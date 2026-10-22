@@ -1,0 +1,26 @@
+{
+  "biome": "tundra",
+  "events": [
+    {
+      "id": "tundra_snowfall",
+      "name": "Snowfall",
+      "enabled": true,
+      "chancePercent": 10,
+      "text": "Snow falls across the tundra, sapping your stamina.",
+      "effects": [
+        {
+          "stat": "stamina",
+          "delta": -10
+        }
+      ]
+    },
+    {
+      "id": "tundra_template",
+      "name": "Template event",
+      "enabled": false,
+      "chancePercent": 10,
+      "text": "Replace this with something that happens in the tundra.",
+      "effects": []
+    }
+  ]
+}

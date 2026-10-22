@@ -1,0 +1,11 @@
+{
+  "name": "modular-text-rpg",
+  "version": "0.2.0",
+  "private": true,
+  "description": "Modular text-RPG engine and modules",
+  "type": "commonjs",
+  "scripts": {
+    "test": "node test/locations.test.cjs && node test/locations-disk.test.cjs && node test/main-character.test.cjs && node test/biome-events.test.cjs && node test/actions.test.cjs",
+    "serve": "node test/serve.cjs 8765"
+  }
+}

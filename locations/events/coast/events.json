@@ -1,0 +1,13 @@
+{
+  "biome": "coast",
+  "events": [
+    {
+      "id": "coast_template",
+      "name": "Template event",
+      "enabled": false,
+      "chancePercent": 10,
+      "text": "Replace this with something that happens in the coast.",
+      "effects": []
+    }
+  ]
+}

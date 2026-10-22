@@ -1,0 +1,464 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Engine core</title>
+<style>
+  :root { --bg:#f6f5f2; --fg:#1d1d1b; --mute:#6b6b66; --line:#d9d7d0; --accent:#2f5d50; color-scheme: light; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#161715; --fg:#e8e6e0; --mute:#8f8e87; --line:#2c2d2a; --accent:#7fb5a3; color-scheme: dark; } }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:16px/1.5 Georgia, serif; }
+  main { max-width:640px; margin:0 auto; padding:24px 16px 48px; }
+  .clock { font-size:2.4rem; letter-spacing:.02em; margin:0; }
+  .meta { color:var(--mute); margin:0 0 20px; }
+  .bar { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:12px; }
+  button, select { font:inherit; padding:6px 12px; background:transparent; color:var(--fg); border:1px solid var(--line); border-radius:4px; cursor:pointer; }
+  button.primary { background:var(--accent); color:var(--bg); border-color:var(--accent); }
+  button:focus-visible, select:focus-visible, input:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+  label { color:var(--mute); }
+  #log { list-style:none; margin:16px 0 0; padding:0; border-top:1px solid var(--line); max-height:50vh; overflow-y:auto; }
+  #log li { padding:6px 0; border-bottom:1px solid var(--line); }
+  #log time { color:var(--mute); margin-right:8px; }
+  h2 { font-size:1.1rem; margin:20px 0 6px; }
+  .seed { color:var(--mute); font-size:.78rem; font-weight:normal; margin-left:6px; }
+  .chars { list-style:none; margin:0; padding:0; }
+  .chars li { padding:6px 0; border-bottom:1px solid var(--line); display:flex; gap:8px; justify-content:space-between; align-items:center; }
+  .chars small { display:block; color:var(--mute); }
+  .empty { color:var(--mute); padding:12px 0; }
+  .creator { display:grid; grid-template-columns:128px minmax(0,1fr); gap:16px; padding:12px; border:1px solid var(--line); border-radius:6px; margin-bottom:12px; }
+  .creator .portrait img { display:block; width:128px; height:128px; object-fit:cover; background:var(--line); border:1px solid var(--line); border-radius:4px; }
+  .creator .portrait input { width:128px; margin-top:8px; font-size:.75rem; color:var(--mute); }
+  .creator label { display:block; margin-bottom:8px; font-size:.85rem; }
+  .creator input[type="text"], .creator input[type="number"], .creator select { display:block; width:100%; margin-top:3px; padding:6px 8px; background:transparent; color:var(--fg); border:1px solid var(--line); border-radius:4px; font:inherit; }
+  .creator .bar { margin-bottom:8px; }
+  .creator .status { margin:0; min-height:1.5em; }
+  @media (max-width:520px) {
+    .creator { grid-template-columns:1fr; }
+    .creator .portrait { display:flex; gap:12px; align-items:flex-start; }
+  }
+  code { font-size:.85em; }
+</style>
+</head>
+<body>
+<main>
+  <h1 class="clock" id="clock"></h1>
+  <p class="meta" id="meta"></p>
+
+  <div class="bar">
+    <button class="primary" id="step">Step</button>
+    <button id="play">Play</button>
+    <label>Tick size
+      <select id="size">
+        <option value="1">1 min</option><option value="10" selected>10 min</option><option value="15">15 min</option>
+        <option value="30">30 min</option><option value="60">1 hour</option><option value="360">6 hours</option><option value="1440">1 day</option>
+      </select>
+    </label>
+  </div>
+  <div class="bar">
+    <button id="save">Save</button><button id="load">Load</button><button id="new">New world</button>
+    <label><input type="checkbox" id="demo"> Test generator</label>
+  </div>
+
+  <h2>Main character</h2>
+  <div class="creator">
+    <div class="portrait">
+      <img id="mcPreview" alt="Main character portrait">
+      <input type="file" id="mcImage" accept="image/*" aria-label="Profile picture">
+    </div>
+    <div class="fields">
+      <label>Name
+        <input type="text" id="mcName" maxlength="40" autocomplete="off" placeholder="Enter a name">
+      </label>
+      <label>Gender
+        <select id="mcGender"></select>
+      </label>
+      <label>Age
+        <input type="number" id="mcAge" min="1" max="120" step="1">
+      </label>
+      <div class="bar">
+        <button class="primary" id="mcSave">Save main character</button>
+        <button id="mcFolder">Connect mainChar folder</button>
+      </div>
+      <p class="meta status" id="mcStatus"></p>
+      <p class="meta status" id="mcStamina"></p>
+    </div>
+  </div>
+  <p class="meta">Saves in the game; with the folder connected, also writes <code>characters/mainChar/main.json</code> and a profile image.</p>
+
+  <h2>Characters</h2>
+  <div class="bar">
+    <button class="primary" id="spawn">Spawn character</button>
+    <button id="leave">Leave location (clear temporary)</button>
+    <button id="disk">Connect folder</button>
+  </div>
+  <h2>Temporary Spawn</h2><ul class="chars" id="temp"></ul>
+  <h2>Named NPC</h2><ul class="chars" id="named"></ul>
+
+  <h2>Locations <span class="seed" id="locSeed"></span></h2>
+  <div class="bar">
+    <button class="primary" id="addLocation">Add location</button>
+    <button id="addFiveLocations">Add 5 locations</button>
+    <button id="locDisk">Connect Locations folder</button>
+    <button id="reloadBiomeEvents">Reload biome events</button>
+  </div>
+  <p class="meta">JSON goes to <code>Locations/&lt;map seed&gt;/loc_0001.json</code> when the folder is connected.</p>
+  <p class="meta">Biome events live in <code>locations/events/&lt;biome&gt;/events.json</code>. Each enabled event rolls its own chance on a visit.</p>
+  <p class="meta" id="locEventStatus">Biome events: loading…</p>
+  <ul class="chars" id="locations"></ul>
+  <p class="meta" id="locVisitStatus">Visit a location to roll its biome events.</p>
+
+  <h2>Actions <span class="seed" id="actionArea"></span></h2>
+  <p class="meta" id="actionStatus">Visit a location to load five actions.</p>
+  <ul class="chars" id="actions"></ul>
+
+  <h2>Event log</h2>
+  <ul id="log"></ul>
+  <p class="empty" id="empty">No events yet. Generators are empty by default; add modules, or tick "Test generator" to check the event pipeline.</p>
+</main>
+
+<script src="engine.js"></script>
+<script src="characters/data.js"></script>
+<script src="characters/characters.js"></script>
+<script src="characters/mainCharacterData.js"></script>
+<script src="characters/mainCharacter.js"></script>
+<script src="locations/data.js"></script>
+<script src="locations/locations.js"></script>
+<script src="actions/data.js"></script>
+<script src="actions/actions.js"></script>
+<script>
+  const engine = new Engine({ startDate: "1000-01-01T06:00:00Z", tickMinutes: 10 });
+  const $ = (id) => document.getElementById(id);
+
+  const chars = createCharactersModule();
+  engine.register(chars);
+
+  const mainCharModule = createMainCharacterModule();
+  engine.register(mainCharModule);
+
+  const locationsModule = createLocationsModule();
+  engine.register(locationsModule);
+
+  engine.register(createActionsModule());
+
+  // Add more modules here, e.g. engine.register(createMarriageModule());
+
+  function render() {
+    const n = engine.now;
+    $("clock").textContent = n.text;
+    $("meta").textContent = `Tick ${n.tick} · ${n.tickMinutes} min per tick · seed ${engine.state.seed}`;
+    $("play").textContent = engine.running ? "Pause" : "Play";
+    $("size").value = String(n.tickMinutes);
+    $("empty").hidden = engine.state.eventLog.length > 0;
+  }
+  function addLine(e) {
+    const li = document.createElement("li");
+    const t = document.createElement("time"); t.textContent = e.when;
+    li.append(t, e.text || e.type);
+    $("log").prepend(li);
+  }
+  function rebuildLog() { $("log").innerHTML = ""; engine.state.eventLog.forEach(addLine); }
+
+  engine.on("event", addLine);
+  engine.on("tick:end", render);
+
+  function renderLocations() {
+    const s = engine.state.modules.locations;
+    if (!s) return;
+    $("locSeed").textContent = `map seed ${s.seed}`;
+
+    const current = s.currentId ? s.locations[s.currentId] : null;
+    $("locVisitStatus").textContent = current
+      ? `Current location: ${current.name}.`
+      : "Visit a location to roll its biome events.";
+
+    const ul = $("locations");
+    ul.innerHTML = "";
+    const list = Object.values(s.locations);
+    if (!list.length) {
+      const li = document.createElement("li");
+      li.className = "empty";
+      li.textContent = "No locations yet. Add one to chart the map.";
+      ul.append(li);
+      return;
+    }
+    for (const loc of list) {
+      const li = document.createElement("li"), box = document.createElement("div");
+      const title = document.createElement("strong"); title.textContent = loc.name;
+      const sm = document.createElement("small");
+      sm.textContent = `${loc.biome} · ${loc.weather} · hostility ${loc.hostility}/100 (${locationsModule.labelFor(loc.hostility)})${loc.id === s.currentId ? " · current" : ""}`;
+      box.append(title, sm);
+      li.append(box);
+
+      const visit = document.createElement("button");
+      visit.textContent = "Visit";
+      visit.title = "Visit this location and roll its biome events";
+      visit.onclick = () => visitLocation(loc.id);
+      li.append(visit);
+
+      const b = document.createElement("button");
+      b.textContent = "JSON";
+      b.title = "Download this location as JSON";
+      b.onclick = () => downloadLocation(loc.id);
+      li.append(b);
+      ul.append(li);
+    }
+  }
+
+  function downloadLocation(id) {
+    const json = locationsModule.toJSON(id);
+    if (!json) return;
+    const blob = new Blob([json], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = id + ".json";
+    document.body.append(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  let visiting = false;
+  async function visitLocation(id) {
+    if (visiting) return;
+    visiting = true;
+    try {
+      const result = await locationsModule.visit(id);
+      engine.flush();
+      const names = result.events.map((event) => event.name);
+      $("locVisitStatus").textContent = names.length
+        ? `Visited ${result.location.name}. Triggered: ${names.join(", ")}.`
+        : `Visited ${result.location.name}. No biome events triggered.`;
+    } catch (error) {
+      alert("Could not visit that location: " + error.message);
+    } finally {
+      visiting = false;
+    }
+  }
+
+  async function updateBiomeEventStatus(force = false) {
+    const el = $("locEventStatus");
+    el.textContent = "Biome events: loading…";
+    try {
+      const summary = await locationsModule.loadEvents(force);
+      el.textContent = summary.errors.length
+        ? `Biome events: ${summary.enabled} active, ${summary.errors.length} biome file(s) failed to load.`
+        : `Biome events: ${summary.enabled} active across ${summary.biomes} biomes.`;
+    } catch (error) {
+      el.textContent = "Biome events: could not load. Serve the project over HTTP.";
+      console.warn("[ui] biome event load failed", error);
+    }
+  }
+
+  $("reloadBiomeEvents").onclick = () => updateBiomeEventStatus(true);
+
+  function renderActions() {
+    const s = engine.state.modules.actions;
+    const actions = s && Array.isArray(s.actions) ? s.actions : [];
+
+    $("actionArea").textContent = s && s.locationName ? `— ${s.locationName}` : "";
+    const ul = $("actions");
+    ul.innerHTML = "";
+
+    if (!actions.length) {
+      $("actionStatus").textContent = "Visit a location to load five actions.";
+      const li = document.createElement("li");
+      li.className = "empty";
+      li.textContent = "No area actions loaded.";
+      ul.append(li);
+      return;
+    }
+
+    $("actionStatus").textContent = `Choose an action in ${s.locationName || "the area"} (placeholder; choices only log an event).`;
+    for (const action of actions) {
+      const li = document.createElement("li"), box = document.createElement("div");
+      const title = document.createElement("strong");
+      title.textContent = action.name;
+      const sm = document.createElement("small");
+      sm.textContent = action.description;
+      box.append(title, sm);
+
+      const b = document.createElement("button");
+      b.textContent = "Choose";
+      b.title = `Choose ${action.name}`;
+      b.onclick = () => act("action:choose", { actionId: action.id });
+
+      li.append(box, b);
+      ul.append(li);
+    }
+  }
+
+  engine.on("event:actions:loaded", renderActions);
+  engine.on("event:action:chosen", (e) => {
+    $("actionStatus").textContent = e.text;
+  });
+
+  // ----- Main character panel -----
+  const mcData = MainCharacterData;
+  let pendingMainImage = null;
+
+  $("mcName").maxLength = mcData.nameMaxLength;
+  $("mcAge").min = mcData.ageRange[0];
+  $("mcAge").max = mcData.ageRange[1];
+  for (const gender of mcData.genders) {
+    const option = document.createElement("option");
+    option.value = gender;
+    option.textContent = gender;
+    $("mcGender").append(option);
+  }
+
+  function renderMainStamina() {
+    const c = engine.state.modules.mainCharacter.character;
+    if (!c) {
+      $("mcStamina").textContent = "";
+      return;
+    }
+    const value = Number.isFinite(Number(c.stamina)) ? Number(c.stamina) : mcData.staminaStart;
+    const max = Number.isFinite(Number(c.staminaMax)) ? Number(c.staminaMax) : mcData.staminaMax;
+    $("mcStamina").textContent = `Stamina ${value}/${max}`;
+  }
+
+  function renderMainCharacter() {
+    const s = engine.state.modules.mainCharacter;
+    const c = s && s.character;
+    $("mcName").value = c ? c.name : "";
+    $("mcGender").value = c ? c.gender : (mcData.genders[0] || "female");
+    $("mcAge").value = c ? c.age : mcData.defaultAge;
+    $("mcPreview").src = (c && c.image) || mainCharModule.defaultAvatar(c ? c.name : "Main Character");
+    $("mcImage").value = "";
+    $("mcFolder").textContent = mainCharModule.folderConnected ? "mainChar folder connected" : "Connect mainChar folder";
+    $("mcStatus").textContent = c
+      ? `Saved: ${c.name} · ${c.age} · ${c.gender}${mainCharModule.folderConnected ? " · folder connected" : ""}`
+      : "No main character saved yet.";
+    renderMainStamina();
+  }
+
+  $("mcImage").onchange = async (event) => {
+    const file = event.target.files && event.target.files[0];
+    if (!file) return;
+    try {
+      pendingMainImage = await mainCharModule.prepareImage(file);
+      $("mcPreview").src = pendingMainImage;
+      $("mcStatus").textContent = "Picture ready. Save the character to keep it.";
+    } catch (error) {
+      pendingMainImage = null;
+      event.target.value = "";
+      alert(error.message);
+    }
+  };
+
+  $("mcSave").onclick = async () => {
+    try {
+      mainCharModule.save({
+        name: $("mcName").value,
+        gender: $("mcGender").value,
+        age: $("mcAge").value,
+        image: pendingMainImage
+      });
+      engine.flush();
+      pendingMainImage = null;
+
+      const wrote = await mainCharModule.writeToFolder();
+      renderMainCharacter();
+      $("mcStatus").textContent = wrote
+        ? `Saved to characters/${mcData.folder}/${mcData.jsonFile} and profile image.`
+        : mainCharModule.folderConnected
+          ? "Saved in game, but the folder write failed. Check the console."
+          : "Saved in game. Connect the mainChar folder to write a JSON copy.";
+    } catch (error) {
+      alert(error.message);
+    }
+  };
+
+  $("mcFolder").onclick = async () => {
+    try {
+      const info = await mainCharModule.connectFolder();
+      // Do not re-render the form here: it may contain unsaved edits or a new image.
+      $("mcFolder").textContent = "mainChar folder connected";
+      const hasCharacter = !!engine.state.modules.mainCharacter.character;
+      $("mcStatus").textContent = info.wrote
+        ? `Folder connected; saved to ${info.path}/${mcData.jsonFile}.`
+        : hasCharacter
+          ? `Folder connected: ${info.path}, but writing ${mcData.jsonFile} failed. Check the console.`
+          : `Folder connected: ${info.path}. Save a character to write the JSON.`;
+    } catch (error) {
+      alert("Could not connect the mainChar folder (Chrome or Edge required): " + error.message);
+    }
+  };
+
+  engine.on("event:mainCharacter:saved", renderMainCharacter);
+  engine.on("event:mainCharacter:statChanged", renderMainStamina);
+
+  ["reset", "load", "run", "pause", "tickSize"].forEach((n) => engine.on(n, () => {
+    if (n === "reset" || n === "load") {
+      pendingMainImage = null;
+      rebuildLog();
+      renderLocations();
+      renderMainCharacter();
+      renderActions();
+    }
+    render();
+  }));
+  engine.on("event:location:added", renderLocations);
+  engine.on("event:location:visited", renderLocations);
+
+  $("step").onclick = () => engine.step();
+  $("play").onclick = () => engine.running ? engine.pause() : engine.run(300);
+  $("size").onchange = (e) => engine.setTickMinutes(+e.target.value);
+  $("new").onclick = () => engine.reset(Date.now());
+  $("save").onclick = () => { try { localStorage.setItem("save1", engine.serialize()); } catch (e) { alert("Saving is unavailable in this browser context."); } };
+  $("load").onclick = () => { try { const s = localStorage.getItem("save1"); s ? engine.load(s) : alert("No save found."); } catch (e) { alert("Loading is unavailable in this browser context."); } };
+
+  // Harness-only generator to verify the pipeline. Not part of the core.
+  $("demo").onchange = (e) => {
+    if (e.target.checked) engine.registerGenerator("test", ({ roll, engine }) =>
+      roll < engine.chancePerTick(3) ? { type: "test", text: "A test event occurred." } : null);
+    else engine.generators.delete("test");
+  };
+
+
+  // ----- Characters panel -----
+  const act = (type, data) => { engine.fire({ type, data }); engine.flush(); };
+  function renderChars() {
+    const s = engine.state.modules.characters;
+    for (const [key, saveable] of [["temp", true], ["named", false]]) {
+      const ul = $(key); ul.innerHTML = "";
+      const list = Object.values(s[key]);
+      if (!list.length) { const li = document.createElement("li"); li.className = "empty"; li.textContent = "None."; ul.append(li); }
+      for (const c of list) {
+        const li = document.createElement("li"), box = document.createElement("div");
+        box.textContent = `${c.name}, ${c.age}, ${c.gender}`;
+        const sm = document.createElement("small"); sm.textContent = c.traits.join(", "); box.append(sm); li.append(box);
+        if (saveable) { const b = document.createElement("button"); b.textContent = "Save as Named NPC"; b.onclick = () => act("character:save", { id: c.id }); li.append(b); }
+        ul.append(li);
+      }
+    }
+  }
+  $("spawn").onclick = () => act("character:spawn");
+  $("leave").onclick = () => act("location:changed");
+  $("disk").onclick = async () => { try { await chars.connectFolder(); $("disk").textContent = "Folder connected"; } catch (e) { alert("Could not connect a folder (Chrome or Edge required): " + e.message); } };
+  ["event", "reset", "load"].forEach((n) => engine.on(n, renderChars));
+  renderChars();
+
+  // ----- Locations panel -----
+  $("addLocation").onclick = () => act("location:add");
+  $("addFiveLocations").onclick = () => act("location:add", { count: 5 });
+  $("locDisk").onclick = async () => {
+    try {
+      const info = await locationsModule.connectFolder();
+      $("locDisk").textContent = `Folder connected (${info.count})`;
+      renderLocations();
+    } catch (e) {
+      alert("Could not connect the Locations folder (Chrome or Edge required): " + e.message);
+    }
+  };
+
+  renderMainCharacter();
+  renderLocations();
+  renderActions();
+  render();
+  updateBiomeEventStatus();
+</script>
+</body>
+</html>

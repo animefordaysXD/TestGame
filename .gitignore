@@ -1,0 +1,13 @@
+node_modules/
+*.log
+.DS_Store
+Thumbs.db
+
+# Generated browser mirror files (content is documented in README files).
+characters/mainChar/main.json
+characters/mainChar/profile.*
+characters/Named NPC/
+characters/Temporary Spawn/
+
+# Do not ignore Locations/ or locations/ here: on Windows the two names are the same
+# directory, and a broad pattern would hide the locations module.
