@@ -1,5 +1,7 @@
 # Modular Text-RPG Engine
 
+**Repository:** <https://github.com/animefordaysXD/TestGame>
+
 > **New AI session? Start with [HANDOFF.md](HANDOFF.md).** It summarizes the current
 > state, architecture rules, tests, known limitations and next steps.
 

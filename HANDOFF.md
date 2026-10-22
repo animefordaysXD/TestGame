@@ -10,6 +10,17 @@ creator with stamina, and five placeholder area actions.
 This file is the starting point for a new AI session. Read it first, then `README.md`
 and `ENGINE_SPEC.md`.
 
+## Clone
+
+```sh
+git clone https://github.com/animefordaysXD/TestGame.git
+cd TestGame
+```
+
+The repository root **is** the game project. There is no nested `text-rpg/` folder in the
+clone. The unrelated hello-world scaffold from the original local workspace was not
+committed.
+
 ## Run it
 
 ```sh
