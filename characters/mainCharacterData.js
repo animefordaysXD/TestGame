@@ -5,9 +5,7 @@ window.MainCharacterData = {
   defaultAge: 25,
   nameMaxLength: 40,
 
-  // First implemented stat. Location events with { stat: "stamina", delta } change it.
-  staminaMax: 100,
-  staminaStart: 100,
+  // Base stats live in characters/statsData.js and are shared with NPCs.
 
   // Uploaded portraits are centre-cropped to a square and resized before being stored.
   imageSize: 256,

@@ -6,7 +6,7 @@ the `actions` module and the content in `actions/data.js`.
 - `default` — the five actions used by every biome unless an override exists.
 - `biomes.<biomeKey>` — optional list of five actions for one biome.
 - Each action is `{ id, name, description }`.
-- Choosing an action emits `action:chosen` and logs a placeholder line. No stamina,
+- Choosing an action emits `action:chosen` and logs a placeholder line. No stat,
   item, time or location effects are applied yet.
 
 To add a biome override, copy the commented `tundra` example in `actions/data.js` and

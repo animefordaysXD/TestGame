@@ -5,7 +5,8 @@
 > **New AI session? Start with [HANDOFF.md](HANDOFF.md).** It summarizes the current
 > state, architecture rules, tests, known limitations and next steps.
 
-Current build: core v0.2, characters v0.1, main character v0.2, locations v0.2, actions v0.1.
+Current build: core v0.2, characters v0.2, main character v0.3, locations v0.2,
+actions v0.1, plus the read-only status viewer.
 
 ## Run
 
@@ -17,7 +18,8 @@ cd text-rpg
 npm run serve
 ```
 
-Then open <http://127.0.0.1:8765/>.
+Then open <http://127.0.0.1:8765/>. The live status tree is at
+<http://127.0.0.1:8765/status.html>.
 
 ## Test
 
@@ -31,19 +33,38 @@ System Access API; it does not prove the real browser folder picker works.
 
 On Windows, if PowerShell blocks `npm.ps1`, use `npm.cmd test` or run the test files
 directly with `node test/locations.test.cjs`, `node test/locations-disk.test.cjs`,
-`node test/main-character.test.cjs`, `node test/biome-events.test.cjs`, and
-`node test/actions.test.cjs`.
+`node test/characters.test.cjs`, `node test/main-character.test.cjs`,
+`node test/biome-events.test.cjs`, and `node test/actions.test.cjs`.
 
 ## Layout
 
 - `engine.js` — core (unchanged v0.2)
-- `characters/` — NPC generator, main character creator and storage
+- `characters/` — NPC generator, shared base stats, main character creator and storage
 - `locations/` — procedural map locations
 - `locations/events/` — per-biome event JSON (copy/paste templates and the tundra sample)
 - `actions/` — five placeholder area actions and optional biome overrides
 - `Locations/` — JSON mirror folder (written after connecting it in the page)
+- `status.html` — read-only node-tree viewer for the current game state
 - `ENGINE_SPEC.md` — current engine contract and event catalog
 - `HANDOFF.md` — session handoff and continuation notes
+
+## Status tree
+
+Open `/status.html` for an interactive node tree of the current session. It reads the
+same `localStorage` slot (`save1`) as the game and shows:
+
+- the world clock, seed and event-log size;
+- every module and its live state slice: NPCs with personality traits and stats, the
+  main character with HP/Stamina/Mana and skills, locations with the current marker,
+  and the five loaded actions;
+- content data counts and the enabled/total events in each biome file;
+- the event catalog and the Node test files.
+
+The page is a viewer only: it does not register modules, change the save or touch game
+logic. Nodes expand/collapse on click, the canvas can be dragged, and the toolbar has
+zoom, fit-width, copy-as-text and SVG download. Use **Load state JSON** to inspect a
+saved state file, or **Reload save** after saving in the game. Folder connections are
+runtime-only and are not stored in the save, so the tree cannot show them.
 
 ## Main character
 
@@ -55,10 +76,16 @@ directly with `node test/locations.test.cjs`, `node test/locations-disk.test.cjs
 - **Connect mainChar folder** writes `characters/mainChar/main.json` and a viewable
   `profile.webp`/`.png`/`.svg` file. Later saves rewrite both. Folder access needs
   Chrome or Edge.
-- The main character has stamina (100/100 by default). Location events can spend or
-  restore it; the current value is shown under the save status and is saved with the
-  character.
+- The main character and every NPC share nine base stats from
+  `characters/statsData.js`: HP, Stamina, Mana, War, Diplomacy, Personal Combat, Money
+  Management, Intrigue and Intelligence. HP/Stamina/Mana are resources; the rest are
+  1-20 skills. The main character starts at 100/100 HP, 100/100 Stamina, 50/50 Mana and
+  10 in each skill. NPCs roll their values.
+- Location events can change any base stat; the current values are saved with the
+  character. The main-character panel shows all nine in a grid, and each NPC card shows
+  a compact stat line.
 - The main character is separate from the generated NPCs in Named NPC / Temporary Spawn.
+  NPCs keep their five personality traits; those will feed a future behaviour system.
 
 ## Locations module
 
@@ -80,8 +107,9 @@ directly with `node test/locations.test.cjs`, `node test/locations-disk.test.cjs
   can trigger on the same visit.
 - `enabled: false` marks a copy/paste template; change it to `true` and edit the text.
 - The tundra file includes a working **Snowfall** event: 10% chance, -10 stamina.
-- Effects currently support `stamina`; other stats are kept in the event data for
-  future modules.
+- Effects support any base stat (`hp`, `stamina`, `mana`, `war`, `diplomacy`,
+  `personalCombat`, `moneyManagement`, `intrigue`, `intelligence`); unknown stats are
+  kept in the event data for future modules.
 - Use **Reload biome events** after editing a JSON file, or refresh the page. Event
   loading uses `fetch`, so serve the project over HTTP.
 - Full schema and a copy/paste template: `locations/events/README.md`.
@@ -90,7 +118,7 @@ directly with `node test/locations.test.cjs`, `node test/locations-disk.test.cjs
 
 - Visiting a location loads five placeholder actions in the **Actions** panel.
 - The default actions are Scout, Scavenge, Rest, Hunt and Travel.
-- Every **Choose** button logs `action:chosen`; no stamina, time, item or travel effects
+- Every **Choose** button logs `action:chosen`; no stat, time, item or travel effects
   are applied yet.
 - Edit `actions/data.js` to change the default list or add a biome-specific list under
   `biomes.<biomeKey>`.

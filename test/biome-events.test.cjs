@@ -1,4 +1,4 @@
-/* Node test for biome event JSON loading, visit rolls, and stamina effects.
+/* Node test for biome event JSON loading, visit rolls, and stat effects.
    Run: node test/biome-events.test.cjs */
 const fs = require("node:fs");
 const path = require("node:path");
@@ -6,6 +6,7 @@ const assert = require("node:assert/strict");
 
 global.window = global;
 require("../engine.js");
+require("../characters/statsData.js");
 require("../characters/mainCharacterData.js");
 require("../characters/mainCharacter.js");
 require("../locations/data.js");
@@ -41,7 +42,7 @@ global.fetch = async (url) => {
 
   const character = mainCharacter.save({ name: "Event Tester", gender: "female", age: 20 });
   engine.flush();
-  assert.equal(character.stamina, 100, "a new main character starts with full stamina");
+  assert.equal(character.stats.stamina, 100, "a new main character starts with full stamina");
 
   const s = engine.state.modules.locations;
   s.locations.loc_9001 = {
@@ -78,7 +79,7 @@ global.fetch = async (url) => {
   assert.equal(locationEvents[0].data.effects[0].stat, "stamina");
   assert.equal(locationEvents[0].data.effects[0].delta, -10);
 
-  assert.equal(engine.state.modules.mainCharacter.character.stamina, 90);
+  assert.equal(engine.state.modules.mainCharacter.character.stats.stamina, 90);
   assert.equal(statEvents.length, 1);
   assert.equal(statEvents[0].depth, 2, "stat changes are follow-ups to location events");
   assert.equal(statEvents[0].data.value, 90);
@@ -111,7 +112,7 @@ global.fetch = async (url) => {
   engine2.register(locations2);
   engine2.load(saved);
   assert.equal(engine2.state.modules.locations.currentId, "loc_9002");
-  assert.equal(engine2.state.modules.mainCharacter.character.stamina, 90);
+  assert.equal(engine2.state.modules.mainCharacter.character.stats.stamina, 90);
 
   engine.reset(555);
   assert.equal(engine.state.modules.locations.currentId, null, "reset clears the current location");
@@ -124,17 +125,22 @@ global.fetch = async (url) => {
   engine.fire({ type: "location:event", data: { eventId: "manual", effects: [{ stat: "stamina", delta: -5 }] } });
   engine.flush();
   assert.equal(statEvents.length, beforeResetEffect + 1, "one statChanged per effect after reset");
-  assert.equal(engine.state.modules.mainCharacter.character.stamina, 95);
+  assert.equal(engine.state.modules.mainCharacter.character.stats.stamina, 95);
 
   const beforeUnknownStat = statEvents.length;
-  engine.fire({ type: "location:event", data: { effects: [{ stat: "mana", delta: -50 }] } });
+  engine.fire({ type: "location:event", data: { effects: [{ stat: "luck", delta: -50 }] } });
   engine.flush();
   assert.equal(statEvents.length, beforeUnknownStat, "unknown stats are ignored");
-  assert.equal(engine.state.modules.mainCharacter.character.stamina, 95);
+  assert.equal(engine.state.modules.mainCharacter.character.stats.stamina, 95);
+
+  engine.fire({ type: "location:event", data: { effects: [{ stat: "mana", delta: -50 }] } });
+  engine.flush();
+  assert.equal(statEvents.length, beforeUnknownStat + 1, "mana is a real stat");
+  assert.equal(engine.state.modules.mainCharacter.character.stats.mana, 0);
 
   engine.fire({ type: "location:event", data: { effects: [{ stat: "stamina", delta: -500 }] } });
   engine.flush();
-  assert.equal(engine.state.modules.mainCharacter.character.stamina, 0, "stamina clamps at zero");
+  assert.equal(engine.state.modules.mainCharacter.character.stats.stamina, 0, "stamina clamps at zero");
   assert.equal(statEvents.at(-1).data.delta, -95);
 
   assert.ok(locations.eventStatus().enabled >= 1);

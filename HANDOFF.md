@@ -2,10 +2,11 @@
 
 **Repository:** <https://github.com/animefordaysXD/TestGame>
 
-**Last updated:** 2026-10-22  
-**Current spec:** `ENGINE_SPEC.md` v0.6  
+**Last updated:** 2026-10-24  
+**Current spec:** `ENGINE_SPEC.md` v0.7  
 **Status:** working test page with procedural locations, biome events, a main-character
-creator with stamina, and five placeholder area actions.
+creator with nine base stats, NPCs with the same stats and personality traits, five
+placeholder area actions, and a live node-tree status page.
 
 This file is the starting point for a new AI session. Read it first, then `README.md`
 and `ENGINE_SPEC.md`.
@@ -27,7 +28,8 @@ committed.
 npm run serve
 ```
 
-Open <http://127.0.0.1:8765/>.
+Open <http://127.0.0.1:8765/>. The read-only status tree is at
+<http://127.0.0.1:8765/status.html>.
 
 On Windows PowerShell, if `npm.ps1` is blocked, use `npm.cmd run serve` and
 `npm.cmd test`. The page must be served over HTTP; biome event JSON is loaded with
@@ -49,9 +51,11 @@ Tests currently cover:
 
 - `test/locations.test.cjs` — location generation, uniqueness, reset, save/load.
 - `test/locations-disk.test.cjs` — Locations folder mirror using an in-memory mock.
-- `test/main-character.test.cjs` — validation, image handling, stamina, save/load,
-  reset, folder mirror.
-- `test/biome-events.test.cjs` — JSON loading, visit rolls, stamina effects, reset,
+- `test/characters.test.cjs` — NPC base stats, deterministic generation, save/clear,
+  reset, legacy saves without stats.
+- `test/main-character.test.cjs` — validation, image handling, base stats, effects,
+  legacy stamina migration, save/load, reset, folder mirror.
+- `test/biome-events.test.cjs` — JSON loading, visit rolls, stat effects, reset,
   save/load.
 - `test/actions.test.cjs` — five-action loading, biome overrides, choices, reset,
   save/load.
@@ -66,15 +70,16 @@ Tests currently cover:
 - Use `engine.rng` or the tick `rng`; never use `Math.random`.
 - Put content in data files, not generation logic.
 - Update the event catalog and module registry in `ENGINE_SPEC.md` whenever a module or
-  event changes.
+  event changes. The module and event branches in `status.html` are hand-maintained;
+  keep them in sync too.
 - Keep State slices JSON-safe. Never cache a slice object; `load()` replaces the state.
 
 ## Modules
 
 | module | state slice | current behavior |
 |---|---|---|
-| `characters` | `nextId`, `named{}`, `temp{}` | NPC generator; Named NPC / Temporary Spawn |
-| `mainCharacter` | `character` | one player character, profile image, stamina, JSON mirror |
+| `characters` | `nextId`, `named{}`, `temp{}` | NPC generator with base stats; Named NPC / Temporary Spawn |
+| `mainCharacter` | `character` | one player character, profile image, base stats, JSON mirror |
 | `locations` | `seed`, `createdAt`, `nextId`, `locations{}`, `currentId` | procedural locations, visit rolls, JSON mirror |
 | `actions` | `locationId`, `locationName`, `biomeKey`, `actions[]` | five placeholder area actions |
 
@@ -83,11 +88,26 @@ Tests currently cover:
 - Name, gender, age, optional profile image.
 - Uploaded images are centre-cropped to 256 px and stored as WebP/PNG data URLs; a
   missing image gets a generated SVG initials avatar.
-- Starts at 100 stamina. `location:event` effects with `{ stat: "stamina", delta }`
-  change it; the module emits `mainCharacter:statChanged` at `depth + 1`.
+- Every character (main and NPC) has the same nine base stats from
+  `characters/statsData.js`: HP, Stamina, Mana, War, Diplomacy, Personal Combat, Money
+  Management, Intrigue and Intelligence. Resources are HP 0-100, Stamina 0-100 and Mana
+  0-50; skills are 1-20. Main starts full/10; NPCs roll their values.
+- Stats live in `character.stats`; resources also store `hpMax`, `staminaMax` and
+  `manaMax`. Old saves with top-level `stamina` are migrated on load.
+- `location:event` effects with `{ stat, delta }` can change any base stat; the module
+  emits `mainCharacter:statChanged` at `depth + 1`.
 - The UI calls `mainCharacter.save()` directly, then `engine.flush()`.
 - `mainCharacter:saved` deliberately omits the image from event data.
 - `characters/mainChar/` is a write-only mirror (`main.json` + `profile.<ext>`).
+
+### NPCs and personality
+
+- `characters/data.js` owns names, surnames, ages and the 30-trait pool with opposite
+  pairs. Each NPC gets five non-conflicting traits.
+- Traits are kept as the personality hook for a future Crusader-Kings-style behaviour
+  system. No behaviour rules read them yet.
+- `characters/statsData.js` owns the shared stat definitions. Add or tune a stat there;
+  both the NPC and main-character modules iterate the list.
 
 ### Locations
 
@@ -114,7 +134,7 @@ Tests currently cover:
 - The module listens to `location:visited`, replaces the action list, and emits
   `actions:loaded` at `depth + 1`.
 - `action:choose` from the UI is handled by `actions`; it emits `action:chosen` at
-  `depth + 1`. This is a placeholder: no stamina, time, item, reward, travel or other
+  `depth + 1`. This is a placeholder: no stat, time, item, reward, travel or other
   effects are applied yet.
 - The UI shows an **Actions** panel with the area name, five actions and **Choose**
   buttons. Selecting one updates the panel status and event log.
@@ -140,18 +160,32 @@ UI Choose action
 
 ## Recent work
 
+- Added shared base stats for every character: HP, Stamina, Mana, War, Diplomacy,
+  Personal Combat, Money Management, Intrigue and Intelligence. `characters/statsData.js`
+  is the single content source; main characters start from its defaults, NPCs roll
+  ranges with `engine.rng`, and old saves are normalized on load.
+- Extended `location:event` effects from stamina-only to any base stat, with resource
+  and skill clamping.
+- Added stat grids to the game page and status tree; NPC cards now show compact stats.
+- Added `test/characters.test.cjs` and updated the main-character/biome-event tests for
+  the `character.stats` shape.
+- Added `status.html`: a read-only, interactive node tree of the current save
+  (world, modules, live slices, content counts, biome event status, event catalog and
+  tests). It reads `localStorage` slot `save1`, does not register modules, and can also
+  load an exported state JSON file. Supports collapse/expand, drag-pan, zoom, fit-width,
+  copy-as-text and SVG export. Linked from the game page.
 - Added the per-biome event JSON system and the tundra Snowfall sample.
-- Added main-character stamina and the first effect pipeline.
 - Added the `actions` module and five-action Action panel.
-- Updated docs to `ENGINE_SPEC.md` v0.6.
-- All Node tests pass; browser checks passed for visit rolls, stamina loss, five-action
+- Updated docs to `ENGINE_SPEC.md` v0.7.
+- All Node tests pass; browser checks passed for visit rolls, stat loss, five-action
   loading, choosing an action, reset and save/load. No console warnings or errors.
 
 ## Known limitations and quirks
 
 - Area actions are placeholders. **Travel** does not move the party.
-- Only `stamina` effects are implemented. Other stats stay in event data for future
-  modules.
+- Base stats are stored and location events can change them, but no progression,
+  training, equipment, checks or opposed rolls use them yet.
+- NPC personality traits are generated but do not weight behaviour yet.
 - Biome events have no cooldowns, once-only flags, weather filters or requirements.
   Every enabled event is an independent roll on each visit.
 - `location:changed` still only clears Temporary Spawn; there is no travel graph,
@@ -165,17 +199,20 @@ UI Choose action
   a known platform quirk; do not add a broad `Locations/` ignore rule without checking
   case-sensitivity.
 - The test page stores saves in `localStorage` slot `save1`, which some contexts block.
+  `status.html` reads only that slot or a manually loaded state JSON file.
+- Folder connections (`mainChar/`, `Locations/`) are runtime handles and are not in the
+  save, so the status tree cannot report whether they are connected.
 - The local test server may not be running in a new session. Start it with
   `npm run serve`.
 
 ## Suggested next steps
 
-1. Give actions real placeholder-to-playable outcomes, starting with stamina/time costs
+1. Give actions real placeholder-to-playable outcomes, starting with stat/time costs
    and an `action:resolved` event.
 2. Make **Travel** use the locations module instead of being a placeholder action.
 3. Add per-biome action overrides and test them in the UI.
 4. Add event conditions (weather, time, once/cooldown) to the biome event schema.
-5. Consider a general effects module once more stats exist.
+5. Use the new stats in checks or opposed rolls, and decide how they progress.
 6. Add a travel graph/connections between locations.
 7. Manually verify both real folder pickers in Chrome/Edge.
 
@@ -191,7 +228,7 @@ follow-up events use depth + 1. init() reruns on reset, so subscribe/register on
 Use engine.rng or the tick rng, never Math.random. Put content in data files. Update the
 event catalog and module registry in ENGINE_SPEC.md for every module or event change.
 
-Current state: locations, biome events, main-character stamina and five placeholder area
-actions are working. Start by asking what feature to build next; do not add unrequested
-scope.
+Current state: locations, biome events, main-character and NPC base stats, personality
+traits and five placeholder area actions are working. Start by asking what feature to
+build next; do not add unrequested scope.
 ```

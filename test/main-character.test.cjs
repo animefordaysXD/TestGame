@@ -4,6 +4,7 @@ const assert = require("node:assert/strict");
 
 global.window = global;
 require("../engine.js");
+require("../characters/statsData.js");
 require("../characters/mainCharacterData.js");
 require("../characters/mainCharacter.js");
 
@@ -97,8 +98,14 @@ async function listNames(dir) {
   assert.equal(first.imageSource, "default");
   assert.ok(first.image.startsWith("data:image/svg+xml"));
   assert.equal(first.id, "main");
-  assert.equal(first.stamina, 100);
-  assert.equal(first.staminaMax, 100);
+  assert.deepEqual(first.stats, {
+    hp: 100, hpMax: 100,
+    stamina: 100, staminaMax: 100,
+    mana: 50, manaMax: 50,
+    war: 10, diplomacy: 10, personalCombat: 10,
+    moneyManagement: 10, intrigue: 10, intelligence: 10
+  });
+  assert.equal(first.stamina, undefined, "stamina lives in the stats block");
   assert.equal(savedEvents.length, 1);
   assert.equal(savedEvents[0].depth, 2, "save uses the supplied event depth");
   assert.equal(savedEvents[0].data.name, "Aria Vale");
@@ -112,7 +119,7 @@ async function listNames(dir) {
     data: { eventId: "test_snow", effects: [{ stat: "stamina", delta: -10 }] }
   });
   engine.flush();
-  assert.equal(engine.state.modules.mainCharacter.character.stamina, 90);
+  assert.equal(engine.state.modules.mainCharacter.character.stats.stamina, 90);
   assert.equal(statEvents.length, 1);
   assert.equal(statEvents[0].depth, 1, "stat changes are follow-ups to location events");
   assert.equal(statEvents[0].data.value, 90);
@@ -128,7 +135,7 @@ async function listNames(dir) {
   engine.flush();
   assert.equal(custom.image, PNG);
   assert.equal(custom.imageSource, "upload");
-  assert.equal(custom.stamina, 90, "profile saves preserve stamina");
+  assert.equal(custom.stats.stamina, 90, "profile saves preserve stamina");
   assert.equal(custom.createdAtTick, first.createdAtTick, "updates keep createdAtTick");
   assert.equal(custom.createdAt, first.createdAt, "updates keep createdAt");
 
@@ -136,7 +143,7 @@ async function listNames(dir) {
   engine.flush();
   assert.equal(reused.image, PNG, "an uploaded image is reused on later saves");
   assert.equal(reused.imageSource, "upload");
-  assert.equal(reused.stamina, 90);
+  assert.equal(reused.stats.stamina, 90);
 
   assert.deepEqual(JSON.parse(mainCharacter.toJSON()), reused);
   assert.doesNotThrow(() => JSON.parse(JSON.stringify(engine.state.modules.mainCharacter)));
@@ -148,17 +155,28 @@ async function listNames(dir) {
   engine2.load(saved);
   assert.equal(engine2.state.modules.mainCharacter.character.name, "Aria V.");
   assert.equal(engine2.state.modules.mainCharacter.character.image, PNG);
-  assert.equal(engine2.state.modules.mainCharacter.character.stamina, 90);
+  assert.equal(engine2.state.modules.mainCharacter.character.stats.stamina, 90);
 
   const beforeUnknown = statEvents.length;
-  engine.fire({ type: "location:event", data: { effects: [{ stat: "mana", delta: -20 }] } });
+  engine.fire({ type: "location:event", data: { effects: [{ stat: "luck", delta: -20 }] } });
   engine.flush();
   assert.equal(statEvents.length, beforeUnknown, "unknown stats are ignored");
-  assert.equal(engine.state.modules.mainCharacter.character.stamina, 90);
+
+  engine.fire({ type: "location:event", data: { effects: [{ stat: "mana", delta: -20 }] } });
+  engine.flush();
+  assert.equal(statEvents.length, beforeUnknown + 1);
+  assert.equal(engine.state.modules.mainCharacter.character.stats.mana, 30, "mana is a real stat");
+
+  engine.fire({ type: "location:event", data: { effects: [{ stat: "war", delta: 500 }] } });
+  engine.flush();
+  assert.equal(engine.state.modules.mainCharacter.character.stats.war, 20, "skills clamp at their max");
+  engine.fire({ type: "location:event", data: { effects: [{ stat: "war", delta: -500 }] } });
+  engine.flush();
+  assert.equal(engine.state.modules.mainCharacter.character.stats.war, 1, "skills clamp at their min");
 
   engine.fire({ type: "location:event", data: { effects: [{ stat: "stamina", delta: -500 }] } });
   engine.flush();
-  assert.equal(engine.state.modules.mainCharacter.character.stamina, 0, "stamina clamps at zero");
+  assert.equal(engine.state.modules.mainCharacter.character.stats.stamina, 0, "stamina clamps at zero");
   assert.equal(statEvents.at(-1).data.delta, -90);
 
   engine.reset(777);
@@ -171,7 +189,7 @@ async function listNames(dir) {
   engine.fire({ type: "location:event", data: { effects: [{ stat: "stamina", delta: -7 }] } });
   engine.flush();
   assert.equal(statEvents.length, beforeResetEffect + 1);
-  assert.equal(engine.state.modules.mainCharacter.character.stamina, 93);
+  assert.equal(engine.state.modules.mainCharacter.character.stats.stamina, 93);
 
   // ----- Folder mirror -----
   const engine3 = new Engine({ seed: 5 });
@@ -200,8 +218,10 @@ async function listNames(dir) {
   assert.equal(json.name, "Borin");
   assert.equal(json.image, PNG);
   assert.equal(json.imageSource, "upload");
-  assert.equal(json.stamina, 100);
-  assert.equal(json.staminaMax, 100);
+  assert.equal(json.stats.stamina, 100);
+  assert.equal(json.stats.staminaMax, 100);
+  assert.equal(json.stamina, undefined, "no duplicate top-level stamina in main.json");
+  assert.equal(json.stats.war, 10);
   assert.deepEqual(await listNames(folder), ["main.json", "profile.png"]);
 
   // Switching extension removes the old profile image.
@@ -224,8 +244,26 @@ async function listNames(dir) {
   assert.deepEqual(await listNames(folder2), ["main.json", "profile.svg"]);
   const defaultJson = await readJson(folder2, "main.json");
   assert.equal(defaultJson.imageSource, "default");
-  assert.equal(defaultJson.stamina, 100);
+  assert.equal(defaultJson.stats.stamina, 100);
   assert.ok(defaultJson.image.startsWith("data:image/svg+xml"));
+
+  // Legacy saves kept stamina at the top level; loading migrates it into stats.
+  const legacySave = JSON.parse(engine3.serialize());
+  const legacyCharacter = legacySave.modules.mainCharacter.character;
+  delete legacyCharacter.stats;
+  legacyCharacter.stamina = 42;
+  legacyCharacter.staminaMax = 80;
+
+  const engine5 = new Engine({ seed: 8 });
+  const main5 = createMainCharacterModule();
+  engine5.register(main5);
+  engine5.load(legacySave);
+  const migrated = engine5.state.modules.mainCharacter.character;
+  assert.equal(migrated.stats.stamina, 42, "legacy stamina value is migrated");
+  assert.equal(migrated.stats.staminaMax, 80, "legacy stamina max is migrated");
+  assert.equal(migrated.stamina, undefined, "legacy top-level stamina is removed");
+  assert.equal(migrated.stats.hp, 100, "other stats get their defaults");
+  assert.equal(migrated.stats.intelligence, 10);
 
   console.log("main character test passed");
 })().catch((error) => {

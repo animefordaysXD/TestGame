@@ -1,4 +1,4 @@
-# Modular Text-RPG Engine — Spec v0.6
+# Modular Text-RPG Engine — Spec v0.7
 
 Plain JS/HTML, no build step, no dependencies. A small core runs the clock, event bus,
 RNG, state and save/load. All gameplay lives in modules that own one state slice and talk
@@ -93,28 +93,71 @@ Slices are JSON-safe. Never cache a slice object; `load()` replaces the whole st
 | actions:loaded | actions | `{ locationId, locationName, biomeKey, actions }` |
 | action:chosen | actions | `{ actionId, name, locationId, locationName }` |
 | mainCharacter:saved | mainCharacter | `{ id, name, gender, age }` (no image) |
-| mainCharacter:statChanged | mainCharacter | `{ id, stat, delta, value, max, eventId }` |
+| mainCharacter:statChanged | mainCharacter | `{ id, stat, delta, value, max, eventId }` (any base stat) |
 
 ## Module registry
 
 | module | depends | slice | purpose |
 |---|---|---|---|
 | core | none | `time`, `eventLog` | clock, state, save/load, event checking |
-| characters | none | `nextId`, `named{}`, `temp{}` | NPC generator; Named NPC / Temporary Spawn |
-| mainCharacter | none | `character` | player character; stamina; profile image; JSON mirror |
+| characters | none | `nextId`, `named{}`, `temp{}` | NPC generator with base stats; Named NPC / Temporary Spawn |
+| mainCharacter | none | `character` | player character; base stats; profile image; JSON mirror |
 | locations | none | `seed`, `createdAt`, `nextId`, `locations{}`, `currentId` | map locations; visit/event checker; JSON mirror |
 | actions | none | `locationId`, `locationName`, `biomeKey`, `actions[]` | five placeholder area actions loaded on visit |
 
-## Characters module
+## Characters module v0.2
 
-- Files: `characters/data.js`, `characters/characters.js`.
-- Character shape: `{ id, gender, name, age, traits[5], createdAtTick, createdAt }`.
-- Five of 30 traits, never both sides of an opposite pair.
+- Files: `characters/statsData.js`, `characters/data.js`, `characters/characters.js`.
+- Character shape: `{ id, gender, name, age, traits[5], stats, createdAtTick, createdAt }`.
+- Five of 30 traits, never both sides of an opposite pair. Traits are the personality
+  hook for future behaviour weighting; no behaviour rules read them yet.
+- `stats` is shared by every character. See **Base stats** below.
 - Spawned characters go to `temp`; saving moves them to `named`.
 - `character:clearTemp` or `location:changed` empties `temp`.
+- New NPCs roll their stats from `CharacterStatsData` with `engine.rng`. Skill rolls are
+  bell-curved around the middle of their range. Old NPC saves without stats get the
+  definition defaults on load, deterministically.
 - Optional disk mirror: `characters/Named NPC/<id>.json`, `characters/Temporary Spawn/<id>.json`.
 
-## Main character module v0.2
+## Base stats
+
+- Files: `characters/statsData.js` (content only). The characters and mainCharacter
+  modules both read `CharacterStatsData.stats`.
+- Every character has the same nine stats in this order:
+
+| key | label | kind | range | main start | NPC roll |
+|---|---|---|---|---|---|
+| `hp` | HP | resource | 0-100 | 100/100 | 70-100 |
+| `stamina` | Stamina | resource | 0-100 | 100/100 | 70-100 |
+| `mana` | Mana | resource | 0-50 | 50/50 | 20-50 |
+| `war` | War | skill | 1-20 | 10 | 1-20, bell |
+| `diplomacy` | Diplomacy | skill | 1-20 | 10 | 1-20, bell |
+| `personalCombat` | Personal Combat | skill | 1-20 | 10 | 1-20, bell |
+| `moneyManagement` | Money Management | skill | 1-20 | 10 | 1-20, bell |
+| `intrigue` | Intrigue | skill | 1-20 | 10 | 1-20, bell |
+| `intelligence` | Intelligence | skill | 1-20 | 10 | 1-20, bell |
+
+- Resource stats store a paired `<key>Max` field (`hpMax`, `staminaMax`, `manaMax`).
+  Skills use the definition `max` directly.
+- Character stat block example:
+
+```json
+{
+  "hp": 100, "hpMax": 100,
+  "stamina": 90, "staminaMax": 100,
+  "mana": 50, "manaMax": 50,
+  "war": 10, "diplomacy": 10, "personalCombat": 10,
+  "moneyManagement": 10, "intrigue": 10, "intelligence": 10
+}
+```
+
+- The stat list, ranges and labels are data. Add a stat by editing `statsData.js`;
+  module code iterates the definitions.
+- The main character starts from the `start` values. NPCs roll from `npcRange`;
+  `npcBell: true` averages three rolls for a mid-range cluster.
+- Personality (`traits`) is unchanged and remains NPC-only for now.
+
+## Main character module v0.3
 
 - Files: `characters/mainCharacterData.js`, `characters/mainCharacter.js`.
 - Slice:
@@ -135,8 +178,13 @@ mainCharacter: {
   "age": 27,
   "image": "data:image/webp;base64,...",
   "imageSource": "upload",
-  "stamina": 90,
-  "staminaMax": 100,
+  "stats": {
+    "hp": 100, "hpMax": 100,
+    "stamina": 90, "staminaMax": 100,
+    "mana": 50, "manaMax": 50,
+    "war": 10, "diplomacy": 10, "personalCombat": 10,
+    "moneyManagement": 10, "intrigue": 10, "intelligence": 10
+  },
   "createdAtTick": 0,
   "createdAt": "1000-01-01 06:00",
   "updatedAtTick": 4,
@@ -148,13 +196,15 @@ mainCharacter: {
   resized to `MainCharacterData.imageSize` (256 px) and compressed as WebP/PNG.
   `imageSource` is `"upload"` or `"default"`; a missing image gets an initials avatar
   generated by `defaultAvatar(name)` as an SVG data URL.
-- `stamina` starts at `MainCharacterData.staminaStart` (100), is capped by
-  `staminaMax` (100), and is preserved when the profile is edited. It is included in
-  the normal save and in `main.json`.
+- `stats` uses the shared **Base stats** block. A new main character starts from the
+  `start` values; profile edits preserve the current values. Stats are included in the
+  normal save and in `main.json`.
+- Legacy saves with top-level `stamina`/`staminaMax` are migrated into
+  `stats.stamina`/`stats.staminaMax` on load, and the old top-level fields are removed.
 - The module subscribes once to `location:event` and applies effects with
-  `{ stat: "stamina", delta }` through `applyEventEffects()`. It emits
-  `mainCharacter:statChanged` at `depth + 1`; stamina is clamped to `0..staminaMax`.
-  Unknown stats are left for future modules.
+  `{ stat, delta }` through `applyEventEffects()`. Any defined base stat works; unknown
+  stats are ignored. It emits `mainCharacter:statChanged` at `depth + 1`; resources
+  clamp to their max and skills clamp to the definition range.
 - `save(data, depth = 0)` validates name, gender and age, stores the character, and
   emits `mainCharacter:saved`. The image is deliberately **not** included in the event
   data, so the event log and save file stay small. The UI calls `save()` directly and
@@ -167,7 +217,7 @@ mainCharacter: {
   folder handle is held.
 - No tick generator. `init()` creates the slice and subscribes to `location:event` once;
   reset clears the character but keeps that single subscription.
-- UI on the test page: name, gender, age, image picker with preview, stamina readout,
+- UI on the test page: name, gender, age, image picker with preview, a nine-stat grid,
   **Save main character**, and **Connect mainChar folder**.
 
 ## Locations module v0.2
@@ -240,8 +290,10 @@ locations: {
   `checkEvents` rolls each enabled event with `engine.rng.next()` and fires
   `location:event` at `depth + 1`. It returns `{ location, events }`. The UI calls
   `visit()` directly and then `engine.flush()`, matching the main-character save flow.
-- `location:event` effects are applied by the main character module for `stamina`.
-  Unknown stats stay in the event data for future modules.
+- `location:event` effects are applied by the main character module for any defined base
+  stat (`hp`, `stamina`, `mana`, `war`, `diplomacy`, `personalCombat`,
+  `moneyManagement`, `intrigue`, `intelligence`). Unknown stats stay in the event data
+  for future modules.
 - Event JSON is fetched by the browser, so serve the project over HTTP. The UI shows
   event-load status and a **Reload biome events** button.
 - Disk writes are serialized; `whenDiskIdle()` returns a promise for tests/UI.
@@ -287,6 +339,7 @@ actions: {
 
 ```
 index.html
+status.html        read-only live node-tree viewer (not a module)
 engine.js
 ENGINE_SPEC.md
 package.json
@@ -297,6 +350,7 @@ actions/
 characters/
   characters.js
   data.js
+  statsData.js
   mainCharacter.js
   mainCharacterData.js
   mainChar/
@@ -328,6 +382,7 @@ Locations/
 test/
   locations.test.cjs
   locations-disk.test.cjs
+  characters.test.cjs
   main-character.test.cjs
   biome-events.test.cjs
   actions.test.cjs
@@ -344,12 +399,12 @@ test/
   `currentId` marks the last visit only; it is not a travel graph.
 - Biome events have no cooldowns, once-only flags, weather filters or requirements.
   Each enabled event is an independent roll on every visit.
-- The effect pipeline implements `stamina` only. Other stats are carried in
-  `location:event` data but ignored until another module handles them.
+- Base stats are stored and location events can change them, but no progression,
+  training, equipment, checks or opposed rolls use them yet.
 - Biome event JSON is fetched with `fetch`; open the page through the static server,
   not `file://`.
 - Area actions are placeholders. Choosing one only emits `action:chosen`; there are no
-  stamina costs, rewards, time costs, travel or per-action outcomes yet.
+  stat costs, rewards, time costs, travel or per-action outcomes yet.
 - The real mainChar folder picker is untested in a browser; its write logic is covered
   by the Node mock test. It needs Chrome/Edge.
 - Uploaded portraits are resized to 256 px and stored as data URLs in state and

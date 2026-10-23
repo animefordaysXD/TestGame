@@ -33,17 +33,27 @@
   .creator input[type="text"], .creator input[type="number"], .creator select { display:block; width:100%; margin-top:3px; padding:6px 8px; background:transparent; color:var(--fg); border:1px solid var(--line); border-radius:4px; font:inherit; }
   .creator .bar { margin-bottom:8px; }
   .creator .status { margin:0; min-height:1.5em; }
+  .stats { margin:0 0 16px; }
+  .stats h3 { font-size:.95rem; margin:0 0 6px; }
+  .stat-grid { display:grid; grid-template-columns:repeat(3, minmax(0,1fr)); gap:6px; }
+  .stat { display:flex; justify-content:space-between; gap:6px; padding:5px 8px; border:1px solid var(--line); border-radius:4px; font:600 .78rem/1.4 "Segoe UI", system-ui, sans-serif; }
+  .stat-label { color:var(--mute); font-weight:400; }
+  .stat-value { font-variant-numeric:tabular-nums; }
+  .chars small.stats-line { font-family:"Segoe UI", system-ui, sans-serif; font-size:.72rem; font-variant-numeric:tabular-nums; margin-top:2px; }
   @media (max-width:520px) {
     .creator { grid-template-columns:1fr; }
     .creator .portrait { display:flex; gap:12px; align-items:flex-start; }
+    .stat-grid { grid-template-columns:repeat(2, minmax(0,1fr)); }
   }
   code { font-size:.85em; }
+  a { color:var(--accent); text-underline-offset:2px; }
 </style>
 </head>
 <body>
 <main>
   <h1 class="clock" id="clock"></h1>
   <p class="meta" id="meta"></p>
+  <p class="meta"><a href="status.html">Status tree →</a></p>
 
   <div class="bar">
     <button class="primary" id="step">Step</button>
@@ -81,8 +91,12 @@
         <button id="mcFolder">Connect mainChar folder</button>
       </div>
       <p class="meta status" id="mcStatus"></p>
-      <p class="meta status" id="mcStamina"></p>
     </div>
+  </div>
+  <div class="stats">
+    <h3>Base stats</h3>
+    <div class="stat-grid" id="mcStats"></div>
+    <p class="meta">Set when the character is first saved. Profile edits keep the current values.</p>
   </div>
   <p class="meta">Saves in the game; with the folder connected, also writes <code>characters/mainChar/main.json</code> and a profile image.</p>
 
@@ -118,6 +132,7 @@
 </main>
 
 <script src="engine.js"></script>
+<script src="characters/statsData.js"></script>
 <script src="characters/data.js"></script>
 <script src="characters/characters.js"></script>
 <script src="characters/mainCharacterData.js"></script>
@@ -129,6 +144,23 @@
 <script>
   const engine = new Engine({ startDate: "1000-01-01T06:00:00Z", tickMinutes: 10 });
   const $ = (id) => document.getElementById(id);
+
+  const statDefs = CharacterStatsData.stats;
+  function statDisplay(stats) {
+    return statDefs.map((def) => {
+      const raw = stats && Number(stats[def.key]);
+      const value = Number.isFinite(raw) ? Math.round(raw) : null;
+      const max = def.kind === "resource" && stats && Number.isFinite(Number(stats[def.key + "Max"]))
+        ? Math.round(Number(stats[def.key + "Max"])) : def.max;
+      return { def, value, max };
+    });
+  }
+  function statsLine(stats) {
+    return statDisplay(stats).map(({ def, value, max }) => `${def.short} ${value === null ? "—" : value}/${max}`).join(" · ");
+  }
+  function statsTitle(stats) {
+    return statDisplay(stats).map(({ def, value, max }) => `${def.label} ${value === null ? "—" : value}/${max}`).join(" · ");
+  }
 
   const chars = createCharactersModule();
   engine.register(chars);
@@ -308,15 +340,26 @@
     $("mcGender").append(option);
   }
 
-  function renderMainStamina() {
+  function renderMainStats() {
     const c = engine.state.modules.mainCharacter.character;
-    if (!c) {
-      $("mcStamina").textContent = "";
-      return;
+    const grid = $("mcStats");
+    grid.innerHTML = "";
+    for (const { def, value, max } of statDisplay(c && c.stats)) {
+      const cell = document.createElement("div");
+      cell.className = "stat";
+      cell.title = `${def.label}: ${value === null ? "not set" : `${value}/${max}`}`;
+
+      const label = document.createElement("span");
+      label.className = "stat-label";
+      label.textContent = def.label;
+
+      const val = document.createElement("span");
+      val.className = "stat-value";
+      val.textContent = value === null ? "—" : `${value}/${max}`;
+
+      cell.append(label, val);
+      grid.append(cell);
     }
-    const value = Number.isFinite(Number(c.stamina)) ? Number(c.stamina) : mcData.staminaStart;
-    const max = Number.isFinite(Number(c.staminaMax)) ? Number(c.staminaMax) : mcData.staminaMax;
-    $("mcStamina").textContent = `Stamina ${value}/${max}`;
   }
 
   function renderMainCharacter() {
@@ -331,7 +374,7 @@
     $("mcStatus").textContent = c
       ? `Saved: ${c.name} · ${c.age} · ${c.gender}${mainCharModule.folderConnected ? " · folder connected" : ""}`
       : "No main character saved yet.";
-    renderMainStamina();
+    renderMainStats();
   }
 
   $("mcImage").onchange = async (event) => {
@@ -388,7 +431,7 @@
   };
 
   engine.on("event:mainCharacter:saved", renderMainCharacter);
-  engine.on("event:mainCharacter:statChanged", renderMainStamina);
+  engine.on("event:mainCharacter:statChanged", renderMainStats);
 
   ["reset", "load", "run", "pause", "tickSize"].forEach((n) => engine.on(n, () => {
     if (n === "reset" || n === "load") {
@@ -429,7 +472,13 @@
       for (const c of list) {
         const li = document.createElement("li"), box = document.createElement("div");
         box.textContent = `${c.name}, ${c.age}, ${c.gender}`;
-        const sm = document.createElement("small"); sm.textContent = c.traits.join(", "); box.append(sm); li.append(box);
+        const sm = document.createElement("small"); sm.textContent = c.traits.join(", "); box.append(sm);
+        const st = document.createElement("small");
+        st.className = "stats-line";
+        st.textContent = statsLine(c.stats);
+        st.title = statsTitle(c.stats);
+        box.append(st);
+        li.append(box);
         if (saveable) { const b = document.createElement("button"); b.textContent = "Save as Named NPC"; b.onclick = () => act("character:save", { id: c.id }); li.append(b); }
         ul.append(li);
       }

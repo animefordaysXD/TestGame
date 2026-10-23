@@ -1,0 +1,879 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Game status — node tree</title>
+<style>
+  :root {
+    --bg:#f6f5f2; --fg:#1d1d1b; --mute:#6b6b66; --line:#d9d7d0; --accent:#2f5d50;
+    --card:#fffefb;
+    --root-fill:#2f5d50; --root-fg:#f6f5f2; --root-sub:#cfe0da;
+    --world-fill:#e9f1f4; --world-line:#9dbcc7;
+    --module-fill:#e4efe9; --module-line:#8db5a6;
+    --state-fill:#eef1f7; --state-line:#a9b7cf;
+    --content-fill:#f6efe0; --content-line:#d3bd8f;
+    --event-fill:#f0eaf7; --event-line:#b9a6d3;
+    --test-fill:#e9f4ea; --test-line:#9ac5a1;
+    --warn-fill:#f9e9e7; --warn-line:#d9a49c;
+    --placeholder-fill:#fbf0e8; --placeholder-line:#d9ae90;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg:#161715; --fg:#e8e6e0; --mute:#8f8e87; --line:#2c2d2a; --accent:#7fb5a3;
+      --card:#1d1f1c;
+      --root-fill:#3d6b5d; --root-fg:#f3f7f5; --root-sub:#cfe0da;
+      --world-fill:#1e2a2e; --world-line:#466a75;
+      --module-fill:#1f2c26; --module-line:#4c7768;
+      --state-fill:#20242d; --state-line:#4d5c76;
+      --content-fill:#2c271b; --content-line:#7c6a41;
+      --event-fill:#282232; --event-line:#6d5a86;
+      --test-fill:#1e2b20; --test-line:#4c7354;
+      --warn-fill:#2e2120; --warn-line:#8c5b53;
+      --placeholder-fill:#2d241d; --placeholder-line:#8a6247;
+      color-scheme: dark;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:15px/1.5 Georgia, serif; }
+  header { display:flex; flex-wrap:wrap; gap:12px; align-items:flex-end; justify-content:space-between;
+           max-width:1200px; margin:0 auto; padding:22px 18px 6px; }
+  h1 { font-size:1.7rem; margin:0; letter-spacing:.01em; }
+  .meta { color:var(--mute); margin:4px 0 0; font-size:.85rem; }
+  a { color:var(--accent); text-underline-offset:2px; }
+  button, .file {
+    font:inherit; font-size:.82rem; padding:5px 10px; background:transparent; color:var(--fg);
+    border:1px solid var(--line); border-radius:4px; cursor:pointer; display:inline-flex;
+    align-items:center; gap:6px; line-height:1.3;
+  }
+  button:hover, .file:hover { border-color:var(--accent); }
+  button:focus-visible, .file:focus-within, a:focus-visible,
+  .node:focus-visible .box { outline:2px solid var(--accent); outline-offset:2px; }
+  .file input { display:none; }
+  .toolbar { display:flex; flex-wrap:wrap; gap:6px; align-items:center;
+             max-width:1200px; margin:12px auto 0; padding:0 18px; }
+  .spacer { flex:1; }
+  .chips { display:flex; flex-wrap:wrap; gap:6px; max-width:1200px; margin:12px auto 0; padding:0 18px; }
+  .chip { font-size:.78rem; padding:3px 9px; border:1px solid var(--line); border-radius:999px;
+          background:var(--card); white-space:nowrap; }
+  .chip b { font-weight:600; }
+  .jump { display:flex; flex-wrap:wrap; gap:6px; align-items:center; max-width:1200px;
+          margin:8px auto 0; padding:0 18px; color:var(--mute); font-size:.78rem; }
+  .jump button { font-size:.76rem; padding:3px 9px; }
+  .legend { display:flex; flex-wrap:wrap; gap:12px; max-width:1200px; margin:10px auto 0; padding:0 18px;
+            color:var(--mute); font-size:.74rem; }
+  .legend span { display:inline-flex; align-items:center; gap:5px; }
+  .swatch { width:11px; height:11px; border-radius:3px; border:1px solid var(--line); display:inline-block; }
+  #viewport { max-width:1200px; margin:12px auto 0; padding:0 18px 30px; overflow:auto;
+              max-height:calc(100vh - 190px); min-height:320px; }
+  #tree { display:block; margin:0 auto; background:var(--bg); }
+  .link { fill:none; stroke:var(--line); stroke-width:1.2; }
+  .node { cursor:default; }
+  .node.has-children { cursor:pointer; }
+  .node .box { stroke-width:1; }
+  .node.root .box { fill:var(--root-fill); stroke:var(--root-fill); }
+  .node.world .box { fill:var(--world-fill); stroke:var(--world-line); }
+  .node.module .box { fill:var(--module-fill); stroke:var(--module-line); }
+  .node.state .box { fill:var(--state-fill); stroke:var(--state-line); }
+  .node.content .box { fill:var(--content-fill); stroke:var(--content-line); }
+  .node.event .box { fill:var(--event-fill); stroke:var(--event-line); }
+  .node.test .box { fill:var(--test-fill); stroke:var(--test-line); }
+  .node.warn .box { fill:var(--warn-fill); stroke:var(--warn-line); }
+  .node.placeholder .box { fill:var(--placeholder-fill); stroke:var(--placeholder-line); stroke-dasharray:4 3; }
+  .node text { font-family:"Segoe UI", system-ui, sans-serif; }
+  .node text.label { font-size:13px; font-weight:600; fill:var(--fg); }
+  .node text.sub { font-size:11px; fill:var(--mute); }
+  .node.root text.label { fill:var(--root-fg); }
+  .node.root text.sub { fill:var(--root-sub); }
+  .node text.tag { font-size:9px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; fill:var(--mute); }
+  .node.root text.tag { fill:var(--root-sub); }
+  .node .tag-bg { fill:var(--bg); opacity:.55; }
+  .node.root .tag-bg { fill:#ffffff; opacity:.12; }
+  .node text.toggle { font-size:12px; font-weight:700; fill:var(--mute); }
+  .node.root text.toggle { fill:var(--root-sub); }
+  .node .hit { fill:transparent; }
+  .hidden-note { max-width:1200px; margin:0 auto; padding:0 18px; color:var(--mute); font-size:.8rem; }
+  @media (max-width:640px) {
+    h1 { font-size:1.35rem; }
+    #viewport { max-height:none; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>Text RPG — status tree</h1>
+    <p class="meta" id="source">Reading save…</p>
+  </div>
+  <a href="index.html">← Back to game</a>
+</header>
+
+<div class="toolbar">
+  <button id="reload" title="Re-read localStorage save1">Reload save</button>
+  <label class="file" title="Open a previously saved state JSON file">Load state JSON
+    <input type="file" id="file" accept="application/json,.json">
+  </label>
+  <button id="expand">Expand all</button>
+  <button id="collapse">Collapse all</button>
+  <span class="spacer"></span>
+  <button id="zoomOut" title="Zoom out">−</button>
+  <button id="zoomReset" title="Reset zoom">100%</button>
+  <button id="zoomIn" title="Zoom in">+</button>
+  <button id="fit" title="Fit the tree width to this window">Fit width</button>
+  <button id="copy">Copy text</button>
+  <button id="download">Download SVG</button>
+</div>
+
+<div class="chips" id="chips"></div>
+
+<div class="jump" id="jump">
+  <span>Jump to</span>
+  <button data-jump="0/0">World</button>
+  <button data-jump="0/1">Modules</button>
+  <button data-jump="0/2">Content data</button>
+  <button data-jump="0/3">Event catalog</button>
+  <button data-jump="0/4">Tests</button>
+</div>
+
+<div class="legend">
+  <span><i class="swatch" style="background:var(--root-fill);border-color:var(--root-fill)"></i>root</span>
+  <span><i class="swatch" style="background:var(--world-fill);border-color:var(--world-line)"></i>world</span>
+  <span><i class="swatch" style="background:var(--module-fill);border-color:var(--module-line)"></i>module</span>
+  <span><i class="swatch" style="background:var(--state-fill);border-color:var(--state-line)"></i>live state</span>
+  <span><i class="swatch" style="background:var(--content-fill);border-color:var(--content-line)"></i>content data</span>
+  <span><i class="swatch" style="background:var(--event-fill);border-color:var(--event-line)"></i>event</span>
+  <span><i class="swatch" style="background:var(--test-fill);border-color:var(--test-line)"></i>test</span>
+  <span><i class="swatch" style="background:var(--placeholder-fill);border-color:var(--placeholder-line)"></i>placeholder</span>
+  <span><i class="swatch" style="background:var(--warn-fill);border-color:var(--warn-line)"></i>empty / note</span>
+</div>
+
+<p class="hidden-note" id="note"></p>
+<div id="viewport"><svg id="tree" xmlns="http://www.w3.org/2000/svg" role="img"
+  aria-label="Node tree of the current text-RPG status"></svg></div>
+
+<script src="characters/statsData.js"></script>
+<script src="characters/data.js"></script>
+<script src="characters/mainCharacterData.js"></script>
+<script src="locations/data.js"></script>
+<script src="actions/data.js"></script>
+<!-- Read-only viewer. It registers no modules and never writes the save.
+     The module/event branches are hand-maintained; update them with ENGINE_SPEC.md. -->
+<script>
+(function () {
+  "use strict";
+
+  const MC = window.MainCharacterData || {};
+  const ST = window.CharacterStatsData || { stats: [] };
+  const LOC = window.LocationData || { biomes: [] };
+  const ACT = window.LocationActionsData || { default: [], biomes: {} };
+  const CD = window.CharacterData || { traits: [], opposites: [] };
+
+  const $ = (id) => document.getElementById(id);
+  const svg = $("tree");
+  const viewport = $("viewport");
+
+  const GAP_X = 62, GAP_Y = 12, PAD = 26, MIN_W = 176, MAX_W = 430;
+  const FONT_LABEL = '600 13px "Segoe UI", system-ui, sans-serif';
+  const FONT_SUB = '11px "Segoe UI", system-ui, sans-serif';
+  const FONT_TAG = '700 9px "Segoe UI", system-ui, sans-serif';
+
+  let live = readSave();
+  let events = null;          // { byKey:{}, total, enabled, errors }
+  let collapsed = new Set();
+  let zoom = 1;
+  let layout = null;
+  let dragged = false;
+  let userMoved = false;
+
+  /* ---------------- state input ---------------- */
+
+  function emptyState() {
+    return {
+      version: 1, seed: "—", rngState: "—",
+      time: { startDate: "1000-01-01T06:00:00Z", tick: 0, minutes: 0, tickMinutes: 10 },
+      eventLog: [],
+      modules: {
+        characters: { nextId: 1, named: {}, temp: {} },
+        mainCharacter: { character: null },
+        locations: { seed: 0, createdAt: "", nextId: 1, locations: {}, currentId: null },
+        actions: { locationId: null, locationName: "", biomeKey: "", actions: [] }
+      }
+    };
+  }
+
+  function readSave() {
+    try {
+      const raw = localStorage.getItem("save1");
+      if (!raw) return { state: null, source: "no save1", note: "No saved game found in this browser; showing the empty new-game state.", at: new Date() };
+      return { state: JSON.parse(raw), source: "localStorage save1", note: "", at: new Date() };
+    } catch (error) {
+      return { state: null, source: "unavailable", note: "localStorage is unavailable here: " + error.message, at: new Date() };
+    }
+  }
+
+  function stateNow() { return live.state || emptyState(); }
+
+  function clockText(time) {
+    try {
+      const d = new Date(Date.parse(time.startDate) + time.minutes * 60000);
+      const p = (n) => String(n).padStart(2, "0");
+      return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())} ${p(d.getUTCHours())}:${p(d.getUTCMinutes())}`;
+    } catch (error) { return "unknown time"; }
+  }
+
+  /* ---------------- content helpers ---------------- */
+
+  const biomes = Array.isArray(LOC.biomes) ? LOC.biomes : [];
+  const defaultActions = Array.isArray(ACT.default) ? ACT.default : [];
+  const overrides = ACT.biomes && typeof ACT.biomes === "object" ? Object.keys(ACT.biomes) : [];
+  const weatherTotal = biomes.reduce((sum, b) => sum + (Array.isArray(b.weather) ? b.weather.length : 0), 0);
+  const firstNames = CD.firstNames || {};
+  const givenNames = Object.values(firstNames).reduce((sum, list) => sum + (Array.isArray(list) ? list.length : 0), 0);
+
+  function bandFor(hostility) {
+    const bands = Array.isArray(LOC.hostilityBands) ? LOC.hostilityBands : [];
+    const value = Number(hostility);
+    for (const band of bands) if (value <= Number(band.max)) return band.label;
+    return "";
+  }
+
+  function statRows(stats, kind) {
+    return ST.stats.filter((def) => !kind || def.kind === kind).map((def) => {
+      const raw = stats && Number(stats[def.key]);
+      const value = Number.isFinite(raw) ? Math.round(raw) : null;
+      const max = def.kind === "resource" && stats && Number.isFinite(Number(stats[def.key + "Max"]))
+        ? Math.round(Number(stats[def.key + "Max"])) : def.max;
+      return { def, value, max };
+    });
+  }
+
+  function statLine(stats, kind) {
+    return statRows(stats, kind).map(({ def, value, max }) =>
+      def.kind === "skill"
+        ? `${def.short} ${value === null ? "—" : value}`
+        : `${def.short} ${value === null ? "—" : value}/${max}`
+    ).join(" · ");
+  }
+
+  async function loadEventStats(force = false) {
+    if (events && !force) return events;
+    const keys = biomes.map((b) => b.key);
+    const rows = await Promise.all(keys.map(async (key) => {
+      try {
+        const response = await fetch(`locations/events/${encodeURIComponent(key)}/events.json`, { cache: "no-store" });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const json = await response.json();
+        const list = Array.isArray(json.events) ? json.events : [];
+        return [key, { total: list.length, enabled: list.filter((e) => e && e.enabled !== false).length }];
+      } catch (error) {
+        return [key, { total: 0, enabled: 0, error: error.message }];
+      }
+    }));
+    const byKey = Object.fromEntries(rows);
+    events = {
+      byKey,
+      total: rows.reduce((sum, [, v]) => sum + v.total, 0),
+      enabled: rows.reduce((sum, [, v]) => sum + v.enabled, 0),
+      errors: rows.filter(([, v]) => v.error).length
+    };
+    return events;
+  }
+
+  /* ---------------- tree model ---------------- */
+
+  function node(label, sub, kind, children, tag) {
+    return { label, sub: sub || "", kind: kind || "state", children: children || [], tag: tag || "" };
+  }
+
+  function group(label, sub, children, kind, tag) {
+    return node(label, sub, kind || "state", children, tag);
+  }
+
+  function buildTree() {
+    const state = stateNow();
+    const modules = state.modules || {};
+    const time = state.time || emptyState().time;
+    const log = Array.isArray(state.eventLog) ? state.eventLog : [];
+
+    /* World --------------------------------------------------------------- */
+    const world = node("World", clockText(time), "world", [
+      node("Time", `${clockText(time)} · tick ${time.tick} · ${time.tickMinutes} min/tick`, "state"),
+      node("Seed", `world ${state.seed} · rng ${state.rngState} · save v${state.version}`, "state"),
+      node("Event log", `${log.length} recent event${log.length === 1 ? "" : "s"} kept (cap 500)`, "state")
+    ], "live");
+
+    /* Characters ---------------------------------------------------------- */
+    const charState = modules.characters || {};
+    const named = Object.values(charState.named || {});
+    const temp = Object.values(charState.temp || {});
+    const npcNode = (c) => node(
+      c.name || c.id || "NPC",
+      `${c.gender || "?"} · age ${c.age ?? "?"} · ${(c.traits || []).slice(0, 4).join(", ")}${(c.traits || []).length > 4 ? "…" : ""}`,
+      "state",
+      [
+        node("Resources", statLine(c.stats, "resource"), "state"),
+        node("Skills", statLine(c.stats, "skill"), "state")
+      ]
+    );
+    const namedNode = group(`Named NPC (${named.length})`, named.length ? "" : "none saved", named.map(npcNode), "state");
+    const tempNode = group(`Temporary Spawn (${temp.length})`, temp.length ? "cleared by location:changed" : "none", temp.map(npcNode), "state");
+    const chars = node("characters", `v0.2 · next id ${charState.nextId ?? "—"}`, "module", [
+      namedNode,
+      tempNode,
+      node("Rules", `${(CD.traits || []).length} traits · ${(CD.opposites || []).length} opposite pairs · 5 per NPC · ${ST.stats.length} base stats`, "content")
+    ], "built");
+
+    /* Main character ------------------------------------------------------ */
+    const mc = (modules.mainCharacter || {}).character || null;
+    const mcStats = mc && mc.stats ? mc.stats : null;
+    const mcRows = statRows(mcStats);
+    const hpRow = mcRows.find((row) => row.def.key === "hp");
+    const staRow = mcRows.find((row) => row.def.key === "stamina");
+    const mcChildren = [];
+    if (mc) {
+      mcChildren.push(node(mc.name || "(unnamed)", `${mc.gender || "?"} · age ${mc.age ?? "?"} · id ${mc.id || "main"}`, "state"));
+      mcChildren.push(group("Stats", statLine(mcStats), mcRows.map(({ def, value, max }) =>
+        node(def.label, value === null ? "not set" : `${value}/${max}`, "state")
+      ), "state"));
+      mcChildren.push(node("Portrait", mc.imageSource === "upload"
+        ? `upload · ${MC.imageSize || 256}px · stored as a data URL`
+        : "generated initials SVG avatar", "state"));
+      mcChildren.push(node("Created / updated", `${mc.createdAt || "—"} · ${mc.updatedAt || "—"}`, "state"));
+    } else {
+      mcChildren.push(node("No main character saved", "Create one on the game page", "warn"));
+    }
+    mcChildren.push(node("Folder mirror", "characters/mainChar/main.json + profile image (runtime only)", "content", [], "write-only"));
+    const mcSummary = mc && hpRow && staRow
+      ? `HP ${hpRow.value ?? "—"}/${hpRow.max} · Stamina ${staRow.value ?? "—"}/${staRow.max}`
+      : "not created";
+    const mainCharacter = node("mainCharacter", `v0.3 · ${mcSummary}`, "module", mcChildren, mc ? "built" : "empty");
+
+    /* Locations ----------------------------------------------------------- */
+    const locState = modules.locations || {};
+    const locations = Object.values(locState.locations || {}).sort((a, b) => String(a.id).localeCompare(String(b.id)));
+    const currentId = locState.currentId || null;
+    const locItems = locations.map((loc) => node(
+      loc.name || loc.id,
+      `${loc.id} · ${loc.biome || "?"} · ${loc.weather || "?"} · hostility ${loc.hostility ?? "?"} (${bandFor(loc.hostility) || "?"})${loc.id === currentId ? " · current" : ""}`,
+      "state",
+      [],
+      loc.id === currentId ? "current" : ""
+    ));
+    const locationsNode = group(`Locations (${locations.length})`, locations.length ? "unique names · biome/weather pairs vary" : "none generated", locItems, "state");
+    const locationsBranch = node("locations", `v0.2 · map seed ${locState.seed ?? "—"} · ${locations.length} generated`, "module", [
+      node("Map", `seed ${locState.seed ?? "—"} · created ${locState.createdAt || "—"} · next ${locState.nextId ?? "—"}`, "state"),
+      locationsNode,
+      node("Biome events on visit", "each enabled event rolls independently; base-stat effects apply", "state")
+    ], "built");
+
+    /* Actions ------------------------------------------------------------- */
+    const actionState = modules.actions || {};
+    const actions = Array.isArray(actionState.actions) ? actionState.actions : [];
+    const actionItems = actions.map((action) => node(
+      action.name || action.id,
+      action.description || "",
+      "placeholder",
+      [],
+      "choose"
+    ));
+    const actionsBranch = node("actions", `v0.1 · ${actions.length} loaded · choices are placeholders`, "module", [
+      node("Area", `${actionState.locationName || "none"}${actionState.biomeKey ? " · " + actionState.biomeKey : ""}${actionState.locationId ? " · " + actionState.locationId : ""}`, "state"),
+      group(`Actions (${actions.length})`, actions.length ? "loaded from the last visited area" : "visit a location to load five", actionItems, "state"),
+      node("Resolution", "action:chosen only — no stat, time, reward or travel yet", "warn", [], "placeholder")
+    ], "placeholder");
+
+    const modulesBranch = node("Modules", "4 registered · event-driven · one slice each", "state", [
+      chars, mainCharacter, locationsBranch, actionsBranch
+    ], "4");
+
+    /* Content ------------------------------------------------------------- */
+    const biomeNodes = biomes.map((biome) => {
+      const stats = events && events.byKey[biome.key];
+      const sub = stats
+        ? (stats.error ? `file unavailable — ${stats.error}` : `${stats.enabled} active / ${stats.total} defined · chancePercent rolls`)
+        : "loading…";
+      return node(`${biome.name} (${biome.key})`, sub, stats && stats.error ? "warn" : "content",
+        [], stats && stats.enabled ? `${stats.enabled} active` : "");
+    });
+    const eventsSummary = events
+      ? `${events.enabled} active / ${events.total} defined across ${biomes.length} biomes${events.errors ? ` · ${events.errors} load error(s)` : ""}`
+      : "loading event files…";
+    const contentBranch = node("Content data", "plain data files — no generation logic", "content", [
+      node("characters/data.js", `${givenNames} given names · ${(CD.surnames || []).length} surnames · ${(CD.traits || []).length} traits · ages ${(CD.ageRange || []).join("–")}`, "content"),
+      node("characters/statsData.js", `${ST.stats.length} base stats · ${ST.stats.filter((d) => d.kind === "resource").length} resources · ${ST.stats.filter((d) => d.kind === "skill").length} skills`, "content"),
+      node("mainCharacterData.js", `portrait ${MC.imageSize ?? 256}px · upload ≤ ${Math.round((MC.maxUploadBytes || 0) / 1048576)} MB · ${(MC.genders || []).length} genders`, "content"),
+      node("locations/data.js", `${biomes.length} biomes · ${weatherTotal} weather entries · ${(LOC.namePrefixes || []).length} prefixes · ${(LOC.nameSuffixes || []).length} suffixes · ${(LOC.namePatterns || []).length} name patterns`, "content"),
+      node("actions/data.js", `${defaultActions.length} default actions · ${overrides.length} biome override(s)`, "content"),
+      group(`Biome events (${biomes.length} files)`, eventsSummary, biomeNodes, "content"),
+      node("Docs", "ENGINE_SPEC.md v0.7 · HANDOFF.md · README.md · actions/README.md · locations/events/README.md", "content")
+    ], "data");
+
+    /* Events -------------------------------------------------------------- */
+    const eventsBranch = node("Event catalog", "requests → module events → depth + 1 follow-ups", "event", [
+      group("Request events", "fired by the UI (and future modules)", [
+        node("character:spawn", "UI → characters.spawn()", "event"),
+        node("character:save", "UI → characters.save() · data { id }", "event"),
+        node("character:clearTemp", "UI → characters.clearTemp()", "event"),
+        node("location:add", "UI → locations.add() · data { count? }", "event"),
+        node("location:changed", "UI → characters clears Temporary Spawn", "event"),
+        node("action:choose", "UI → actions.choose() · data { actionId }", "event")
+      ], "event"),
+      group("Module events", "emitted at depth + 1", [
+        node("character:spawned", "characters · { id }", "event"),
+        node("character:saved", "characters · { id }", "event"),
+        node("character:tempCleared", "characters · { ids }", "event"),
+        node("location:added", "locations · { id }", "event"),
+        node("location:visited", "locations · { id, name, biome, biomeKey, weather, hostility }", "event"),
+        node("location:event", "locations · event data + effects", "event"),
+        node("actions:loaded", "actions · five actions for the area", "event"),
+        node("action:chosen", "actions · { actionId, name, locationId, locationName }", "event"),
+        node("mainCharacter:saved", "mainCharacter · identity only (no image)", "event"),
+        node("mainCharacter:statChanged", "mainCharacter · any base stat: stat, delta, value, max", "event")
+      ], "event")
+    ], "16");
+
+    /* Docs & tests -------------------------------------------------------- */
+    const testsBranch = node("Tests", "Node only · npm test", "test", [
+      node("locations.test.cjs", "generation · uniqueness · reset · save/load", "test"),
+      node("locations-disk.test.cjs", "Locations folder mirror (in-memory mock)", "test"),
+      node("characters.test.cjs", "NPC stats · generation · save/clear · legacy load", "test"),
+      node("main-character.test.cjs", "validation · image · base stats · effects · mirror", "test"),
+      node("biome-events.test.cjs", "JSON loading · visit rolls · stat effects · reset", "test"),
+      node("actions.test.cjs", "five actions · overrides · choices · reset · save/load", "test"),
+      node("serve.cjs", "static server on 127.0.0.1:8765", "test")
+    ], "7");
+
+    const rootSub = live.state
+      ? `${live.source} · ${clockText(time)} · tick ${time.tick}`
+      : `${live.source} · empty state · ${clockText(time)}`;
+    return node("Text RPG — current status", rootSub, "root", [
+      world, modulesBranch, contentBranch, eventsBranch, testsBranch
+    ], live.state ? "live" : "empty");
+  }
+
+  /* ---------------- text measurement and layout ---------------- */
+
+  const measure = (() => {
+    const ctx = document.createElement("canvas").getContext("2d");
+    return (text, font) => { ctx.font = font; return ctx.measureText(text).width; };
+  })();
+
+  const clip = (text, max) => {
+    const s = String(text || "");
+    return s.length > max ? s.slice(0, max - 1) + "…" : s;
+  };
+
+  function measureNode(n) {
+    const label = clip(n.label, 52);
+    const sub = clip(n.sub, 68);
+    const tag = clip(n.tag, 12);
+    const labelW = measure(label, FONT_LABEL);
+    const subW = measure(sub, FONT_SUB);
+    const tagW = tag ? measure(tag, FONT_TAG) + 14 : 0;
+    const width = Math.max(MIN_W, Math.min(MAX_W,
+      Math.ceil(Math.max(labelW + 26 + tagW, subW + 26))));
+    n._label = label; n._sub = sub; n._tag = tag; n._tagW = tagW;
+    n.w = width;
+    n.h = sub ? 48 : 34;
+  }
+
+  function layoutTree(root) {
+    let cursor = 0;
+    const columns = [];
+
+    function walk(n, depth, path) {
+      n._path = path;
+      n.depth = depth;
+      measureNode(n);
+      columns[depth] = Math.max(columns[depth] || 0, n.w);
+      const kids = collapsed.has(path) ? [] : n.children;
+      n._kids = kids;
+      if (!kids.length) {
+        n.cy = cursor + n.h / 2;
+        cursor += n.h + GAP_Y;
+      } else {
+        kids.forEach((child, i) => walk(child, depth + 1, path + "/" + i));
+        n.cy = (kids[0].cy + kids[kids.length - 1].cy) / 2;
+      }
+      n.y = n.cy - n.h / 2;
+    }
+
+    walk(root, 0, "0");
+
+    const offsets = [];
+    let x = 0;
+    columns.forEach((w, i) => { offsets[i] = x; x += w + GAP_X; });
+    const width = x - GAP_X + PAD * 2;
+    const height = cursor - GAP_Y + PAD * 2;
+
+    function place(n) {
+      n.x = PAD + offsets[n.depth];
+      n._kids.forEach(place);
+    }
+    place(root);
+
+    return { root, width, height };
+  }
+
+  /* ---------------- SVG rendering ---------------- */
+
+  const escapeXml = (s) => String(s)
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;").replace(/'/g, "&apos;");
+
+  function render() {
+    const tree = buildTree();
+    layout = layoutTree(tree);
+
+    const parts = [];
+    const links = [];
+    const nodes = [];
+
+    (function walk(n) {
+      for (const child of n._kids) {
+        const x1 = n.x + n.w, y1 = n.cy, x2 = child.x, y2 = child.cy;
+        const mx = (x1 + x2) / 2;
+        links.push(`<path class="link" d="M ${x1} ${y1} C ${mx} ${y1}, ${mx} ${y2}, ${x2} ${y2}"/>`);
+        walk(child);
+      }
+      nodes.push(n);
+    })(tree);
+
+    for (const n of nodes) {
+      const hasKids = n.children.length > 0;
+      const isCollapsed = collapsed.has(n._path);
+      const classes = ["node", n.kind];
+      if (hasKids) classes.push("has-children");
+
+      const x = n.x, y = n.y, w = n.w, h = n.h;
+      const labelX = x + (hasKids ? 26 : 14);
+      const labelY = n._sub ? y + 19 : y + 21;
+      const subY = y + 36;
+
+      const bits = [];
+      bits.push(`<g class="${classes.join(" ")}" data-path="${n._path}" tabindex="0" role="button" aria-expanded="${hasKids ? String(!isCollapsed) : "false"}">`);
+      bits.push(`<rect class="box" x="${x}" y="${y}" width="${w}" height="${h}" rx="8"/>`);
+      if (hasKids) {
+        bits.push(`<text class="toggle" x="${x + 13}" y="${y + h / 2 + 3}">${isCollapsed ? "▸" : "▾"}</text>`);
+        if (isCollapsed) {
+          bits.push(`<text class="tag" x="${x + w - 10}" y="${y + h / 2 + 3}" text-anchor="end">+${countDescendants(n)}</text>`);
+        }
+      }
+      bits.push(`<text class="label" x="${labelX}" y="${labelY}">${escapeXml(n._label)}</text>`);
+      if (n._sub) bits.push(`<text class="sub" x="${x + 14}" y="${subY}">${escapeXml(n._sub)}</text>`);
+
+      if (n._tag && !(hasKids && isCollapsed)) {
+        const tagX = x + w - n._tagW - 6;
+        const tagY = n._sub ? y + 8 : y + 9;
+        bits.push(`<rect class="tag-bg" x="${tagX}" y="${tagY}" width="${n._tagW}" height="15" rx="7.5"/>`);
+        bits.push(`<text class="tag" x="${tagX + n._tagW / 2}" y="${tagY + 11}" text-anchor="middle">${escapeXml(n._tag)}</text>`);
+      }
+
+      // A larger invisible hit area makes collapsed nodes easy to click.
+      bits.push(`<rect class="hit" x="${x}" y="${y}" width="${w}" height="${h}" rx="8"/>`);
+      bits.push("</g>");
+      parts.push(bits.join(""));
+    }
+
+    svg.innerHTML = `<g transform="translate(0,0)">${links.join("")}${parts.join("")}</g>`;
+    svg.setAttribute("viewBox", `0 0 ${layout.width} ${layout.height}`);
+    applyZoom();
+    renderChips(tree);
+
+    // A left-to-right tree centres the root vertically. Until the user scrolls,
+    // later renders re-centre so async content cannot reset the origin.
+    if (!userMoved) requestAnimationFrame(centerOnRoot);
+  }
+
+  function centerOnRoot() {
+    if (!layout) return;
+    const rootY = layout.root.cy * zoom;
+    viewport.scrollTop = Math.max(0, rootY - viewport.clientHeight / 2);
+    viewport.scrollLeft = 0;
+  }
+
+  function countDescendants(n) {
+    let count = 0;
+    (function walk(item) {
+      for (const child of item.children) { count++; walk(child); }
+    })(n);
+    return count;
+  }
+
+  function applyZoom() {
+    if (!layout) return;
+    svg.style.width = `${Math.round(layout.width * zoom)}px`;
+    svg.style.height = `${Math.round(layout.height * zoom)}px`;
+    $("zoomReset").textContent = `${Math.round(zoom * 100)}%`;
+  }
+
+  function renderChips(tree) {
+    const state = stateNow();
+    const time = state.time || emptyState().time;
+    const mc = (state.modules.mainCharacter || {}).character;
+    const locs = Object.values((state.modules.locations || {}).locations || {});
+    const acts = (state.modules.actions || {}).actions || [];
+    const named = Object.values((state.modules.characters || {}).named || {});
+    const temp = Object.values((state.modules.characters || {}).temp || {});
+    const mcRows = statRows(mc && mc.stats);
+    const hp = mcRows.find((row) => row.def.key === "hp");
+    const sta = mcRows.find((row) => row.def.key === "stamina");
+    const chips = [
+      `${clockText(time)} · tick ${time.tick}`,
+      `${time.tickMinutes} min/tick`,
+      mc && hp && sta ? `HP ${hp.value ?? "—"}/${hp.max} · Stamina ${sta.value ?? "—"}/${sta.max}` : "No main character",
+      `${locs.length} location${locs.length === 1 ? "" : "s"}`,
+      `${acts.length} action${acts.length === 1 ? "" : "s"} (placeholder)`,
+      `${named.length} named · ${temp.length} temporary`,
+      events ? `${events.enabled} biome event${events.enabled === 1 ? "" : "s"} active` : "Biome events…",
+      `${state.eventLog ? state.eventLog.length : 0} logged`
+    ];
+    $("chips").innerHTML = chips.map((c) => `<span class="chip">${escapeXml(c)}</span>`).join("");
+  }
+
+  /* ---------------- source / note ---------------- */
+
+  function renderSource() {
+    $("source").textContent = live.state
+      ? `Source: ${live.source} · read ${live.at.toLocaleTimeString()} · live values from the game save`
+      : `Source: ${live.source} · ${live.note}`;
+    $("note").textContent = live.note;
+    $("note").hidden = !live.note;
+  }
+
+  /* ---------------- interactions ---------------- */
+
+  let dragStart = null;
+
+  viewport.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0) return;
+    userMoved = true;
+    dragStart = { x: event.clientX, y: event.clientY, left: viewport.scrollLeft, top: viewport.scrollTop };
+    dragged = false;
+  });
+  viewport.addEventListener("wheel", () => { userMoved = true; }, { passive: true });
+
+  viewport.addEventListener("pointermove", (event) => {
+    if (!dragStart) return;
+    const dx = event.clientX - dragStart.x, dy = event.clientY - dragStart.y;
+    if (Math.abs(dx) + Math.abs(dy) > 4) {
+      dragged = true;
+      viewport.scrollLeft = dragStart.left - dx;
+      viewport.scrollTop = dragStart.top - dy;
+    }
+  });
+
+  const endDrag = () => { dragStart = null; setTimeout(() => { dragged = false; }, 0); };
+  viewport.addEventListener("pointerup", endDrag);
+  viewport.addEventListener("pointercancel", endDrag);
+
+  svg.addEventListener("click", (event) => {
+    if (dragged) return;
+    const g = event.target.closest("g.node");
+    if (!g) return;
+    const path = g.dataset.path;
+    const n = findNode(layout.root, path);
+    if (!n || !n.children.length) return;
+    if (collapsed.has(path)) collapsed.delete(path); else collapsed.add(path);
+    render();
+  });
+
+  svg.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    const g = event.target.closest("g.node");
+    if (!g) return;
+    event.preventDefault();
+    const path = g.dataset.path;
+    const n = findNode(layout.root, path);
+    if (!n || !n.children.length) return;
+    if (collapsed.has(path)) collapsed.delete(path); else collapsed.add(path);
+    render();
+  });
+
+  function findNode(n, path) {
+    if (n._path === path) return n;
+    for (const child of n._kids || []) {
+      const found = findNode(child, path);
+      if (found) return found;
+    }
+    // Also search collapsed children by their structural path.
+    for (const child of n.children) {
+      if (child._path === path) return child;
+    }
+    return null;
+  }
+
+  /* ---------------- controls ---------------- */
+
+  $("jump").addEventListener("click", (event) => {
+    const button = event.target.closest("button[data-jump]");
+    if (button) jumpTo(button.dataset.jump);
+  });
+
+  function jumpTo(path) {
+    userMoved = true;
+    const parts = path.split("/");
+    let changed = false;
+    for (let i = 1; i < parts.length; i++) {
+      if (collapsed.delete(parts.slice(0, i + 1).join("/"))) changed = true;
+    }
+    if (changed) render();
+    const target = findNode(layout.root, path);
+    if (!target) return;
+    viewport.scrollLeft = Math.max(0, target.x * zoom - 8);
+    viewport.scrollTop = Math.max(0, target.y * zoom - 8);
+  }
+
+  $("reload").onclick = async () => {
+    live = readSave();
+    userMoved = false;
+    collapsed = new Set();
+    renderSource();
+    await loadEventStats(true);
+    render();
+  };
+
+  $("file").onchange = (event) => {
+    const file = event.target.files && event.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const state = JSON.parse(String(reader.result));
+        if (!state || typeof state !== "object" || !state.time || !state.modules)
+          throw new Error("not an engine state file");
+        live = { state, source: file.name, note: `Loaded state from ${file.name}.`, at: new Date() };
+        collapsed = new Set();
+        userMoved = false;
+        renderSource();
+        render();
+      } catch (error) {
+        alert("Could not read that state file: " + error.message);
+      }
+      event.target.value = "";
+    };
+    reader.readAsText(file);
+  };
+
+  $("expand").onclick = () => { collapsed = new Set(); render(); };
+  $("collapse").onclick = () => {
+    collapsed = new Set();
+    (function mark(n) {
+      for (const child of n.children) {
+        if (child.children.length) collapsed.add(child._path);
+        mark(child);
+      }
+    })(layout.root);
+    render();
+  };
+
+  $("zoomIn").onclick = () => { zoom = Math.min(2, zoom + 0.1); applyZoom(); };
+  $("zoomOut").onclick = () => { zoom = Math.max(0.3, zoom - 0.1); applyZoom(); };
+  $("zoomReset").onclick = () => { zoom = 1; applyZoom(); };
+  $("fit").onclick = () => {
+    if (!layout) return;
+    userMoved = true;
+    zoom = Math.max(0.3, Math.min(1, (viewport.clientWidth - 8) / layout.width));
+    applyZoom();
+    requestAnimationFrame(() => {
+      viewport.scrollLeft = 0;
+      viewport.scrollTop = Math.max(0, layout.root.cy * zoom - viewport.clientHeight / 2);
+    });
+  };
+
+  $("copy").onclick = () => {
+    const text = treeText(buildTree());
+    const area = document.createElement("textarea");
+    area.value = text;
+    area.style.position = "fixed";
+    area.style.top = "-1000px";
+    document.body.append(area);
+    area.select();
+    let copied = false;
+    try { copied = document.execCommand("copy"); } catch (error) { copied = false; }
+    area.remove();
+    flash("copy", copied ? "Copied" : "Copy failed");
+    if (!copied) window.prompt("Copy the status tree:", text);
+  };
+
+  $("download").onclick = () => {
+    if (!layout) return;
+    const style = `
+      .link{fill:none;stroke:#d9d7d0;stroke-width:1.2}
+      .node text{font-family:"Segoe UI",system-ui,sans-serif}
+      .node text.label{font-size:13px;font-weight:600;fill:#1d1d1b}
+      .node text.sub{font-size:11px;fill:#6b6b66}
+      .node text.tag{font-size:9px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;fill:#6b6b66}
+      .node .tag-bg{fill:#f6f5f2;opacity:.55}
+      .node text.toggle{font-size:12px;font-weight:700;fill:#6b6b66}
+      .node .box{stroke-width:1}
+      .node.root .box{fill:#2f5d50;stroke:#2f5d50}
+      .node.world .box{fill:#e9f1f4;stroke:#9dbcc7}
+      .node.module .box{fill:#e4efe9;stroke:#8db5a6}
+      .node.state .box{fill:#eef1f7;stroke:#a9b7cf}
+      .node.content .box{fill:#f6efe0;stroke:#d3bd8f}
+      .node.event .box{fill:#f0eaf7;stroke:#b9a6d3}
+      .node.test .box{fill:#e9f4ea;stroke:#9ac5a1}
+      .node.warn .box{fill:#f9e9e7;stroke:#d9a49c}
+      .node.placeholder .box{fill:#fbf0e8;stroke:#d9ae90;stroke-dasharray:4 3}
+      .node.root text.label{fill:#f6f5f2}
+      .node.root text.sub{fill:#cfe0da}
+      .node.root text.tag{fill:#cfe0da}
+      .node.root .tag-bg{fill:#fff;opacity:.12}
+      .node.root text.toggle{fill:#cfe0da}
+    `;
+    const clone = svg.cloneNode(true);
+    clone.removeAttribute("style");
+    clone.setAttribute("width", layout.width);
+    clone.setAttribute("height", layout.height);
+    const styleEl = document.createElementNS("http://www.w3.org/2000/svg", "style");
+    styleEl.textContent = style;
+    clone.insertBefore(styleEl, clone.firstChild);
+    const bg = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+    bg.setAttribute("width", layout.width);
+    bg.setAttribute("height", layout.height);
+    bg.setAttribute("fill", "#f6f5f2");
+    clone.insertBefore(bg, styleEl.nextSibling);
+    const blob = new Blob(['<?xml version="1.0" encoding="UTF-8"?>\n' + new XMLSerializer().serializeToString(clone)],
+      { type: "image/svg+xml" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "game-status-tree.svg";
+    document.body.append(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+
+  function flash(id, text) {
+    const button = $(id);
+    const original = button.textContent;
+    button.textContent = text;
+    setTimeout(() => { button.textContent = original; }, 1200);
+  }
+
+  function treeText(root) {
+    const lines = [];
+    (function walk(n, prefix, last) {
+      const marker = last ? "└─ " : "├─ ";
+      const tag = n.tag ? ` [${n.tag}]` : "";
+      lines.push(`${prefix}${marker}${n.label}${tag}${n.sub ? ` — ${n.sub}` : ""}`);
+      const childPrefix = prefix + (last ? "   " : "│  ");
+      n.children.forEach((child, i) => walk(child, childPrefix, i === n.children.length - 1));
+    })(root, "", true);
+    return lines.join("\n");
+  }
+
+  /* ---------------- boot ---------------- */
+
+  renderSource();
+  render();
+  loadEventStats()
+    .then(() => { render(); if (!userMoved) centerOnRoot(); })
+    .catch(() => { render(); if (!userMoved) centerOnRoot(); });
+})();
+</script>
+</body>
+</html>

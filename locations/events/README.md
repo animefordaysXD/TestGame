@@ -31,9 +31,11 @@ When you press **Visit** on a location, every **enabled** event in that biome's
 | `text` | Event-log text. |
 | `effects` | Array of `{ "stat": "...", "delta": ... }`. |
 
-The current effect pipeline supports `stamina` on the main character: negative values
-reduce it, positive values restore it, and it is clamped between `0` and `staminaMax`.
-Unknown stats are kept in the event data but ignored for now.
+The effect pipeline applies to the main character and supports every base stat:
+`hp`, `stamina`, `mana`, `war`, `diplomacy`, `personalCombat`, `moneyManagement`,
+`intrigue` and `intelligence`. Negative values reduce a stat, positive values restore
+it. Resources clamp between `0` and their max (`hpMax`, `staminaMax`, `manaMax`);
+skills clamp to `1`-`20`. Unknown stats are kept in the event data but ignored for now.
 
 ## Copy/paste template
 

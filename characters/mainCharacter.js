@@ -1,20 +1,41 @@
-/* Main character module v0.2 — one player character with a profile picture and stamina.
+/* Main character module v0.3 — one player character with a profile picture and base stats.
    The UI calls save()/prepareImage()/connectFolder() directly; other modules read the
    state slice or listen for mainCharacter:saved / mainCharacter:statChanged.
    Location events are applied here through the event bus. See ENGINE_SPEC.md. */
 (function (global) {
   "use strict";
   const D = global.MainCharacterData;
+  const SD = global.CharacterStatsData;
 
   if (!D || !Array.isArray(D.genders) || !D.genders.length)
     throw new Error("characters/mainCharacterData.js must define MainCharacterData.genders");
+  if (!SD || !Array.isArray(SD.stats) || !SD.stats.length)
+    throw new Error("characters/statsData.js must define CharacterStatsData.stats");
 
   const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
-  const STAMINA_MAX = Math.max(1, Math.round(Number(D.staminaMax) || 100));
-  const STAMINA_START = clamp(
-    Number.isFinite(Number(D.staminaStart)) ? Math.round(Number(D.staminaStart)) : STAMINA_MAX,
-    0, STAMINA_MAX
-  );
+  const STAT_DEFS = SD.stats;
+  const STAT_BY_KEY = new Map(STAT_DEFS.map((def) => [def.key, def]));
+
+  // Build a complete stat block from partial/legacy data. Old saves kept stamina at
+  // the character's top level; it is migrated into stats.stamina here.
+  function normaliseStats(source, legacy = null) {
+    const input = source && typeof source === "object" ? source : {};
+    const stats = {};
+    for (const def of STAT_DEFS) {
+      let raw = input[def.key];
+      if (raw === undefined && legacy && def.key === "stamina") raw = legacy.stamina;
+      const legacyMax = legacy && def.key === "stamina" ? legacy.staminaMax : undefined;
+      const max = def.kind === "resource"
+        ? clamp(Math.round(Number(input[def.key + "Max"] ?? legacyMax) || def.max), def.min + 1, def.max)
+        : def.max;
+      const value = Number.isFinite(Number(raw)) ? Math.round(Number(raw)) : def.start;
+      stats[def.key] = clamp(value, def.min, max);
+      if (def.kind === "resource") stats[def.key + "Max"] = max;
+    }
+    return stats;
+  }
+
+  const defaultStats = () => normaliseStats(null);
 
   const escapeXml = (value) => String(value).replace(/[&<>"']/g, (ch) => ({
     "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&apos;"
@@ -93,12 +114,9 @@
       const character = S().character;
       if (!character) return null;
 
-      const max = Math.max(1, Math.round(Number(character.staminaMax) || STAMINA_MAX));
-      const value = Number.isFinite(Number(character.stamina))
-        ? Math.round(Number(character.stamina))
-        : STAMINA_START;
-      character.staminaMax = max;
-      character.stamina = clamp(value, 0, max);
+      character.stats = normaliseStats(character.stats, character);
+      delete character.stamina;
+      delete character.staminaMax;
       return character;
     };
 
@@ -189,12 +207,7 @@
         const previousCustom = existing && existing.imageSource === "upload" ? existing.image : null;
         const image = clean.image || previousCustom || defaultAvatar(clean.name);
         const imageSource = (clean.image || previousCustom) ? "upload" : "default";
-        const staminaMax = existing
-          ? Math.max(1, Math.round(Number(existing.staminaMax) || STAMINA_MAX))
-          : STAMINA_MAX;
-        const stamina = existing && Number.isFinite(Number(existing.stamina))
-          ? clamp(Math.round(Number(existing.stamina)), 0, staminaMax)
-          : clamp(STAMINA_START, 0, staminaMax);
+        const stats = existing ? normaliseStats(existing.stats, existing) : defaultStats();
 
         const character = {
           id: "main",
@@ -203,8 +216,7 @@
           age: clean.age,
           image,
           imageSource,
-          stamina,
-          staminaMax,
+          stats,
           createdAtTick: existing ? existing.createdAtTick : now.tick,
           createdAt: existing ? existing.createdAt : now.text,
           updatedAtTick: now.tick,
@@ -222,37 +234,35 @@
         return character;
       },
 
-      // First effect pipeline: location events can spend or restore stamina.
+      // Location events can change any base stat. Resources clamp to their max and
+      // skills clamp to their data range; unknown stats are ignored.
       applyEventEffects(depth = 0, data = {}) {
-        const character = S().character;
+        const character = normalizeCharacter();
         if (!character) return [];
-
-        const max = Math.max(1, Math.round(Number(character.staminaMax) || STAMINA_MAX));
-        character.staminaMax = max;
-        character.stamina = clamp(
-          Number.isFinite(Number(character.stamina)) ? Math.round(Number(character.stamina)) : STAMINA_START,
-          0, max
-        );
 
         const effects = Array.isArray(data.effects) ? data.effects : [];
         const applied = [];
         for (const effect of effects) {
-          if (!effect || effect.stat !== "stamina") continue;
+          if (!effect || typeof effect.stat !== "string") continue;
+          const def = STAT_BY_KEY.get(effect.stat.trim());
+          if (!def) continue;
           const delta = Math.round(Number(effect.delta));
           if (!Number.isFinite(delta) || delta === 0) continue;
 
-          const next = clamp(character.stamina + delta, 0, max);
-          const actual = next - character.stamina;
+          const max = def.kind === "resource" ? character.stats[def.key + "Max"] : def.max;
+          const current = character.stats[def.key];
+          const next = clamp(current + delta, def.min, max);
+          const actual = next - current;
           if (!actual) continue;
 
-          character.stamina = next;
-          applied.push({ stat: "stamina", delta: actual, value: next, max });
+          character.stats[def.key] = next;
+          applied.push({ stat: def.key, delta: actual, value: next, max });
           const verb = actual < 0 ? "loses" : "gains";
           engine.fire({
             type: "mainCharacter:statChanged",
-            text: `${character.name} ${verb} ${Math.abs(actual)} stamina (${next}/${max}).`,
+            text: `${character.name} ${verb} ${Math.abs(actual)} ${def.label} (${next}/${max}).`,
             data: {
-              id: character.id, stat: "stamina", delta: actual,
+              id: character.id, stat: def.key, delta: actual,
               value: next, max, eventId: data.eventId || null
             }
           }, depth);

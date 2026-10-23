@@ -1,9 +1,51 @@
-/* Characters module v0.1 — NPC generator + Named NPC / Temporary Spawn storage. See ENGINE_SPEC.md.
-   Add an attribute: push one { key, generate } entry into ATTRIBUTES. Order matters; each gets the character built so far. */
+/* Characters module v0.2 — NPC generator + Named NPC / Temporary Spawn storage. See ENGINE_SPEC.md.
+   Add an attribute: push one { key, generate } entry into ATTRIBUTES. Order matters; each gets the character built so far.
+   Base stats are defined once in characters/statsData.js and shared with the mainCharacter module. */
 (function (global) {
   "use strict";
   const D = global.CharacterData;
+  const SD = global.CharacterStatsData;
   const pick = (rng, arr) => arr[Math.floor(rng.next() * arr.length)];
+  const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
+
+  if (!SD || !Array.isArray(SD.stats) || !SD.stats.length)
+    throw new Error("characters/statsData.js must define CharacterStatsData.stats");
+  const STAT_DEFS = SD.stats;
+
+  // Roll one NPC stat. Bell-curved skills stay near the middle of their range.
+  const rollStat = (rng, def) => {
+    const range = Array.isArray(def.npcRange) ? def.npcRange : [def.min, def.max];
+    const lo = clamp(Math.round(Number(range[0])), def.min, def.max);
+    const hi = clamp(Math.round(Number(range[1])), def.min, def.max);
+    const top = Math.max(lo, hi);
+    const t = def.npcBell ? (rng.next() + rng.next() + rng.next()) / 3 : rng.next();
+    return clamp(Math.round(lo + t * (top - lo)), def.min, def.max);
+  };
+
+  const makeStats = (rng) => {
+    const stats = {};
+    for (const def of STAT_DEFS) {
+      stats[def.key] = rollStat(rng, def);
+      if (def.kind === "resource") stats[def.key + "Max"] = def.max;
+    }
+    return stats;
+  };
+
+  // Fill missing/partial stats deterministically for old saves. New NPCs roll in generate().
+  const normaliseStats = (character) => {
+    const source = character.stats && typeof character.stats === "object" ? character.stats : {};
+    const stats = {};
+    for (const def of STAT_DEFS) {
+      const max = def.kind === "resource"
+        ? clamp(Math.round(Number(source[def.key + "Max"]) || def.max), def.min + 1, def.max)
+        : def.max;
+      const raw = Number(source[def.key]);
+      stats[def.key] = clamp(Number.isFinite(raw) ? Math.round(raw) : def.start, def.min, max);
+      if (def.kind === "resource") stats[def.key + "Max"] = max;
+    }
+    character.stats = stats;
+    return character;
+  };
 
   const ATTRIBUTES = [
     { key: "gender", generate: ({ rng }) => pick(rng, ["male", "female"]) },
@@ -16,7 +58,8 @@
           if (!D.opposites.some(([x, y]) => (t === x && chosen.includes(y)) || (t === y && chosen.includes(x)))) chosen.push(t);
         }
         return chosen;
-    } }
+    } },
+    { key: "stats",  generate: ({ rng }) => makeStats(rng) }
   ];
 
   const FOLDERS = { named: "Named NPC", temp: "Temporary Spawn" };
@@ -24,6 +67,11 @@
   function createCharactersModule() {
     let engine = null, bound = false, disk = null;
     const S = () => engine.state.modules.characters;   // never cache: state is replaced on load
+
+    const normaliseAll = () => {
+      for (const character of [...Object.values(S().named), ...Object.values(S().temp)])
+        normaliseStats(character);
+    };
 
     // Optional mirror to real folders (Chrome/Edge). The game state is always the source of truth.
     const put = async (dir, c) => { try { const w = await (await dir.getFileHandle(c.id + ".json", { create: true })).createWritable(); await w.write(JSON.stringify(c, null, 2)); await w.close(); } catch (e) { console.warn(e); } };
@@ -35,11 +83,18 @@
       init(eng) {
         engine = eng;
         engine.slice("characters", { nextId: 1, named: {}, temp: {} });
+        normaliseAll();
         if (bound) return; bound = true;   // init runs again on reset: subscribe only once
         engine.on("event:character:spawn", (e) => mod.spawn(e.depth + 1));
         engine.on("event:character:save", (e) => mod.save(e.data.id, e.depth + 1));
         engine.on("event:character:clearTemp", (e) => mod.clearTemp(e.depth + 1));
         engine.on("event:location:changed", (e) => mod.clearTemp(e.depth + 1)); // future location module
+      },
+
+      onLoad(eng) {
+        engine = eng;
+        engine.slice("characters", { nextId: 1, named: {}, temp: {} });
+        normaliseAll();
       },
 
       generate(rng) { const char = {}; for (const a of ATTRIBUTES) char[a.key] = a.generate({ rng: rng, char, engine }); return char; },
