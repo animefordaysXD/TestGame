@@ -1,6 +1,7 @@
-/* Characters module v0.2 — NPC generator + Named NPC / Temporary Spawn storage. See ENGINE_SPEC.md.
+/* Characters module v0.3 — NPC generator + Named NPC / Temporary Spawn storage. See ENGINE_SPEC.md.
    Add an attribute: push one { key, generate } entry into ATTRIBUTES. Order matters; each gets the character built so far.
-   Base stats are defined once in characters/statsData.js and shared with the mainCharacter module. */
+   Base stats are defined once in characters/statsData.js and shared with the mainCharacter module.
+   The module also applies combat:damage to the NPC it names. */
 (function (global) {
   "use strict";
   const D = global.CharacterData;
@@ -89,6 +90,7 @@
         engine.on("event:character:save", (e) => mod.save(e.data.id, e.depth + 1));
         engine.on("event:character:clearTemp", (e) => mod.clearTemp(e.depth + 1));
         engine.on("event:location:changed", (e) => mod.clearTemp(e.depth + 1)); // future location module
+        engine.on("event:combat:damage", (e) => mod.applyCombatDamage(e.data || {}));
       },
 
       onLoad(eng) {
@@ -113,6 +115,19 @@
         delete s.temp[id]; s.named[id] = c;
         if (disk) { put(disk.named, c); del(disk.temp, id); }
         engine.fire({ type: "character:saved", text: `${c.name} was saved as a Named NPC.`, data: { id } }, depth);
+      },
+
+      // Combat damage is already announced by combat:damage; update the NPC's HP here.
+      applyCombatDamage(data = {}) {
+        const s = S(), c = s.named[data.targetId] || s.temp[data.targetId];
+        if (!c) return null;
+        normaliseStats(c);
+        const amount = Math.max(0, Math.round(Number(data.amount)));
+        if (!amount) return null;
+
+        const max = Math.max(1, Math.round(Number(c.stats.hpMax) || 1));
+        c.stats.hp = clamp(c.stats.hp - amount, 0, max);
+        return c.stats.hp;
       },
 
       clearTemp(depth = 0) {

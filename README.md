@@ -5,16 +5,17 @@
 > **New AI session? Start with [HANDOFF.md](HANDOFF.md).** It summarizes the current
 > state, architecture rules, tests, known limitations and next steps.
 
-Current build: core v0.2, characters v0.2, main character v0.3, locations v0.2,
-actions v0.1, plus the read-only status viewer.
+Current build: core v0.2, characters v0.3, main character v0.4, combat v0.1,
+locations v0.2, actions v0.1, plus the read-only status viewer.
 
 ## Run
 
 The page needs to be served over HTTP because the optional folder mirror uses the File
 System Access API (Chrome/Edge), and `localStorage` can be blocked on `file://`.
 
+From the repository root:
+
 ```sh
-cd text-rpg
 npm run serve
 ```
 
@@ -23,8 +24,9 @@ Then open <http://127.0.0.1:8765/>. The live status tree is at
 
 ## Test
 
+From the repository root:
+
 ```sh
-cd text-rpg
 npm test
 ```
 
@@ -34,12 +36,14 @@ System Access API; it does not prove the real browser folder picker works.
 On Windows, if PowerShell blocks `npm.ps1`, use `npm.cmd test` or run the test files
 directly with `node test/locations.test.cjs`, `node test/locations-disk.test.cjs`,
 `node test/characters.test.cjs`, `node test/main-character.test.cjs`,
-`node test/biome-events.test.cjs`, and `node test/actions.test.cjs`.
+`node test/biome-events.test.cjs`, `node test/actions.test.cjs`, and
+`node test/combat.test.cjs`.
 
 ## Layout
 
 - `engine.js` — core (unchanged v0.2)
 - `characters/` — NPC generator, shared base stats, main character creator and storage
+- `combat/` — basic player-first duels (Attack/Defend)
 - `locations/` — procedural map locations
 - `locations/events/` — per-biome event JSON (copy/paste templates and the tundra sample)
 - `actions/` — five placeholder area actions and optional biome overrides
@@ -55,8 +59,8 @@ same `localStorage` slot (`save1`) as the game and shows:
 
 - the world clock, seed and event-log size;
 - every module and its live state slice: NPCs with personality traits and stats, the
-  main character with HP/Stamina/Mana and skills, locations with the current marker,
-  and the five loaded actions;
+  main character with HP/Stamina/Mana, armor and skills, the current combat and its log,
+  locations with the current marker, and the five loaded actions;
 - content data counts and the enabled/total events in each biome file;
 - the event catalog and the Node test files.
 
@@ -78,14 +82,32 @@ runtime-only and are not stored in the save, so the tree cannot show them.
   Chrome or Edge.
 - The main character and every NPC share nine base stats from
   `characters/statsData.js`: HP, Stamina, Mana, War, Diplomacy, Personal Combat, Money
-  Management, Intrigue and Intelligence. HP/Stamina/Mana are resources; the rest are
-  1-20 skills. The main character starts at 100/100 HP, 100/100 Stamina, 50/50 Mana and
-  10 in each skill. NPCs roll their values.
-- Location events can change any base stat; the current values are saved with the
-  character. The main-character panel shows all nine in a grid, and each NPC card shows
-  a compact stat line.
+  Management, Intrigue and Intelligence, plus an `armor` equipment stat. HP/Stamina/Mana
+  are resources; the skills are 1-20; armor is 0-100 and starts at 0. The main character
+  starts at 100/100 HP, 100/100 Stamina, 50/50 Mana, 0 armor and 10 in each skill. NPCs
+  roll their values.
+- Location events can change any non-equipment base stat; the current values are saved
+  with the character. Armor is reserved for equipment and is ignored by location events.
+  The main-character panel shows all stats in a grid, and each NPC card shows a compact
+  stat line.
 - The main character is separate from the generated NPCs in Named NPC / Temporary Spawn.
   NPCs keep their five personality traits; those will feed a future behaviour system.
+
+## Combat
+
+- Each Temporary Spawn and Named NPC card has a **Fight** button. Save a main character
+  first.
+- The player always moves first. **Attack** deals damage based on the attacker's
+  Personal Combat; a surviving enemy immediately counterattacks.
+- **Defend** braces for the next attack. The provisional formula is
+  `max(0, damage - armor * 2)`. Armor is 0 for everyone until equipment is added, so
+  Defend currently blocks nothing.
+- `combat:damage` lowers the real main/NPC HP; 0 HP ends the duel. A lethal player hit
+  skips the enemy counterattack.
+- The enemy always attacks in this basic version. There is no flee, initiative, hit
+  chance or damage variance yet.
+- Tuning lives in `combat/data.js`; the turn flow and events are documented in
+  `combat/README.md` and `ENGINE_SPEC.md`.
 
 ## Locations module
 

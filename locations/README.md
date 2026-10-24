@@ -24,3 +24,6 @@ Locations/
 - Browser folder access needs Chrome or Edge. If `index.html` is opened through
   `file://`, serve the folder instead (`npm run serve`, then open
   <http://127.0.0.1:8765/>).
+
+Combat is separate from visiting locations. A visit rolls biome events; fights start from
+an NPC card's **Fight** button. See `combat/README.md`.

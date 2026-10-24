@@ -102,6 +102,7 @@ async function listNames(dir) {
     hp: 100, hpMax: 100,
     stamina: 100, staminaMax: 100,
     mana: 50, manaMax: 50,
+    armor: 0,
     war: 10, diplomacy: 10, personalCombat: 10,
     moneyManagement: 10, intrigue: 10, intelligence: 10
   });
@@ -162,6 +163,12 @@ async function listNames(dir) {
   engine.flush();
   assert.equal(statEvents.length, beforeUnknown, "unknown stats are ignored");
 
+  const armorBefore = engine.state.modules.mainCharacter.character.stats.armor;
+  engine.fire({ type: "location:event", data: { effects: [{ stat: "armor", delta: 5 }] } });
+  engine.flush();
+  assert.equal(engine.state.modules.mainCharacter.character.stats.armor, armorBefore,
+    "equipment stats are not changed by location events");
+
   engine.fire({ type: "location:event", data: { effects: [{ stat: "mana", delta: -20 }] } });
   engine.flush();
   assert.equal(statEvents.length, beforeUnknown + 1);
@@ -173,6 +180,15 @@ async function listNames(dir) {
   engine.fire({ type: "location:event", data: { effects: [{ stat: "war", delta: -500 }] } });
   engine.flush();
   assert.equal(engine.state.modules.mainCharacter.character.stats.war, 1, "skills clamp at their min");
+
+  const hpBeforeCombat = engine.state.modules.mainCharacter.character.stats.hp;
+  const statEventsBeforeCombat = statEvents.length;
+  engine.fire({ type: "combat:damage", data: { targetId: "main", amount: 5 } });
+  engine.flush();
+  assert.equal(engine.state.modules.mainCharacter.character.stats.hp, hpBeforeCombat - 5,
+    "combat:damage lowers the main character's HP");
+  assert.equal(statEvents.length, statEventsBeforeCombat,
+    "combat damage is announced by combat:damage, not a duplicate statChanged");
 
   engine.fire({ type: "location:event", data: { effects: [{ stat: "stamina", delta: -500 }] } });
   engine.flush();
@@ -220,6 +236,7 @@ async function listNames(dir) {
   assert.equal(json.imageSource, "upload");
   assert.equal(json.stats.stamina, 100);
   assert.equal(json.stats.staminaMax, 100);
+  assert.equal(json.stats.armor, 0);
   assert.equal(json.stamina, undefined, "no duplicate top-level stamina in main.json");
   assert.equal(json.stats.war, 10);
   assert.deepEqual(await listNames(folder), ["main.json", "profile.png"]);
@@ -263,6 +280,7 @@ async function listNames(dir) {
   assert.equal(migrated.stats.staminaMax, 80, "legacy stamina max is migrated");
   assert.equal(migrated.stamina, undefined, "legacy top-level stamina is removed");
   assert.equal(migrated.stats.hp, 100, "other stats get their defaults");
+  assert.equal(migrated.stats.armor, 0, "armor starts empty");
   assert.equal(migrated.stats.intelligence, 10);
 
   console.log("main character test passed");

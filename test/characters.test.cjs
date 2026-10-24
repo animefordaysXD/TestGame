@@ -9,8 +9,8 @@ require("../characters/data.js");
 require("../characters/characters.js");
 
 const STAT_DEFS = CharacterStatsData.stats;
-assert.equal(STAT_DEFS.length, 9, "nine base stats are defined");
-assert.equal(new Set(STAT_DEFS.map((def) => def.key)).size, 9, "stat keys are unique");
+assert.equal(STAT_DEFS.length, 10, "nine base stats plus armor are defined");
+assert.equal(new Set(STAT_DEFS.map((def) => def.key)).size, 10, "stat keys are unique");
 
 function assertStats(stats, label) {
   assert.ok(stats && typeof stats === "object", `${label} has a stats block`);
@@ -48,6 +48,7 @@ function makeEngine(seed) {
   assert.equal(first.traits.length, 5, "personality traits are still generated");
   assert.equal(new Set(first.traits).size, 5, "traits are unique");
   assertStats(first.stats, "NPC");
+  assert.equal(first.stats.armor, 0, "armor starts empty until equipment exists");
   assert.ok(JSON.stringify(first).length > 0, "NPC state is JSON-safe");
 
   const second = characters.spawn();
@@ -55,6 +56,15 @@ function makeEngine(seed) {
   assert.equal(second.id, "npc_0002");
   assert.equal(engine.state.modules.characters.nextId, 3);
   assertStats(second.stats, "second NPC");
+
+  // Combat damage is applied to the NPC named by the event.
+  const hpBeforeCombat = second.stats.hp;
+  engine.fire({ type: "combat:damage", data: { targetId: second.id, amount: 5 } });
+  engine.flush();
+  assert.equal(second.stats.hp, hpBeforeCombat - 5, "combat:damage lowers NPC HP");
+  engine.fire({ type: "combat:damage", data: { targetId: second.id, amount: 500 } });
+  engine.flush();
+  assert.equal(second.stats.hp, 0, "NPC HP clamps at zero");
 
   // Same seed and same calls produce the same character, including stats.
   const replay = makeEngine(4242);
@@ -104,6 +114,7 @@ function makeEngine(seed) {
   assert.equal(migrated.stats.hp, 100);
   assert.equal(migrated.stats.stamina, 100);
   assert.equal(migrated.stats.mana, 50);
+  assert.equal(migrated.stats.armor, 0);
   assert.equal(migrated.stats.war, 10);
   assert.equal(migrated.stats.intelligence, 10);
   assert.equal(migrated.traits.length, 5, "legacy personality traits survive");

@@ -31,11 +31,12 @@ When you press **Visit** on a location, every **enabled** event in that biome's
 | `text` | Event-log text. |
 | `effects` | Array of `{ "stat": "...", "delta": ... }`. |
 
-The effect pipeline applies to the main character and supports every base stat:
-`hp`, `stamina`, `mana`, `war`, `diplomacy`, `personalCombat`, `moneyManagement`,
-`intrigue` and `intelligence`. Negative values reduce a stat, positive values restore
-it. Resources clamp between `0` and their max (`hpMax`, `staminaMax`, `manaMax`);
-skills clamp to `1`-`20`. Unknown stats are kept in the event data but ignored for now.
+The effect pipeline applies to the main character and supports every non-equipment base
+stat: `hp`, `stamina`, `mana`, `war`, `diplomacy`, `personalCombat`, `moneyManagement`,
+`intrigue` and `intelligence`. Negative values reduce a stat, positive values restore it.
+Resources clamp between `0` and their max (`hpMax`, `staminaMax`, `manaMax`); skills
+clamp to `1`-`20`. `armor` is an equipment stat and is ignored here; equipment will write
+it. Unknown stats are kept in the event data but ignored for now.
 
 ## Copy/paste template
 

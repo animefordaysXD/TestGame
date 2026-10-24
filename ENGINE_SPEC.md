@@ -1,4 +1,4 @@
-# Modular Text-RPG Engine — Spec v0.7
+# Modular Text-RPG Engine — Spec v0.8
 
 Plain JS/HTML, no build step, no dependencies. A small core runs the clock, event bus,
 RNG, state and save/load. All gameplay lives in modules that own one state slice and talk
@@ -92,8 +92,14 @@ Slices are JSON-safe. Never cache a slice object; `load()` replaces the whole st
 | action:choose (request) | UI, future action modules | `{ actionId }` |
 | actions:loaded | actions | `{ locationId, locationName, biomeKey, actions }` |
 | action:chosen | actions | `{ actionId, name, locationId, locationName }` |
+| combat:start (request) | UI | `{ player, enemy }` combatant snapshots |
+| combat:action (request) | UI | `{ action: "attack" \| "defend" }` |
+| combat:started | combat | `{ playerId, playerName, enemyId, enemyName }` |
+| combat:damage | combat | `{ action, sourceId, sourceName, targetId, targetName, amount, hpBefore, hpAfter, hpMax, defended, armor, reduction }` |
+| combat:defended | combat | `{ id, name, armor, reduction }` |
+| combat:ended | combat | `{ winnerId, winnerName, loserId, loserName, rounds }` |
 | mainCharacter:saved | mainCharacter | `{ id, name, gender, age }` (no image) |
-| mainCharacter:statChanged | mainCharacter | `{ id, stat, delta, value, max, eventId }` (any base stat) |
+| mainCharacter:statChanged | mainCharacter | `{ id, stat, delta, value, max, eventId }` (any non-equipment base stat) |
 
 ## Module registry
 
@@ -102,10 +108,11 @@ Slices are JSON-safe. Never cache a slice object; `load()` replaces the whole st
 | core | none | `time`, `eventLog` | clock, state, save/load, event checking |
 | characters | none | `nextId`, `named{}`, `temp{}` | NPC generator with base stats; Named NPC / Temporary Spawn |
 | mainCharacter | none | `character` | player character; base stats; profile image; JSON mirror |
+| combat | none | `active`, `round`, `turn`, `player`, `enemy`, `defending`, `winner*`, `log[]` | basic player-first duel; attack/defend |
 | locations | none | `seed`, `createdAt`, `nextId`, `locations{}`, `currentId` | map locations; visit/event checker; JSON mirror |
 | actions | none | `locationId`, `locationName`, `biomeKey`, `actions[]` | five placeholder area actions loaded on visit |
 
-## Characters module v0.2
+## Characters module v0.3
 
 - Files: `characters/statsData.js`, `characters/data.js`, `characters/characters.js`.
 - Character shape: `{ id, gender, name, age, traits[5], stats, createdAtTick, createdAt }`.
@@ -115,21 +122,25 @@ Slices are JSON-safe. Never cache a slice object; `load()` replaces the whole st
 - Spawned characters go to `temp`; saving moves them to `named`.
 - `character:clearTemp` or `location:changed` empties `temp`.
 - New NPCs roll their stats from `CharacterStatsData` with `engine.rng`. Skill rolls are
-  bell-curved around the middle of their range. Old NPC saves without stats get the
-  definition defaults on load, deterministically.
+  bell-curved around the middle of their range. Armor rolls its `[0, 0]` range, so it
+  starts at 0. Old NPC saves without stats get the definition defaults on load,
+  deterministically.
+- `combat:damage` targeting an NPC lowers that NPC's HP, clamped to 0..`hpMax`. The
+  combat module announces the hit; characters does not emit a second stat event.
 - Optional disk mirror: `characters/Named NPC/<id>.json`, `characters/Temporary Spawn/<id>.json`.
 
 ## Base stats
 
 - Files: `characters/statsData.js` (content only). The characters and mainCharacter
   modules both read `CharacterStatsData.stats`.
-- Every character has the same nine stats in this order:
+- Every character has the same nine base stats plus an empty armor stat, in this order:
 
 | key | label | kind | range | main start | NPC roll |
 |---|---|---|---|---|---|
 | `hp` | HP | resource | 0-100 | 100/100 | 70-100 |
 | `stamina` | Stamina | resource | 0-100 | 100/100 | 70-100 |
 | `mana` | Mana | resource | 0-50 | 50/50 | 20-50 |
+| `armor` | Armor | equipment | 0-100 | 0 | 0 |
 | `war` | War | skill | 1-20 | 10 | 1-20, bell |
 | `diplomacy` | Diplomacy | skill | 1-20 | 10 | 1-20, bell |
 | `personalCombat` | Personal Combat | skill | 1-20 | 10 | 1-20, bell |
@@ -139,6 +150,9 @@ Slices are JSON-safe. Never cache a slice object; `load()` replaces the whole st
 
 - Resource stats store a paired `<key>Max` field (`hpMax`, `staminaMax`, `manaMax`).
   Skills use the definition `max` directly.
+- `armor` is an equipment stat. It starts at 0 for everyone and is deliberately not
+  changed by location events; a future equipment module will write it. Combat's Defend
+  action already reads it (see **Combat module**).
 - Character stat block example:
 
 ```json
@@ -146,6 +160,7 @@ Slices are JSON-safe. Never cache a slice object; `load()` replaces the whole st
   "hp": 100, "hpMax": 100,
   "stamina": 90, "staminaMax": 100,
   "mana": 50, "manaMax": 50,
+  "armor": 0,
   "war": 10, "diplomacy": 10, "personalCombat": 10,
   "moneyManagement": 10, "intrigue": 10, "intelligence": 10
 }
@@ -157,7 +172,7 @@ Slices are JSON-safe. Never cache a slice object; `load()` replaces the whole st
   `npcBell: true` averages three rolls for a mid-range cluster.
 - Personality (`traits`) is unchanged and remains NPC-only for now.
 
-## Main character module v0.3
+## Main character module v0.4
 
 - Files: `characters/mainCharacterData.js`, `characters/mainCharacter.js`.
 - Slice:
@@ -182,6 +197,7 @@ mainCharacter: {
     "hp": 100, "hpMax": 100,
     "stamina": 90, "staminaMax": 100,
     "mana": 50, "manaMax": 50,
+    "armor": 0,
     "war": 10, "diplomacy": 10, "personalCombat": 10,
     "moneyManagement": 10, "intrigue": 10, "intelligence": 10
   },
@@ -202,9 +218,12 @@ mainCharacter: {
 - Legacy saves with top-level `stamina`/`staminaMax` are migrated into
   `stats.stamina`/`stats.staminaMax` on load, and the old top-level fields are removed.
 - The module subscribes once to `location:event` and applies effects with
-  `{ stat, delta }` through `applyEventEffects()`. Any defined base stat works; unknown
-  stats are ignored. It emits `mainCharacter:statChanged` at `depth + 1`; resources
-  clamp to their max and skills clamp to the definition range.
+  `{ stat, delta }` through `applyEventEffects()`. Any defined non-equipment stat works;
+  unknown and equipment stats are ignored. It emits `mainCharacter:statChanged` at
+  `depth + 1`; resources clamp to their max and skills clamp to the definition range.
+- It also subscribes once to `combat:damage`; when the target is `main`, it lowers HP and
+  clamps to 0..`hpMax`. The combat module already announces that hit, so this does not
+  emit a second `mainCharacter:statChanged` line.
 - `save(data, depth = 0)` validates name, gender and age, stores the character, and
   emits `mainCharacter:saved`. The image is deliberately **not** included in the event
   data, so the event log and save file stay small. The UI calls `save()` directly and
@@ -215,10 +234,54 @@ mainCharacter: {
   `characters/mainChar/`. It writes `main.json` plus a viewable `profile.<ext>` image.
 - `writeToFolder()` rewrites the mirror from state. `folderConnected` reports whether a
   folder handle is held.
-- No tick generator. `init()` creates the slice and subscribes to `location:event` once;
-  reset clears the character but keeps that single subscription.
-- UI on the test page: name, gender, age, image picker with preview, a nine-stat grid,
-  **Save main character**, and **Connect mainChar folder**.
+- No tick generator. `init()` creates the slice and subscribes to `location:event` and
+  `combat:damage` once; reset clears the character but keeps those single subscriptions.
+- UI on the test page: name, gender, age, image picker with preview, a stat grid
+  (nine base stats plus armor), **Save main character**, and **Connect mainChar folder**.
+
+## Combat module v0.1
+
+- Files: `combat/data.js`, `combat/combat.js`; notes in `combat/README.md`.
+- Slice:
+
+```js
+combat: {
+  active: false,
+  round: 0,
+  turn: null,             // "player" while waiting for input
+  player: null,           // { id, name, hp, hpMax, personalCombat, armor }
+  enemy: null,
+  defending: false,
+  winnerId: null, winnerName: "",
+  loserId: null, loserName: "",
+  startedAtTick: null, startedAt: "",
+  endedAtTick: null, endedAt: "",
+  log: []                 // capped at CombatData.logLimit
+}
+```
+
+- The UI starts a duel with `combat:start` and passes `{ player, enemy }` snapshots.
+  The module never reads another module's slice; the snapshots contain the stats needed
+  for the fight.
+- The player always moves first: round 1, `turn: "player"`. The player chooses
+  **Attack** or **Defend** with `combat:action`.
+- Attack damage is based on the attacker's Personal Combat:
+  `max(minDamage, round(personalCombat * multiplier))`. Defaults are `1` and `1`, so a
+  Personal Combat of 10 deals 10 damage. After a surviving enemy is hit, it immediately
+  attacks back. A lethal player hit ends the fight before the counterattack.
+- The enemy always attacks in v0.1; `CombatData.enemyAction` is the future AI hook.
+- Defend sets `defending` for the next enemy attack. The provisional formula is
+  `max(0, incomingDamage - armor * armorMultiplier)`, with `armorMultiplier: 2`. Armor is
+  0 for every character until equipment exists, so Defend currently blocks nothing.
+- Damage is emitted as `combat:damage`; the mainCharacter and characters modules apply it
+  to the real character slices. The module also emits `combat:started`,
+  `combat:defended` and `combat:ended` at `depth + 1` (or one deeper for the enemy turn).
+- `combat:damage` includes `amount`, `hpBefore`, `hpAfter`, `hpMax`, `defended`, `armor`
+  and `reduction`, so the UI and future modules can react without parsing text.
+- The slice keeps the final snapshots, winner and log after a fight, so the UI can show
+  the result. Starting a new fight resets the slice. Reset clears it.
+- UI on the test page: every NPC card has a **Fight** button; the **Combat** panel shows
+  both HP totals, round/turn, **Attack** and **Defend**, and the last eight log lines.
 
 ## Locations module v0.2
 
@@ -292,8 +355,8 @@ locations: {
   `visit()` directly and then `engine.flush()`, matching the main-character save flow.
 - `location:event` effects are applied by the main character module for any defined base
   stat (`hp`, `stamina`, `mana`, `war`, `diplomacy`, `personalCombat`,
-  `moneyManagement`, `intrigue`, `intelligence`). Unknown stats stay in the event data
-  for future modules.
+  `moneyManagement`, `intrigue`, `intelligence`). `armor` is an equipment stat and is
+  ignored; unknown stats stay in the event data for future modules.
 - Event JSON is fetched by the browser, so serve the project over HTTP. The UI shows
   event-load status and a **Reload biome events** button.
 - Disk writes are serialized; `whenDiskIdle()` returns a promise for tests/UI.
@@ -347,6 +410,10 @@ actions/
   actions.js
   data.js
   README.md
+combat/
+  combat.js
+  data.js
+  README.md
 characters/
   characters.js
   data.js
@@ -386,6 +453,7 @@ test/
   main-character.test.cjs
   biome-events.test.cjs
   actions.test.cjs
+  combat.test.cjs
   serve.cjs
 ```
 
@@ -399,8 +467,14 @@ test/
   `currentId` marks the last visit only; it is not a travel graph.
 - Biome events have no cooldowns, once-only flags, weather filters or requirements.
   Each enabled event is an independent roll on every visit.
-- Base stats are stored and location events can change them, but no progression,
-  training, equipment, checks or opposed rolls use them yet.
+- Base stats are stored and location events can change them. Combat uses Personal Combat
+  and armor, but there is no progression, training, equipment, checks or opposed-roll
+  system yet.
+- Combat is one-on-one and player-first. There is no flee, positioning, initiative, hit
+  chance, damage variance or enemy AI; the enemy always attacks.
+- Armor is an equipment stat fixed at 0 until an equipment module exists. Defend already
+  applies the provisional `max(0, damage - armor * 2)` formula, so it currently blocks
+  nothing.
 - Biome event JSON is fetched with `fetch`; open the page through the static server,
   not `file://`.
 - Area actions are placeholders. Choosing one only emits `action:chosen`; there are no

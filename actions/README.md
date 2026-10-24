@@ -15,3 +15,6 @@ least five entries; a shorter override is ignored and the default list is used.
 
 The current UI shows the loaded actions under **Actions** and refreshes them on each
 visit. Use the **Choose** button to log a placeholder choice.
+
+Combat is a separate module. Choosing an area action never starts a fight; fights start
+from an NPC card's **Fight** button. See `combat/README.md`.

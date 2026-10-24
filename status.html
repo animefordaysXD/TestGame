@@ -157,6 +157,7 @@
 <script src="characters/mainCharacterData.js"></script>
 <script src="locations/data.js"></script>
 <script src="actions/data.js"></script>
+<script src="combat/data.js"></script>
 <!-- Read-only viewer. It registers no modules and never writes the save.
      The module/event branches are hand-maintained; update them with ENGINE_SPEC.md. -->
 <script>
@@ -167,6 +168,7 @@
   const ST = window.CharacterStatsData || { stats: [] };
   const LOC = window.LocationData || { biomes: [] };
   const ACT = window.LocationActionsData || { default: [], biomes: {} };
+  const CBD = window.CombatData || { actions: [], attack: {}, defend: {} };
   const CD = window.CharacterData || { traits: [], opposites: [] };
 
   const $ = (id) => document.getElementById(id);
@@ -196,6 +198,11 @@
       modules: {
         characters: { nextId: 1, named: {}, temp: {} },
         mainCharacter: { character: null },
+        combat: {
+          active: false, round: 0, turn: null, player: null, enemy: null, defending: false,
+          winnerId: null, winnerName: "", loserId: null, loserName: "",
+          startedAtTick: null, startedAt: "", endedAtTick: null, endedAt: "", log: []
+        },
         locations: { seed: 0, createdAt: "", nextId: 1, locations: {}, currentId: null },
         actions: { locationId: null, locationName: "", biomeKey: "", actions: [] }
       }
@@ -313,15 +320,16 @@
       "state",
       [
         node("Resources", statLine(c.stats, "resource"), "state"),
-        node("Skills", statLine(c.stats, "skill"), "state")
+        node("Skills", statLine(c.stats, "skill"), "state"),
+        node("Equipment", statLine(c.stats, "equipment"), "state")
       ]
     );
     const namedNode = group(`Named NPC (${named.length})`, named.length ? "" : "none saved", named.map(npcNode), "state");
     const tempNode = group(`Temporary Spawn (${temp.length})`, temp.length ? "cleared by location:changed" : "none", temp.map(npcNode), "state");
-    const chars = node("characters", `v0.2 · next id ${charState.nextId ?? "—"}`, "module", [
+    const chars = node("characters", `v0.3 · next id ${charState.nextId ?? "—"}`, "module", [
       namedNode,
       tempNode,
-      node("Rules", `${(CD.traits || []).length} traits · ${(CD.opposites || []).length} opposite pairs · 5 per NPC · ${ST.stats.length} base stats`, "content")
+      node("Rules", `${(CD.traits || []).length} traits · ${(CD.opposites || []).length} opposite pairs · 5 per NPC · ${ST.stats.length} stats (9 base + armor)`, "content")
     ], "built");
 
     /* Main character ------------------------------------------------------ */
@@ -347,7 +355,29 @@
     const mcSummary = mc && hpRow && staRow
       ? `HP ${hpRow.value ?? "—"}/${hpRow.max} · Stamina ${staRow.value ?? "—"}/${staRow.max}`
       : "not created";
-    const mainCharacter = node("mainCharacter", `v0.3 · ${mcSummary}`, "module", mcChildren, mc ? "built" : "empty");
+    const mainCharacter = node("mainCharacter", `v0.4 · ${mcSummary}`, "module", mcChildren, mc ? "built" : "empty");
+
+    /* Combat -------------------------------------------------------------- */
+    const combatState = modules.combat || {};
+    const combatPlayer = combatState.player || null;
+    const combatEnemy = combatState.enemy || null;
+    const combatLog = Array.isArray(combatState.log) ? combatState.log : [];
+    const combatLine = (c) => c
+      ? `${c.name} · HP ${c.hp}/${c.hpMax} · PC ${c.personalCombat} · armor ${c.armor ?? 0}`
+      : "—";
+    const combatSummary = combatState.active
+      ? `round ${combatState.round} · ${combatState.turn || "—"} turn`
+      : combatState.winnerName
+        ? `ended · ${combatState.winnerName} won in ${combatState.round}`
+        : "no combat";
+    const combatBranch = node("combat", `v0.1 · ${combatSummary}`, "module", [
+      node("Player", combatLine(combatPlayer), "state"),
+      node("Enemy", combatLine(combatEnemy), "state"),
+      node("Turn", combatSummary, "state"),
+      node("Rules", "player first · attack = Personal Combat · defend = max(0, damage - armor × 2) · enemy always attacks", "content"),
+      group(`Log (${combatLog.length})`, combatLog.length ? "most recent entries" : "empty",
+        combatLog.slice(-6).map((line) => node(line, "", "state")), "state")
+    ], combatState.active || combatState.winnerName ? "built" : "empty");
 
     /* Locations ----------------------------------------------------------- */
     const locState = modules.locations || {};
@@ -383,9 +413,9 @@
       node("Resolution", "action:chosen only — no stat, time, reward or travel yet", "warn", [], "placeholder")
     ], "placeholder");
 
-    const modulesBranch = node("Modules", "4 registered · event-driven · one slice each", "state", [
-      chars, mainCharacter, locationsBranch, actionsBranch
-    ], "4");
+    const modulesBranch = node("Modules", "5 registered · event-driven · one slice each", "state", [
+      chars, mainCharacter, combatBranch, locationsBranch, actionsBranch
+    ], "5");
 
     /* Content ------------------------------------------------------------- */
     const biomeNodes = biomes.map((biome) => {
@@ -401,12 +431,13 @@
       : "loading event files…";
     const contentBranch = node("Content data", "plain data files — no generation logic", "content", [
       node("characters/data.js", `${givenNames} given names · ${(CD.surnames || []).length} surnames · ${(CD.traits || []).length} traits · ages ${(CD.ageRange || []).join("–")}`, "content"),
-      node("characters/statsData.js", `${ST.stats.length} base stats · ${ST.stats.filter((d) => d.kind === "resource").length} resources · ${ST.stats.filter((d) => d.kind === "skill").length} skills`, "content"),
+      node("characters/statsData.js", `${ST.stats.length} stats · ${ST.stats.filter((d) => d.kind === "resource").length} resources · ${ST.stats.filter((d) => d.kind === "skill").length} skills · ${ST.stats.filter((d) => d.kind === "equipment").length} equipment`, "content"),
       node("mainCharacterData.js", `portrait ${MC.imageSize ?? 256}px · upload ≤ ${Math.round((MC.maxUploadBytes || 0) / 1048576)} MB · ${(MC.genders || []).length} genders`, "content"),
       node("locations/data.js", `${biomes.length} biomes · ${weatherTotal} weather entries · ${(LOC.namePrefixes || []).length} prefixes · ${(LOC.nameSuffixes || []).length} suffixes · ${(LOC.namePatterns || []).length} name patterns`, "content"),
       node("actions/data.js", `${defaultActions.length} default actions · ${overrides.length} biome override(s)`, "content"),
+      node("combat/data.js", `${(CBD.actions || []).length} actions · attack ${(CBD.attack && CBD.attack.stat) || "personalCombat"} × ${(CBD.attack && CBD.attack.multiplier) || 1} · defend armor × ${(CBD.defend && CBD.defend.armorMultiplier) || 2}`, "content"),
       group(`Biome events (${biomes.length} files)`, eventsSummary, biomeNodes, "content"),
-      node("Docs", "ENGINE_SPEC.md v0.7 · HANDOFF.md · README.md · actions/README.md · locations/events/README.md", "content")
+      node("Docs", "ENGINE_SPEC.md v0.8 · HANDOFF.md · README.md · actions/README.md · combat/README.md · locations/README.md · locations/events/README.md · characters/mainChar/README.md", "content")
     ], "data");
 
     /* Events -------------------------------------------------------------- */
@@ -417,7 +448,9 @@
         node("character:clearTemp", "UI → characters.clearTemp()", "event"),
         node("location:add", "UI → locations.add() · data { count? }", "event"),
         node("location:changed", "UI → characters clears Temporary Spawn", "event"),
-        node("action:choose", "UI → actions.choose() · data { actionId }", "event")
+        node("action:choose", "UI → actions.choose() · data { actionId }", "event"),
+        node("combat:start", "UI → combat.start() · data { player, enemy } snapshots", "event"),
+        node("combat:action", "UI → combat.action() · data { action: attack|defend }", "event")
       ], "event"),
       group("Module events", "emitted at depth + 1", [
         node("character:spawned", "characters · { id }", "event"),
@@ -429,9 +462,13 @@
         node("actions:loaded", "actions · five actions for the area", "event"),
         node("action:chosen", "actions · { actionId, name, locationId, locationName }", "event"),
         node("mainCharacter:saved", "mainCharacter · identity only (no image)", "event"),
-        node("mainCharacter:statChanged", "mainCharacter · any base stat: stat, delta, value, max", "event")
+        node("mainCharacter:statChanged", "mainCharacter · any non-equipment stat: stat, delta, value, max", "event"),
+        node("combat:started", "combat · player/enemy ids and names", "event"),
+        node("combat:damage", "combat · source, target, amount, hpBefore/After, armor", "event"),
+        node("combat:defended", "combat · player brace, armor and reduction", "event"),
+        node("combat:ended", "combat · winner, loser, rounds", "event")
       ], "event")
-    ], "16");
+    ], "22");
 
     /* Docs & tests -------------------------------------------------------- */
     const testsBranch = node("Tests", "Node only · npm test", "test", [
@@ -441,8 +478,9 @@
       node("main-character.test.cjs", "validation · image · base stats · effects · mirror", "test"),
       node("biome-events.test.cjs", "JSON loading · visit rolls · stat effects · reset", "test"),
       node("actions.test.cjs", "five actions · overrides · choices · reset · save/load", "test"),
+      node("combat.test.cjs", "player-first turns · attack · defend/armor · death · reset · save/load", "test"),
       node("serve.cjs", "static server on 127.0.0.1:8765", "test")
-    ], "7");
+    ], "8");
 
     const rootSub = live.state
       ? `${live.source} · ${clockText(time)} · tick ${time.tick}`
@@ -616,6 +654,7 @@
     const acts = (state.modules.actions || {}).actions || [];
     const named = Object.values((state.modules.characters || {}).named || {});
     const temp = Object.values((state.modules.characters || {}).temp || {});
+    const combat = state.modules.combat || {};
     const mcRows = statRows(mc && mc.stats);
     const hp = mcRows.find((row) => row.def.key === "hp");
     const sta = mcRows.find((row) => row.def.key === "stamina");
@@ -623,6 +662,7 @@
       `${clockText(time)} · tick ${time.tick}`,
       `${time.tickMinutes} min/tick`,
       mc && hp && sta ? `HP ${hp.value ?? "—"}/${hp.max} · Stamina ${sta.value ?? "—"}/${sta.max}` : "No main character",
+      combat.active ? `Combat: round ${combat.round}` : combat.winnerName ? `Combat: ${combat.winnerName} won` : "No combat",
       `${locs.length} location${locs.length === 1 ? "" : "s"}`,
       `${acts.length} action${acts.length === 1 ? "" : "s"} (placeholder)`,
       `${named.length} named · ${temp.length} temporary`,

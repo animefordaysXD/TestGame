@@ -1,7 +1,7 @@
-/* Main character module v0.3 — one player character with a profile picture and base stats.
+/* Main character module v0.4 — one player character with a profile picture and base stats.
    The UI calls save()/prepareImage()/connectFolder() directly; other modules read the
    state slice or listen for mainCharacter:saved / mainCharacter:statChanged.
-   Location events are applied here through the event bus. See ENGINE_SPEC.md. */
+   Location events and combat damage are applied here through the event bus. See ENGINE_SPEC.md. */
 (function (global) {
   "use strict";
   const D = global.MainCharacterData;
@@ -164,6 +164,7 @@
         if (bound) return;   // init runs again on reset: subscribe only once
         bound = true;
         engine.on("event:location:event", (e) => mod.applyEventEffects(e.depth + 1, e.data || {}));
+        engine.on("event:combat:damage", (e) => mod.applyCombatDamage(e.data || {}));
       },
 
       onLoad(eng) {
@@ -234,8 +235,22 @@
         return character;
       },
 
-      // Location events can change any base stat. Resources clamp to their max and
-      // skills clamp to their data range; unknown stats are ignored.
+      // Combat damage is already announced by combat:damage; update HP here without
+      // emitting a second statChanged line.
+      applyCombatDamage(data = {}) {
+        const character = normalizeCharacter();
+        if (!character || !data || data.targetId !== character.id) return null;
+        const amount = Math.max(0, Math.round(Number(data.amount)));
+        if (!amount) return null;
+
+        const max = Math.max(1, Math.round(Number(character.stats.hpMax) || 1));
+        character.stats.hp = clamp(character.stats.hp - amount, 0, max);
+        return character.stats.hp;
+      },
+
+      // Location events can change any non-equipment stat. Resources clamp to their max
+      // and skills clamp to their data range; armor is left for equipment; unknown stats
+      // are ignored.
       applyEventEffects(depth = 0, data = {}) {
         const character = normalizeCharacter();
         if (!character) return [];
@@ -245,7 +260,7 @@
         for (const effect of effects) {
           if (!effect || typeof effect.stat !== "string") continue;
           const def = STAT_BY_KEY.get(effect.stat.trim());
-          if (!def) continue;
+          if (!def || def.kind === "equipment") continue;
           const delta = Math.round(Number(effect.delta));
           if (!Number.isFinite(delta) || delta === 0) continue;
 

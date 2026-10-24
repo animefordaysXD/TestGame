@@ -25,6 +25,7 @@
   .chars { list-style:none; margin:0; padding:0; }
   .chars li { padding:6px 0; border-bottom:1px solid var(--line); display:flex; gap:8px; justify-content:space-between; align-items:center; }
   .chars small { display:block; color:var(--mute); }
+  .chars .row-actions { display:flex; flex-wrap:wrap; gap:6px; justify-content:flex-end; }
   .empty { color:var(--mute); padding:12px 0; }
   .creator { display:grid; grid-template-columns:128px minmax(0,1fr); gap:16px; padding:12px; border:1px solid var(--line); border-radius:6px; margin-bottom:12px; }
   .creator .portrait img { display:block; width:128px; height:128px; object-fit:cover; background:var(--line); border:1px solid var(--line); border-radius:4px; }
@@ -40,6 +41,13 @@
   .stat-label { color:var(--mute); font-weight:400; }
   .stat-value { font-variant-numeric:tabular-nums; }
   .chars small.stats-line { font-family:"Segoe UI", system-ui, sans-serif; font-size:.72rem; font-variant-numeric:tabular-nums; margin-top:2px; }
+  .combat { border:1px solid var(--line); border-radius:6px; padding:12px; margin-bottom:12px; }
+  .combatants { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+  .combatant { display:flex; justify-content:space-between; gap:8px; padding:6px 8px; border:1px solid var(--line); border-radius:4px; font:600 .82rem/1.4 "Segoe UI", system-ui, sans-serif; font-variant-numeric:tabular-nums; }
+  .combatant .stat-label { font-weight:400; }
+  #combatLog { list-style:none; margin:8px 0 0; padding:0; max-height:180px; overflow-y:auto; font-size:.82rem; }
+  #combatLog li { padding:4px 0; border-bottom:1px solid var(--line); }
+  #combatLog li:last-child { border-bottom:0; }
   @media (max-width:520px) {
     .creator { grid-template-columns:1fr; }
     .creator .portrait { display:flex; gap:12px; align-items:flex-start; }
@@ -109,6 +117,21 @@
   <h2>Temporary Spawn</h2><ul class="chars" id="temp"></ul>
   <h2>Named NPC</h2><ul class="chars" id="named"></ul>
 
+  <h2>Combat</h2>
+  <div class="combat">
+    <div class="combatants">
+      <div class="combatant"><span class="stat-label" id="combatPlayerName">You</span><strong id="combatPlayerHp">—</strong></div>
+      <div class="combatant"><span class="stat-label" id="combatEnemyName">Enemy</span><strong id="combatEnemyHp">—</strong></div>
+    </div>
+    <p class="meta" id="combatStatus">No combat. Use Fight on an NPC.</p>
+    <p class="meta">Attack uses Personal Combat. Defend applies max(0, damage − armor × 2); armor is 0 until equipment exists.</p>
+    <div class="bar">
+      <button id="combatAttack" disabled>Attack</button>
+      <button id="combatDefend" disabled>Defend</button>
+    </div>
+    <ul id="combatLog"></ul>
+  </div>
+
   <h2>Locations <span class="seed" id="locSeed"></span></h2>
   <div class="bar">
     <button class="primary" id="addLocation">Add location</button>
@@ -141,6 +164,8 @@
 <script src="locations/locations.js"></script>
 <script src="actions/data.js"></script>
 <script src="actions/actions.js"></script>
+<script src="combat/data.js"></script>
+<script src="combat/combat.js"></script>
 <script>
   const engine = new Engine({ startDate: "1000-01-01T06:00:00Z", tickMinutes: 10 });
   const $ = (id) => document.getElementById(id);
@@ -172,6 +197,9 @@
   engine.register(locationsModule);
 
   engine.register(createActionsModule());
+
+  const combatModule = createCombatModule();
+  engine.register(combatModule);
 
   // Add more modules here, e.g. engine.register(createMarriageModule());
 
@@ -440,6 +468,7 @@
       renderLocations();
       renderMainCharacter();
       renderActions();
+      renderCombat();
     }
     render();
   }));
@@ -463,6 +492,67 @@
 
   // ----- Characters panel -----
   const act = (type, data) => { engine.fire({ type, data }); engine.flush(); };
+
+  // ----- Combat panel -----
+  function combatSnapshot(c) {
+    return {
+      id: c.id,
+      name: c.name,
+      hp: c.stats.hp,
+      hpMax: c.stats.hpMax,
+      personalCombat: c.stats.personalCombat,
+      armor: c.stats.armor ?? 0
+    };
+  }
+
+  function startCombat(c) {
+    const main = engine.state.modules.mainCharacter.character;
+    if (!main) { alert("Save a main character before starting combat."); return; }
+    if (!main.stats || main.stats.hp <= 0) { alert("The main character has no HP left."); return; }
+    const combat = engine.state.modules.combat;
+    if (combat && combat.active) { alert("Finish the current combat first."); return; }
+    if (!c || !c.stats || c.stats.hp <= 0) { alert("That NPC cannot fight."); return; }
+    act("combat:start", { player: combatSnapshot(main), enemy: combatSnapshot(c) });
+  }
+
+  function renderCombat() {
+    const s = engine.state.modules.combat || {};
+    const active = !!s.active;
+    const player = s.player, enemy = s.enemy;
+
+    $("combatPlayerName").textContent = player ? player.name : "You";
+    $("combatPlayerHp").textContent = player ? `${player.hp}/${player.hpMax}` : "—";
+    $("combatEnemyName").textContent = enemy ? enemy.name : "Enemy";
+    $("combatEnemyHp").textContent = enemy ? `${enemy.hp}/${enemy.hpMax}` : "—";
+
+    $("combatStatus").textContent = active
+      ? `Round ${s.round} · ${s.turn === "player" ? "your turn" : "enemy turn"}`
+      : s.winnerName
+        ? `${s.winnerName} won after ${s.round} round${s.round === 1 ? "" : "s"}.`
+        : "No combat. Use Fight on an NPC.";
+
+    $("combatAttack").disabled = !active || s.turn !== "player";
+    $("combatDefend").disabled = !active || s.turn !== "player";
+
+    const log = Array.isArray(s.log) ? s.log : [];
+    const ul = $("combatLog");
+    ul.innerHTML = "";
+    for (const line of log.slice(-8)) {
+      const li = document.createElement("li");
+      li.textContent = line;
+      ul.append(li);
+    }
+  }
+
+  $("combatAttack").onclick = () => act("combat:action", { action: "attack" });
+  $("combatDefend").onclick = () => act("combat:action", { action: "defend" });
+  for (const name of ["combat:started", "combat:damage", "combat:defended", "combat:ended"]) {
+    engine.on(`event:${name}`, () => {
+      renderCombat();
+      renderMainStats();
+    });
+  }
+
   function renderChars() {
     const s = engine.state.modules.characters;
     for (const [key, saveable] of [["temp", true], ["named", false]]) {
@@ -479,7 +569,24 @@
         st.title = statsTitle(c.stats);
         box.append(st);
         li.append(box);
-        if (saveable) { const b = document.createElement("button"); b.textContent = "Save as Named NPC"; b.onclick = () => act("character:save", { id: c.id }); li.append(b); }
+
+        const row = document.createElement("div");
+        row.className = "row-actions";
+        const fight = document.createElement("button");
+        fight.textContent = "Fight";
+        fight.title = `Fight ${c.name}`;
+        const combat = engine.state.modules.combat;
+        fight.disabled = !!(combat && combat.active) || c.stats.hp <= 0;
+        fight.onclick = () => startCombat(c);
+        row.append(fight);
+
+        if (saveable) {
+          const b = document.createElement("button");
+          b.textContent = "Save as Named NPC";
+          b.onclick = () => act("character:save", { id: c.id });
+          row.append(b);
+        }
+        li.append(row);
         ul.append(li);
       }
     }
@@ -506,6 +613,7 @@
   renderMainCharacter();
   renderLocations();
   renderActions();
+  renderCombat();
   render();
   updateBiomeEventStatus();
 </script>
