@@ -1,8 +1,9 @@
-# Modular Text-RPG Engine — Spec v0.8
+# Modular Text-RPG Engine — Spec v0.9
 
 Plain JS/HTML, no build step, no dependencies. A small core runs the clock, event bus,
 RNG, state and save/load. All gameplay lives in modules that own one state slice and talk
 only through events. Code is the source of truth; this file is the quick contract.
+For the per-module code map and "where do I change this?" guide, see `MODULES.md`.
 
 ## Core behaviour
 
@@ -89,9 +90,17 @@ Slices are JSON-safe. Never cache a slice object; `load()` replaces the whole st
 | location:visited | locations | `{ id, name, biome, biomeKey, weather, hostility }` |
 | location:event | locations | `{ locationId, locationName, biomeKey, eventId, name, chancePercent, roll, effects }` |
 | location:changed | UI "Leave location", future movement | none (characters clears Temporary Spawn) |
-| action:choose (request) | UI, future action modules | `{ actionId }` |
+| action:choose (request) | UI, future action modules | `{ actionId, destinationId? }` |
 | actions:loaded | actions | `{ locationId, locationName, biomeKey, actions }` |
 | action:chosen | actions | `{ actionId, name, locationId, locationName }` |
+| action:resolved | actions | `{ actionId, name, outcomeId, outcomeName, text, effects, timeMinutes, equipmentKey, travelTo, locationId, locationName, atTick, at }` |
+| action:blocked | actions | `{ actionId, name, reason, locationId, locationName }` |
+| equipment:add (request) | UI | `{ key? }` (omit to pick randomly) |
+| equipment:equip (request) | UI | `{ itemId }` |
+| equipment:unequip (request) | UI | none |
+| equipment:added | equipment | `{ itemId, key, name, slot, armor, equipped, source }` |
+| equipment:equipped | equipment | `{ itemId, key, name, slot, armor, totalArmor, previousItemId }` |
+| equipment:unequipped | equipment | `{ itemId, key, name, armor, totalArmor }` |
 | combat:start (request) | UI | `{ player, enemy }` combatant snapshots |
 | combat:action (request) | UI | `{ action: "attack" \| "defend" }` |
 | combat:started | combat | `{ playerId, playerName, enemyId, enemyName }` |
@@ -100,6 +109,7 @@ Slices are JSON-safe. Never cache a slice object; `load()` replaces the whole st
 | combat:ended | combat | `{ winnerId, winnerName, loserId, loserName, rounds }` |
 | mainCharacter:saved | mainCharacter | `{ id, name, gender, age }` (no image) |
 | mainCharacter:statChanged | mainCharacter | `{ id, stat, delta, value, max, eventId }` (any non-equipment base stat) |
+| mainCharacter:armorChanged | mainCharacter | `{ id, stat: "armor", delta, value, previous, itemId, itemName }` |
 
 ## Module registry
 
@@ -110,7 +120,8 @@ Slices are JSON-safe. Never cache a slice object; `load()` replaces the whole st
 | mainCharacter | none | `character` | player character; base stats; profile image; JSON mirror |
 | combat | none | `active`, `round`, `turn`, `player`, `enemy`, `defending`, `winner*`, `log[]` | basic player-first duel; attack/defend |
 | locations | none | `seed`, `createdAt`, `nextId`, `locations{}`, `currentId` | map locations; visit/event checker; JSON mirror |
-| actions | none | `locationId`, `locationName`, `biomeKey`, `actions[]` | five placeholder area actions loaded on visit |
+| actions | none | `locationId`, `locationName`, `biomeKey`, `actions[]`, `lastAction` | five area actions with costs, outcomes, time and travel |
+| equipment | none | `nextId`, `items{}`, `equippedId` | main-character armor; mirrors armor into the character stat |
 
 ## Characters module v0.3
 
@@ -150,9 +161,10 @@ Slices are JSON-safe. Never cache a slice object; `load()` replaces the whole st
 
 - Resource stats store a paired `<key>Max` field (`hpMax`, `staminaMax`, `manaMax`).
   Skills use the definition `max` directly.
-- `armor` is an equipment stat. It starts at 0 for everyone and is deliberately not
-  changed by location events; a future equipment module will write it. Combat's Defend
-  action already reads it (see **Combat module**).
+- `armor` is an equipment stat. It starts at 0 for everyone. The `equipment` module
+  writes the main character's armor through `equipment:equipped` / `equipment:unequipped`;
+  location and action effects never change it. Combat's Defend action reads it (see
+  **Combat module**). NPCs do not equip yet and stay at 0.
 - Character stat block example:
 
 ```json
@@ -221,6 +233,13 @@ mainCharacter: {
   `{ stat, delta }` through `applyEventEffects()`. Any defined non-equipment stat works;
   unknown and equipment stats are ignored. It emits `mainCharacter:statChanged` at
   `depth + 1`; resources clamp to their max and skills clamp to the definition range.
+- It subscribes once to `action:resolved` and applies the combined costs and outcome
+  effects through `applyActionEffects()` with the same clamping. The stat event's
+  `eventId` is the action id.
+- It subscribes once to `equipment:equipped` / `equipment:unequipped`. The announced
+  `totalArmor` is clamped to 0-100, written to `stats.armor`, and announced as
+  `mainCharacter:armorChanged` at `depth + 1`. The module never reads the equipment
+  slice.
 - It also subscribes once to `combat:damage`; when the target is `main`, it lowers HP and
   clamps to 0..`hpMax`. The combat module already announces that hit, so this does not
   emit a second `mainCharacter:statChanged` line.
@@ -234,8 +253,9 @@ mainCharacter: {
   `characters/mainChar/`. It writes `main.json` plus a viewable `profile.<ext>` image.
 - `writeToFolder()` rewrites the mirror from state. `folderConnected` reports whether a
   folder handle is held.
-- No tick generator. `init()` creates the slice and subscribes to `location:event` and
-  `combat:damage` once; reset clears the character but keeps those single subscriptions.
+- No tick generator. `init()` creates the slice and subscribes once to `location:event`,
+  `action:resolved`, `equipment:equipped` / `equipment:unequipped` and `combat:damage`;
+  reset clears the character but keeps those single subscriptions.
 - UI on the test page: name, gender, age, image picker with preview, a stat grid
   (nine base stats plus armor), **Save main character**, and **Connect mainChar folder**.
 
@@ -270,9 +290,9 @@ combat: {
   Personal Combat of 10 deals 10 damage. After a surviving enemy is hit, it immediately
   attacks back. A lethal player hit ends the fight before the counterattack.
 - The enemy always attacks in v0.1; `CombatData.enemyAction` is the future AI hook.
-- Defend sets `defending` for the next enemy attack. The provisional formula is
+- Defend sets `defending` for the next enemy attack. The formula is
   `max(0, incomingDamage - armor * armorMultiplier)`, with `armorMultiplier: 2`. Armor is
-  0 for every character until equipment exists, so Defend currently blocks nothing.
+  written by the equipment module; without equipment it is 0 and Defend blocks nothing.
 - Damage is emitted as `combat:damage`; the mainCharacter and characters modules apply it
   to the real character slices. The module also emits `combat:started`,
   `combat:defended` and `combat:ended` at `depth + 1` (or one deeper for the enemy turn).
@@ -372,7 +392,7 @@ locations: {
   folder**, **Reload biome events**, a **Visit** button per location, a current-location
   marker, visit status, and a **JSON** download button per location.
 
-## Actions module v0.1
+## Actions module v0.2
 
 - Files: `actions/data.js`, `actions/actions.js`; notes in `actions/README.md`.
 - Slice:
@@ -382,21 +402,75 @@ actions: {
   locationId: null,     // last visited location
   locationName: "",
   biomeKey: "",
-  actions: []           // exactly five action objects
+  actions: [],          // exactly five action objects
+  lastAction: null      // the most recent action:resolved data, cleared on visit
 }
 ```
 
-- Action shape: `{ id, name, description }`.
+- Action shape:
+  `{ id, name, description, timeMinutes, costs[], outcomes[], requiresDestination, travelText }`.
+  Costs and outcome effects use `{ stat, delta }`.
 - `actions/data.js` owns `LocationActionsData.default` (five actions) and optional
   `biomes.<biomeKey>` overrides. An override with fewer than five entries is ignored.
 - The module listens to `location:visited`; it replaces the previous area's actions,
-  stores the area id/name/biome, and emits `actions:loaded` at `depth + 1`.
-- It listens to `action:choose` and emits `action:chosen` at `depth + 1`. This is a
-  placeholder: choices are logged, but no costs, rewards, travel or other effects apply.
+  stores the area id/name/biome, clears `lastAction`, and emits `actions:loaded` at
+  `depth + 1`.
+- It listens to `action:choose` with `{ actionId, destinationId? }`. It emits
+  `action:chosen`, then picks one outcome with `engine.rng` (weighted by `weight`,
+  default 1) and emits `action:resolved` at `depth + 1`.
+- `action:resolved` carries the combined `costs` + outcome `effects`, `timeMinutes`,
+  an optional `equipmentKey` and an optional `travelTo`. The module applies none of them
+  itself:
+  - `mainCharacter` applies the effects and emits `mainCharacter:statChanged`.
+  - `equipment` adds the item named by `equipmentKey`.
+  - the UI advances the clock by whole ticks and, for `travelTo`, calls
+    `locations.visit(destinationId)`.
+- Travel actions set `requiresDestination: true` and have no outcomes. Without a
+  destination the module emits `action:blocked` and resolves nothing. Movement stays in
+  the locations module; actions never edits the locations slice.
+- `lastAction` is JSON-safe and included in saves, so the UI/status tree can show the
+  last resolution.
 - `init()` subscribes once; reset empties the slice and keeps the subscription. On load,
   `onLoad()` normalizes the loaded slice for the UI.
-- UI on the test page: an **Actions** panel appears/updates after a visit, showing five
-  **Choose** buttons. The last placeholder choice is shown in the panel status.
+- UI on the test page: an **Actions** panel with five **Choose** buttons, cost/time text
+  in each row, a destination dropdown for Travel, and the last resolution in the status.
+
+## Equipment module v0.1
+
+- Files: `equipment/data.js`, `equipment/equipment.js`; notes in `equipment/README.md`.
+- Slice:
+
+```js
+equipment: {
+  nextId: 1,
+  items: {                       // item id -> item
+    "eq_0001": {
+      id: "eq_0001", key: "leather_cuirass", name: "Leather Cuirass",
+      slot: "body", armor: 3, equipped: true,
+      acquiredAtTick: 0, acquiredAt: "1000-01-01 06:00"
+    }
+  },
+  equippedId: "eq_0001"          // one body item, or null
+}
+```
+
+- `equipment/data.js` owns the armor catalogue: `key`, `name`, `slot`, `armor`, `weight`,
+  plus `maxArmor` and `autoEquip`. Add or tune armor there; module code iterates the list.
+- The first acquired item is equipped automatically when nothing is worn. Equipping
+  another item swaps it; only one body item is worn.
+- Requests: `equipment:add` (`{ key? }`; omit the key for a weighted random pick),
+  `equipment:equip` (`{ itemId }`) and `equipment:unequip`.
+- Module events: `equipment:added`, `equipment:equipped` and `equipment:unequipped` at
+  `depth + 1`. The equipped event includes `totalArmor` for the bridge.
+- The module listens to `action:resolved`; an outcome with `equipmentKey` adds that item
+  (auto-equipping when free) without the actions module calling it.
+- `mainCharacter` listens to the equipped/unequipped events, clamps `totalArmor` to
+  0-100, writes `stats.armor` and emits `mainCharacter:armorChanged`. The equipment module
+  never reads or writes another module's slice.
+- Only the main character can equip in v0.1. NPCs stay at armor 0.
+- UI on the test page: an **Equipment** panel with **Find armor**, the inventory, the
+  equipped item and **Equip** / **Unequip** buttons. Find armor requires a saved main
+  character.
 
 ## File layout
 
@@ -405,9 +479,14 @@ index.html
 status.html        read-only live node-tree viewer (not a module)
 engine.js
 ENGINE_SPEC.md
+MODULES.md         living per-module handbook (update with every module change)
 package.json
 actions/
   actions.js
+  data.js
+  README.md
+equipment/
+  equipment.js
   data.js
   README.md
 combat/
@@ -453,6 +532,7 @@ test/
   main-character.test.cjs
   biome-events.test.cjs
   actions.test.cjs
+  equipment.test.cjs
   combat.test.cjs
   serve.cjs
 ```
@@ -461,24 +541,25 @@ test/
 
 - The Locations folder mirror (`connectFolder`) is tested with an in-memory File System
   Access API mock in Node, but the real browser picker is untested; it needs Chrome/Edge.
-- `location:changed` still only clears Temporary Spawn; it does not move the party or
-  relate locations to each other yet.
-- Locations have no coordinates, connections, travel, population or resources yet.
-  `currentId` marks the last visit only; it is not a travel graph.
+- `location:changed` still only clears Temporary Spawn; it does not move the party.
+- Locations have no coordinates, connections, population or resources. The Travel action
+  can visit any known location; `currentId` marks the last visit, not a travel graph.
 - Biome events have no cooldowns, once-only flags, weather filters or requirements.
   Each enabled event is an independent roll on every visit.
-- Base stats are stored and location events can change them. Combat uses Personal Combat
-  and armor, but there is no progression, training, equipment, checks or opposed-roll
-  system yet.
+- Base stats are stored, and location events and area actions can change them. Combat uses
+  Personal Combat and armor, but there is no progression, training or opposed-roll system
+  yet.
 - Combat is one-on-one and player-first. There is no flee, positioning, initiative, hit
   chance, damage variance or enemy AI; the enemy always attacks.
-- Armor is an equipment stat fixed at 0 until an equipment module exists. Defend already
-  applies the provisional `max(0, damage - armor * 2)` formula, so it currently blocks
-  nothing.
+- Armor comes from the equipment module, which is main-character-only with one body slot.
+  NPCs still fight at armor 0. Defend uses `max(0, damage - armor * 2)`.
+- Equipment armor is mirrored to the main character present when it is equipped. The UI
+  requires a saved character before **Find armor**; an action reward equipped before the
+  character exists will not change `stats.armor` later.
+- Area actions resolve costs, one weighted outcome, time and travel, but have no
+  requirements or skill checks, and travel can reach any charted location.
 - Biome event JSON is fetched with `fetch`; open the page through the static server,
   not `file://`.
-- Area actions are placeholders. Choosing one only emits `action:chosen`; there are no
-  stat costs, rewards, time costs, travel or per-action outcomes yet.
 - The real mainChar folder picker is untested in a browser; its write logic is covered
   by the Node mock test. It needs Chrome/Edge.
 - Uploaded portraits are resized to 256 px and stored as data URLs in state and

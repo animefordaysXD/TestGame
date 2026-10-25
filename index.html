@@ -108,6 +108,14 @@
   </div>
   <p class="meta">Saves in the game; with the folder connected, also writes <code>characters/mainChar/main.json</code> and a profile image.</p>
 
+  <h2>Equipment <span class="seed" id="equipArmor"></span></h2>
+  <div class="bar">
+    <button class="primary" id="equipFind">Find armor</button>
+  </div>
+  <p class="meta" id="equipStatus">No armor equipped. Defend reduces incoming damage by armor × 2.</p>
+  <ul class="chars" id="equipment"></ul>
+  <p class="meta">Armor is written into the main character's Armor stat. Only the main character can wear equipment in this version.</p>
+
   <h2>Characters</h2>
   <div class="bar">
     <button class="primary" id="spawn">Spawn character</button>
@@ -124,7 +132,7 @@
       <div class="combatant"><span class="stat-label" id="combatEnemyName">Enemy</span><strong id="combatEnemyHp">—</strong></div>
     </div>
     <p class="meta" id="combatStatus">No combat. Use Fight on an NPC.</p>
-    <p class="meta">Attack uses Personal Combat. Defend applies max(0, damage − armor × 2); armor is 0 until equipment exists.</p>
+    <p class="meta">Attack uses Personal Combat. Defend applies max(0, damage − armor × 2); equip armor above to make it matter.</p>
     <div class="bar">
       <button id="combatAttack" disabled>Attack</button>
       <button id="combatDefend" disabled>Defend</button>
@@ -148,6 +156,7 @@
   <h2>Actions <span class="seed" id="actionArea"></span></h2>
   <p class="meta" id="actionStatus">Visit a location to load five actions.</p>
   <ul class="chars" id="actions"></ul>
+  <p class="meta">Costs and outcomes are applied to the main character; travel moves through the locations module. Time costs advance the clock.</p>
 
   <h2>Event log</h2>
   <ul id="log"></ul>
@@ -160,6 +169,8 @@
 <script src="characters/characters.js"></script>
 <script src="characters/mainCharacterData.js"></script>
 <script src="characters/mainCharacter.js"></script>
+<script src="equipment/data.js"></script>
+<script src="equipment/equipment.js"></script>
 <script src="locations/data.js"></script>
 <script src="locations/locations.js"></script>
 <script src="actions/data.js"></script>
@@ -192,6 +203,9 @@
 
   const mainCharModule = createMainCharacterModule();
   engine.register(mainCharModule);
+
+  const equipmentModule = createEquipmentModule();
+  engine.register(equipmentModule);
 
   const locationsModule = createLocationsModule();
   engine.register(locationsModule);
@@ -330,29 +344,101 @@
       return;
     }
 
-    $("actionStatus").textContent = `Choose an action in ${s.locationName || "the area"} (placeholder; choices only log an event).`;
+    $("actionStatus").textContent = `Choose an action in ${s.locationName || "the area"}. Costs and outcomes use the main character's stats.`;
+
+    const locState = engine.state.modules.locations;
+    const otherLocations = Object.values(locState && locState.locations ? locState.locations : {})
+      .filter((loc) => loc.id !== s.locationId);
+
     for (const action of actions) {
       const li = document.createElement("li"), box = document.createElement("div");
       const title = document.createElement("strong");
       title.textContent = action.name;
       const sm = document.createElement("small");
-      sm.textContent = action.description;
+      const bits = [];
+      if (action.timeMinutes) bits.push(`${action.timeMinutes} min`);
+      for (const cost of action.costs) bits.push(`${cost.delta > 0 ? "+" : ""}${cost.delta} ${cost.stat}`);
+      sm.textContent = `${action.description}${bits.length ? ` · ${bits.join(" · ")}` : ""}`;
       box.append(title, sm);
+
+      const row = document.createElement("div");
+      row.className = "row-actions";
+
+      let destination = null;
+      if (action.requiresDestination) {
+        destination = document.createElement("select");
+        destination.setAttribute("aria-label", `Destination for ${action.name}`);
+        if (!otherLocations.length) {
+          const option = document.createElement("option");
+          option.value = "";
+          option.textContent = "No other location";
+          destination.append(option);
+          destination.disabled = true;
+        } else {
+          for (const loc of otherLocations) {
+            const option = document.createElement("option");
+            option.value = loc.id;
+            option.textContent = `${loc.name} (${loc.biome})`;
+            destination.append(option);
+          }
+        }
+        row.append(destination);
+      }
 
       const b = document.createElement("button");
       b.textContent = "Choose";
       b.title = `Choose ${action.name}`;
-      b.onclick = () => act("action:choose", { actionId: action.id });
+      b.disabled = !!(action.requiresDestination && !otherLocations.length);
+      b.onclick = () => chooseAction(action, destination ? destination.value : "");
 
-      li.append(box, b);
+      row.append(b);
+      li.append(box, row);
       ul.append(li);
     }
   }
 
+  let choosingAction = false;
+  async function chooseAction(action, destinationId) {
+    if (choosingAction) return;
+    choosingAction = true;
+    try {
+      engine.fire({ type: "action:choose", data: { actionId: action.id, destinationId } });
+      engine.flush();
+
+      const last = engine.state.modules.actions.lastAction;
+      if (!last || last.actionId !== action.id) return;
+
+      // Time is core state: advance whole ticks instead of editing the clock directly.
+      if (last.timeMinutes > 0) {
+        const tickMinutes = Math.max(1, engine.now.tickMinutes);
+        engine.step(Math.max(1, Math.ceil(last.timeMinutes / tickMinutes)));
+        engine.flush();
+      }
+
+      if (last.travelTo) {
+        const result = await locationsModule.visit(last.travelTo);
+        engine.flush();
+        const names = result.events.map((event) => event.name);
+        const suffix = names.length ? ` Triggered: ${names.join(", ")}.` : " No biome events.";
+        $("actionStatus").textContent = `You travel to ${result.location.name}.${suffix}`;
+        $("locVisitStatus").textContent = `Current location: ${result.location.name}.`;
+      } else {
+        $("actionStatus").textContent = `${last.text}${last.timeMinutes ? ` (${last.timeMinutes} min)` : ""}`;
+      }
+    } catch (error) {
+      alert("Could not resolve that action: " + error.message);
+    } finally {
+      choosingAction = false;
+    }
+  }
+
   engine.on("event:actions:loaded", renderActions);
-  engine.on("event:action:chosen", (e) => {
-    $("actionStatus").textContent = e.text;
+  engine.on("event:action:resolved", (e) => {
+    const data = e.data || {};
+    $("actionStatus").textContent = `${data.text || e.text || "Action resolved."}${data.timeMinutes ? ` (${data.timeMinutes} min)` : ""}`;
   });
+  engine.on("event:action:blocked", (e) => { $("actionStatus").textContent = e.text; });
+  engine.on("event:location:added", renderActions);
 
   // ----- Main character panel -----
   const mcData = MainCharacterData;
@@ -459,7 +545,71 @@
   };
 
   engine.on("event:mainCharacter:saved", renderMainCharacter);
+  engine.on("event:mainCharacter:saved", renderEquipment);
   engine.on("event:mainCharacter:statChanged", renderMainStats);
+  engine.on("event:mainCharacter:armorChanged", renderMainStats);
+
+  // ----- Equipment panel -----
+  function renderEquipment() {
+    const s = engine.state.modules.equipment || { items: {}, equippedId: null };
+    const items = Object.values(s.items || {});
+    const equipped = s.equippedId ? s.items[s.equippedId] : null;
+    const armor = equipped ? equipped.armor : 0;
+    const hasMain = !!(engine.state.modules.mainCharacter && engine.state.modules.mainCharacter.character);
+
+    $("equipFind").disabled = !hasMain;
+    $("equipArmor").textContent = `armor ${armor}/100`;
+    $("equipStatus").textContent = equipped
+      ? `${equipped.name} equipped · armor ${armor}/100 · Defend blocks ${armor * 2} damage.`
+      : items.length
+        ? "No armor equipped. Equip an item below."
+        : "No armor yet. Find armor here, or scavenge while exploring.";
+
+    const ul = $("equipment");
+    ul.innerHTML = "";
+    if (!items.length) {
+      const li = document.createElement("li");
+      li.className = "empty";
+      li.textContent = hasMain ? "No armor in the inventory." : "Save a main character first.";
+      ul.append(li);
+      return;
+    }
+
+    for (const item of items) {
+      const li = document.createElement("li"), box = document.createElement("div");
+      const title = document.createElement("strong");
+      title.textContent = item.name;
+      const sm = document.createElement("small");
+      sm.textContent = `${item.slot} · armor ${item.armor} · ${item.equipped ? "equipped" : "in inventory"}`;
+      box.append(title, sm);
+      li.append(box);
+
+      const b = document.createElement("button");
+      if (item.equipped) {
+        b.textContent = "Unequip";
+        b.onclick = () => act("equipment:unequip");
+      } else {
+        b.textContent = "Equip";
+        b.title = `Equip ${item.name} (armor ${item.armor})`;
+        b.disabled = !hasMain;
+        b.onclick = () => act("equipment:equip", { itemId: item.id });
+      }
+      li.append(b);
+      ul.append(li);
+    }
+  }
+
+  $("equipFind").onclick = () => {
+    if (!engine.state.modules.mainCharacter.character) {
+      alert("Save a main character before finding equipment.");
+      return;
+    }
+    act("equipment:add");
+  };
+
+  for (const name of ["equipment:added", "equipment:equipped", "equipment:unequipped"]) {
+    engine.on(`event:${name}`, renderEquipment);
+  }
 
   ["reset", "load", "run", "pause", "tickSize"].forEach((n) => engine.on(n, () => {
     if (n === "reset" || n === "load") {
@@ -467,6 +617,7 @@
       rebuildLog();
       renderLocations();
       renderMainCharacter();
+      renderEquipment();
       renderActions();
       renderCombat();
     }
@@ -611,6 +762,7 @@
   };
 
   renderMainCharacter();
+  renderEquipment();
   renderLocations();
   renderActions();
   renderCombat();

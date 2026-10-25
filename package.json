@@ -5,7 +5,7 @@
   "description": "Modular text-RPG engine and modules",
   "type": "commonjs",
   "scripts": {
-    "test": "node test/locations.test.cjs && node test/locations-disk.test.cjs && node test/characters.test.cjs && node test/main-character.test.cjs && node test/biome-events.test.cjs && node test/actions.test.cjs && node test/combat.test.cjs",
+    "test": "node test/locations.test.cjs && node test/locations-disk.test.cjs && node test/characters.test.cjs && node test/main-character.test.cjs && node test/biome-events.test.cjs && node test/actions.test.cjs && node test/equipment.test.cjs && node test/combat.test.cjs",
     "serve": "node test/serve.cjs 8765"
   }
 }

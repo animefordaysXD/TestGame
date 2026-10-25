@@ -164,6 +164,9 @@
         if (bound) return;   // init runs again on reset: subscribe only once
         bound = true;
         engine.on("event:location:event", (e) => mod.applyEventEffects(e.depth + 1, e.data || {}));
+        engine.on("event:action:resolved", (e) => mod.applyActionEffects(e.depth + 1, e.data || {}));
+        engine.on("event:equipment:equipped", (e) => mod.applyEquipment(e.data || {}, e.depth + 1));
+        engine.on("event:equipment:unequipped", (e) => mod.applyEquipment(e.data || {}, e.depth + 1));
         engine.on("event:combat:damage", (e) => mod.applyCombatDamage(e.data || {}));
       },
 
@@ -248,16 +251,16 @@
         return character.stats.hp;
       },
 
-      // Location events can change any non-equipment stat. Resources clamp to their max
-      // and skills clamp to their data range; armor is left for equipment; unknown stats
-      // are ignored.
-      applyEventEffects(depth = 0, data = {}) {
+      // Shared by biome events and resolved area actions. Applies { stat, delta }
+      // pairs to the main character, clamping resources to their max and skills to
+      // their definition range. Equipment stats are handled by applyEquipment;
+      // unknown stats are ignored. Emits one mainCharacter:statChanged per effect.
+      applyEffects(depth = 0, effects = [], eventId = null) {
         const character = normalizeCharacter();
         if (!character) return [];
 
-        const effects = Array.isArray(data.effects) ? data.effects : [];
         const applied = [];
-        for (const effect of effects) {
+        for (const effect of Array.isArray(effects) ? effects : []) {
           if (!effect || typeof effect.stat !== "string") continue;
           const def = STAT_BY_KEY.get(effect.stat.trim());
           if (!def || def.kind === "equipment") continue;
@@ -278,11 +281,43 @@
             text: `${character.name} ${verb} ${Math.abs(actual)} ${def.label} (${next}/${max}).`,
             data: {
               id: character.id, stat: def.key, delta: actual,
-              value: next, max, eventId: data.eventId || null
+              value: next, max, eventId
             }
           }, depth);
         }
         return applied;
+      },
+
+      applyEventEffects(depth = 0, data = {}) {
+        return mod.applyEffects(depth, data.effects, data.eventId || null);
+      },
+
+      // Area actions carry their costs and outcome effects in action:resolved.
+      applyActionEffects(depth = 0, data = {}) {
+        return mod.applyEffects(depth, data.effects, data.actionId || null);
+      },
+
+      // Equipment is the source of truth for armor. This module never reads the
+      // equipment slice; it mirrors the announced total into stats.armor.
+      applyEquipment(data = {}, depth = 0) {
+        const character = normalizeCharacter();
+        if (!character) return null;
+
+        const def = STAT_BY_KEY.get("armor");
+        const value = clamp(Math.round(Number(data.totalArmor ?? data.armor) || 0), def.min, def.max);
+        const previous = Math.round(Number(character.stats.armor) || 0);
+        if (value === previous) return previous;
+
+        character.stats.armor = value;
+        engine.fire({
+          type: "mainCharacter:armorChanged",
+          text: `${character.name}'s armor is now ${value}/100${data.name ? ` (${data.name})` : ""}.`,
+          data: {
+            id: character.id, stat: "armor", delta: value - previous,
+            value, previous, itemId: data.itemId || null, itemName: data.name || ""
+          }
+        }, depth);
+        return value;
       },
 
       toJSON() {

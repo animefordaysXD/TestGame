@@ -48,7 +48,7 @@ function makeEngine(seed) {
   assert.equal(first.traits.length, 5, "personality traits are still generated");
   assert.equal(new Set(first.traits).size, 5, "traits are unique");
   assertStats(first.stats, "NPC");
-  assert.equal(first.stats.armor, 0, "armor starts empty until equipment exists");
+  assert.equal(first.stats.armor, 0, "armor starts at 0");
   assert.ok(JSON.stringify(first).length > 0, "NPC state is JSON-safe");
 
   const second = characters.spawn();

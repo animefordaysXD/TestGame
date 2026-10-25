@@ -3,14 +3,15 @@
 **Repository:** <https://github.com/animefordaysXD/TestGame>
 
 **Last updated:** 2026-10-24
-**Current spec:** `ENGINE_SPEC.md` v0.8
+**Current spec:** `ENGINE_SPEC.md` v0.9
 **Status:** working test page with procedural locations, biome events, a main-character
 creator with nine base stats plus armor, NPCs with the same stats and personality traits,
-basic player-first combat (Attack/Defend), five placeholder area actions, and a live
-node-tree status page.
+basic player-first combat (Attack/Defend), an equipment module whose armor feeds Defend,
+five area actions with costs/outcomes/time and Travel through the locations module, and a
+live node-tree status page.
 
-This file is the starting point for a new AI session. Read it first, then `README.md`
-and `ENGINE_SPEC.md`.
+This file is the starting point for a new AI session. Read it first, then `README.md`,
+`ENGINE_SPEC.md` and `MODULES.md` (the per-module map and adjustment guide).
 
 ## Clone
 
@@ -58,8 +59,10 @@ Tests currently cover:
   legacy stamina migration, save/load, reset, folder mirror.
 - `test/biome-events.test.cjs` — JSON loading, visit rolls, stat effects, reset,
   save/load.
-- `test/actions.test.cjs` — five-action loading, biome overrides, choices, reset,
-  save/load.
+- `test/actions.test.cjs` — five-action loading, biome overrides, weighted outcomes,
+  stat costs, time, travel through locations, equipment rewards, reset, save/load.
+- `test/equipment.test.cjs` — inventory, auto-equip, swap/unequip, armor bridge,
+  combat/Defend integration, reset, save/load.
 - `test/combat.test.cjs` — player-first turns, attack damage, defend/armor, lethal hits,
   invalid actions, reset, save/load.
 
@@ -75,6 +78,9 @@ Tests currently cover:
 - Update the event catalog and module registry in `ENGINE_SPEC.md` whenever a module or
   event changes. The module and event branches in `status.html` are hand-maintained;
   keep them in sync too.
+- **Update `MODULES.md` in the same change whenever a module changes.** It is the
+  practical map (role, code map, events, adjustment table) and the update log. Add a
+  row to its update log, and keep it consistent with the code, the spec and status.
 - Keep State slices JSON-safe. Never cache a slice object; `load()` replaces the state.
 
 ## Git workflow
@@ -89,9 +95,10 @@ Tests currently cover:
 |---|---|---|
 | `characters` | `nextId`, `named{}`, `temp{}` | NPC generator with base stats; Named NPC / Temporary Spawn |
 | `mainCharacter` | `character` | one player character, profile image, base stats, JSON mirror |
+| `equipment` | `nextId`, `items{}`, `equippedId` | main-character armor inventory; mirrors armor into the character stat |
 | `combat` | `active`, `round`, `turn`, `player`, `enemy`, `defending`, `winner*`, `log[]` | basic player-first duels; Attack/Defend |
 | `locations` | `seed`, `createdAt`, `nextId`, `locations{}`, `currentId` | procedural locations, visit rolls, JSON mirror |
-| `actions` | `locationId`, `locationName`, `biomeKey`, `actions[]` | five placeholder area actions |
+| `actions` | `locationId`, `locationName`, `biomeKey`, `actions[]`, `lastAction` | five area actions with costs, outcomes, time and Travel |
 
 ### Main character
 
@@ -106,8 +113,11 @@ Tests currently cover:
 - Stats live in `character.stats`; resources also store `hpMax`, `staminaMax` and
   `manaMax`. Old saves with top-level `stamina` are migrated on load.
 - `location:event` effects with `{ stat, delta }` can change any non-equipment base stat;
-  the module emits `mainCharacter:statChanged` at `depth + 1`. Armor is ignored until
-  equipment exists.
+  the module emits `mainCharacter:statChanged` at `depth + 1`. Armor is ignored here.
+- `action:resolved` effects use the same clamping path (`applyActionEffects`), so action
+  costs and outcomes can change any non-equipment stat; `eventId` is the action id.
+- `equipment:equipped` / `equipment:unequipped` write `stats.armor` through
+  `applyEquipment` and emit `mainCharacter:armorChanged` at `depth + 1`.
 - `combat:damage` targeting `main` lowers HP directly; the combat module already logs the
   hit, so there is no duplicate `statChanged` event.
 - The UI calls `mainCharacter.save()` directly, then `engine.flush()`.
@@ -133,8 +143,8 @@ Tests currently cover:
   enemy immediately counterattacks. **Defend** braces for that counterattack.
 - `combat:damage` is applied to the real main/NPC slices by their modules. Lethal player
   hits skip the counterattack; 0 HP ends the fight with `combat:ended`.
-- Defend uses the provisional `max(0, damage - armor * 2)` formula. Armor is 0 for
-  everyone until equipment exists, so it currently blocks nothing.
+- Defend uses `max(0, damage - armor * 2)`. Armor is written by the equipment module;
+  with no armor equipped, Defend blocks nothing.
 - The enemy always attacks in v0.1. There is no flee, positioning, initiative, hit
   chance or damage variance yet.
 
@@ -158,15 +168,38 @@ Tests currently cover:
 ### Actions
 
 - `actions/data.js` has five default actions: Scout, Scavenge, Rest, Hunt, Travel.
+  Each action stores `timeMinutes`, `costs[]`, `outcomes[]` and optional
+  `requiresDestination` / `travelText`.
 - Optional `LocationActionsData.biomes.<biomeKey>` lists override the default when they
   contain five valid actions.
-- The module listens to `location:visited`, replaces the action list, and emits
-  `actions:loaded` at `depth + 1`.
-- `action:choose` from the UI is handled by `actions`; it emits `action:chosen` at
-  `depth + 1`. This is a placeholder: no stat, time, item, reward, travel or other
-  effects are applied yet.
-- The UI shows an **Actions** panel with the area name, five actions and **Choose**
-  buttons. Selecting one updates the panel status and event log.
+- The module listens to `location:visited`, replaces the action list, clears `lastAction`,
+  and emits `actions:loaded` at `depth + 1`.
+- `action:choose` (`{ actionId, destinationId? }`) emits `action:chosen`, picks one
+  outcome with `engine.rng` (weighted by `weight`), stores `lastAction`, and emits
+  `action:resolved` at `depth + 1` with combined costs/effects, `timeMinutes`,
+  `equipmentKey` and `travelTo`.
+- The actions module applies nothing itself. `mainCharacter` applies the effects,
+  `equipment` adds an awarded item, and the UI advances the clock by whole ticks.
+- Travel requires a destination; without one the module emits `action:blocked` and
+  resolves nothing. The UI then calls `locations.visit(travelTo)`, so the destination's
+  actions load and its biome events roll. No module edits another's slice.
+- The UI shows an **Actions** panel with the area name, five actions, cost/time text, a
+  destination dropdown for Travel, and the last resolution in the status line.
+
+### Equipment
+
+- `equipment/data.js` owns the armor catalogue (`key`, `name`, `slot`, `armor`, `weight`),
+  `maxArmor` and `autoEquip`. All six current items use the one `body` slot.
+- The first acquired item is auto-equipped; equipping another swaps it. Requests are
+  `equipment:add`, `equipment:equip` and `equipment:unequip`; module events are
+  `equipment:added`, `equipment:equipped` and `equipment:unequipped`.
+- The module listens to `action:resolved` and adds the item named by `equipmentKey`.
+- `mainCharacter` listens to the equipped/unequipped events, clamps `totalArmor` to
+  0-100, writes `stats.armor` and emits `mainCharacter:armorChanged`. The equipment
+  module never reads another slice.
+- Only the main character can equip. The UI has an **Equipment** panel with **Find
+  armor**, the inventory, and **Equip** / **Unequip**; Find armor needs a saved main
+  character. Scavenge can award armor.
 
 ## Current event flow
 
@@ -182,8 +215,21 @@ UI Visit
 
 ```text
 UI Choose action
-  -> action:choose
-  -> actions.choose() -> action:chosen
+  -> action:choose { actionId, destinationId? }
+  -> actions.choose() -> action:chosen, action:resolved
+  -> mainCharacter.applyActionEffects() -> mainCharacter:statChanged
+  -> equipment.add() for a rewarded item -> equipment:added/equipped
+  -> UI engine.flush()
+  -> UI engine.step(ceil(timeMinutes / tickMinutes))
+  -> for Travel: locations.visit(travelTo) -> location:visited -> actions:loaded + biome events
+  -> engine.flush() from the UI
+```
+
+```text
+UI Equip / Unequip / Find armor
+  -> equipment:equip / unequip / add
+  -> equipment.equip()/unequip()/add() -> equipment:equipped / unequipped / added
+  -> mainCharacter.applyEquipment() -> mainCharacter:armorChanged
   -> engine.flush() from the UI
 ```
 
@@ -200,48 +246,50 @@ UI Fight on an NPC
 
 ## Recent work
 
-- Added basic player-first combat: **Attack** deals Personal Combat damage, the enemy
-  counterattacks, **Defend** braces, and 0 HP ends the duel. New `combat` module,
-  `combat/data.js`, **Fight** buttons on NPC cards and a **Combat** panel.
-- Added the `armor` equipment stat (0-100, starts at 0). It is shown for every character
-  but is not changed by location events; equipment will write it later. Defend already
-  reads the provisional `damage - armor * 2` formula, so it blocks nothing while armor is 0.
-- Added shared base stats for every character: HP, Stamina, Mana, War, Diplomacy,
-  Personal Combat, Money Management, Intrigue and Intelligence. `characters/statsData.js`
-  is the single content source; main characters start from its defaults, NPCs roll
-  ranges with `engine.rng`, and old saves are normalized on load.
-- Extended `location:event` effects from stamina-only to any base stat, with resource
-  and skill clamping.
-- Added stat grids to the game page and status tree; NPC cards now show compact stats.
-- Added `test/characters.test.cjs`, `test/combat.test.cjs`, and updated the
-  main-character/biome-event tests for the `character.stats` shape and combat damage.
-- Added `status.html`: a read-only, interactive node tree of the current save
-  (world, modules, live slices, content counts, biome event status, event catalog and
-  tests). It reads `localStorage` slot `save1`, does not register modules, and can also
-  load an exported state JSON file. Supports collapse/expand, drag-pan, zoom, fit-width,
-  copy-as-text and SVG export. Linked from the game page.
-- Added the per-biome event JSON system and the tundra Snowfall sample.
-- Added the `actions` module and five-action Action panel.
-- Updated docs to `ENGINE_SPEC.md` v0.8.
-- All Node tests pass; browser checks passed for the new stat grid/armor, the full
-  Fight/Attack/Defend/win flow, disabled Fight buttons during combat, and the combat
-  branch in `status.html`. No console errors.
+- Added the `equipment` module: a six-item body-armor catalogue, inventory with
+  auto-equip/swap/unequip, `equipment:add/equip/unequip` requests and
+  `equipment:added/equipped/unequipped` events. Armor is mirrored into the main
+  character's `stats.armor` by `mainCharacter.applyEquipment()`.
+- Made area actions playable: each default action now has a time cost, stat costs and
+  weighted outcomes. `action:resolved` carries effects, `timeMinutes`, an optional
+  `equipmentKey` and an optional `travelTo`; `lastAction` is saved for the UI/status tree.
+- Travel now uses the locations module. The Actions panel shows a destination dropdown;
+  choosing Travel pays its stamina cost, advances time, then calls `locations.visit`,
+  which reloads actions and rolls biome events. `action:blocked` covers a missing
+  destination.
+- Added the **Equipment** panel (Find armor, inventory, Equip/Unequip) and the **Actions**
+  panel's cost/time/travel UI. Armor is shown in the main stat grid and combat note.
+- Defend now has a visible effect: with equipment equipped, `combat:damage` reports the
+  armor reduction and the real HP loss is smaller.
+- Added `test/equipment.test.cjs`, rewrote `test/actions.test.cjs` for outcomes/time/
+  travel/equipment, and extended the status tree with equipment, action resolution,
+  events and content counts. Docs are at `ENGINE_SPEC.md` v0.9.
+- All eight Node test files pass. Browser checks passed for: saving a character, adding
+  and visiting locations, Rest advancing 60 minutes, Find armor/Equip/Unequip, Travel to
+  another location, a Defend with armor 1 blocking 2 damage, and the new status branches.
+  No console errors.
+- Added `MODULES.md`, a living per-module handbook: role, files, state, code map, events,
+  adjustment tables, gotchas and an update log. It must be updated with every module
+  change (also listed in the architecture rules).
 
 ## Known limitations and quirks
 
-- Area actions are placeholders. **Travel** does not move the party.
-- Base stats are stored and location events can change them. Combat uses Personal Combat
-  and armor, but there is no progression, training, equipment, checks or opposed-roll
-  system yet.
+- Area actions resolve costs, one weighted outcome, time and travel, but have no
+  requirements or skill checks yet. Travel can reach any charted location.
+- The UI applies action time by stepping whole ticks; there is no separate time-cost API.
+- Base stats are stored, and location events/actions can change them. Combat uses Personal
+  Combat and armor, but there is no progression, training or opposed-roll system yet.
 - Combat is one-on-one and player-first. There is no flee, positioning, initiative, hit
   chance, damage variance or enemy AI; the enemy always attacks.
-- Armor is an equipment stat fixed at 0 until equipment exists. Defend already applies
-  the provisional `max(0, damage - armor * 2)` formula, so it currently blocks nothing.
+- Equipment is main-character-only with one body slot. NPCs still fight at armor 0.
+  Armor is mirrored to the main character present when the item is equipped; the UI
+  requires a saved character before **Find armor**.
 - NPC personality traits are generated but do not weight behaviour yet.
 - Biome events have no cooldowns, once-only flags, weather filters or requirements.
   Every enabled event is an independent roll on each visit.
 - `location:changed` still only clears Temporary Spawn; there is no travel graph,
-  coordinates or location connections.
+  coordinates or location connections. Travel moves `currentId` through any known
+  location.
 - The real OS folder pickers are untested in a browser. The disk tests use an in-memory
   File System Access API mock. Chrome/Edge is required.
 - `mainChar/` is a write mirror, not an import source. `localStorage` or the in-game load
@@ -259,18 +307,18 @@ UI Fight on an NPC
 
 ## Suggested next steps
 
-1. Add an equipment module and armor values so Defend has a visible effect; keep the
-   provisional `damage - armor * 2` formula easy to tune.
-2. Expand combat: enemy AI, flee, multiple opponents, hit chance/damage variance, or
+1. Expand equipment: NPC loadouts, more slots (head/hands/weapon), item quality and
+   inventory limits; keep the armor-to-stat bridge event-based.
+2. Use stats in action and event checks (success/chance based on skill and difficulty)
+   and add requirements such as minimum stamina or a needed item.
+3. Add a travel graph/connections between locations with distance and travel time,
+   instead of letting Travel reach any charted location.
+4. Add per-biome action overrides and test them in the UI.
+5. Add event conditions (weather, time, once/cooldown) to the biome event schema.
+6. Expand combat: enemy AI, flee, multiple opponents, hit chance/damage variance, or
    initiative, depending on the desired feel.
-3. Give actions real placeholder-to-playable outcomes, starting with stat/time costs
-   and an `action:resolved` event.
-4. Make **Travel** use the locations module instead of being a placeholder action.
-5. Add per-biome action overrides and test them in the UI.
-6. Add event conditions (weather, time, once/cooldown) to the biome event schema.
-7. Use the new stats in checks or opposed rolls, and decide how they progress.
-8. Add a travel graph/connections between locations.
-9. Manually verify both real folder pickers in Chrome/Edge.
+7. Decide how stats progress through training, actions and equipment.
+8. Manually verify both real folder pickers in Chrome/Edge.
 
 ## Quick prompt for a new AI
 
@@ -283,10 +331,12 @@ Do not edit engine.js (core v0.2). Keep every module's state slice JSON-safe and
 modules communicate only through events. UI events must be followed by engine.flush();
 follow-up events use depth + 1. init() reruns on reset, so subscribe/register only once.
 Use engine.rng or the tick rng, never Math.random. Put content in data files. Update the
-event catalog and module registry in ENGINE_SPEC.md for every module or event change.
+event catalog and module registry in ENGINE_SPEC.md for every module or event change,
+and update MODULES.md (role, code map, events, adjustment table, update log) whenever a
+module changes.
 
-Current state: locations, biome events, main-character and NPC base stats plus armor,
-personality traits, five placeholder area actions and basic player-first combat
-(Attack/Defend) are working. Start by asking what feature to build next; do not add
-unrequested scope.
+Current state: locations, biome events, main-character and NPC base stats, equipment and
+armor, personality traits, five area actions with costs/outcomes/time and Travel through
+the locations module, and basic player-first combat (Attack/Defend) are working. Start by
+asking what feature to build next; do not add unrequested scope.
 ```

@@ -30,9 +30,10 @@ attack damage = max(minDamage, round(attacker.personalCombat * multiplier))
 defend damage = max(0, incoming damage - armor * armorMultiplier)
 ```
 
-Defaults are `multiplier: 1`, `minDamage: 1`, `armorMultiplier: 2`. Armor is 0 for every
-character until equipment exists, so Defend currently blocks nothing; the formula and
-event data are already in place for equipment. This formula is provisional and may change.
+Defaults are `multiplier: 1`, `minDamage: 1`, `armorMultiplier: 2`. Armor now comes from
+the equipment module: equipping armor writes `stats.armor`, and Defend blocks
+`armor * 2` damage. Without equipment, armor is 0 and Defend blocks nothing. This formula
+is provisional and may change.
 
 ## State slice
 
@@ -82,6 +83,6 @@ NPC is at 0 HP.
 
 - Only one opponent, no flee, positioning, initiative, hit chance or damage variance.
 - The enemy has no AI yet; it always attacks.
-- Armor cannot be equipped or changed by location events. It stays 0 until an equipment
-  module writes it.
-- Defend is mostly a placeholder until armor is non-zero.
+- Armor is written by the equipment module (main character only). Equipping changes the
+  Defend reduction immediately; NPCs still fight with armor 0.
+- Defend is only useful once armor is equipped; with 0 armor it blocks nothing.

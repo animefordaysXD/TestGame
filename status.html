@@ -155,6 +155,7 @@
 <script src="characters/statsData.js"></script>
 <script src="characters/data.js"></script>
 <script src="characters/mainCharacterData.js"></script>
+<script src="equipment/data.js"></script>
 <script src="locations/data.js"></script>
 <script src="actions/data.js"></script>
 <script src="combat/data.js"></script>
@@ -168,6 +169,7 @@
   const ST = window.CharacterStatsData || { stats: [] };
   const LOC = window.LocationData || { biomes: [] };
   const ACT = window.LocationActionsData || { default: [], biomes: {} };
+  const EQD = window.EquipmentData || { items: [], slots: [] };
   const CBD = window.CombatData || { actions: [], attack: {}, defend: {} };
   const CD = window.CharacterData || { traits: [], opposites: [] };
 
@@ -204,7 +206,8 @@
           startedAtTick: null, startedAt: "", endedAtTick: null, endedAt: "", log: []
         },
         locations: { seed: 0, createdAt: "", nextId: 1, locations: {}, currentId: null },
-        actions: { locationId: null, locationName: "", biomeKey: "", actions: [] }
+        actions: { locationId: null, locationName: "", biomeKey: "", actions: [], lastAction: null },
+        equipment: { nextId: 1, items: {}, equippedId: null }
       }
     };
   }
@@ -357,6 +360,24 @@
       : "not created";
     const mainCharacter = node("mainCharacter", `v0.4 · ${mcSummary}`, "module", mcChildren, mc ? "built" : "empty");
 
+    /* Equipment ----------------------------------------------------------- */
+    const equipState = modules.equipment || {};
+    const gearItems = Object.values(equipState.items || {}).sort((a, b) => String(a.id).localeCompare(String(b.id)));
+    const equippedGear = equipState.equippedId ? (equipState.items || {})[equipState.equippedId] : null;
+    const gearArmor = equippedGear ? equippedGear.armor : 0;
+    const equipmentBranch = node("equipment", `v0.1 · ${gearItems.length} item(s) · armor ${gearArmor}/100`, "module", [
+      node("Equipped", equippedGear
+        ? `${equippedGear.name} · armor ${equippedGear.armor} · Defend blocks ${equippedGear.armor * 2}`
+        : "nothing equipped", equippedGear ? "state" : "warn"),
+      group(`Items (${gearItems.length})`, gearItems.length ? "main character only" : "find or scavenge armor",
+        gearItems.map((item) => node(
+          item.name || item.id,
+          `${item.id} · ${item.slot || "body"} · armor ${item.armor} · ${item.equipped ? "equipped" : "in inventory"}`,
+          "state", [], item.equipped ? "equipped" : ""
+        )), "state"),
+      node("Rules", "one body slot · equipment:equipped mirrors totalArmor into main stats · NPCs cannot equip yet", "content")
+    ], gearItems.length ? "built" : "empty");
+
     /* Combat -------------------------------------------------------------- */
     const combatState = modules.combat || {};
     const combatPlayer = combatState.player || null;
@@ -374,7 +395,7 @@
       node("Player", combatLine(combatPlayer), "state"),
       node("Enemy", combatLine(combatEnemy), "state"),
       node("Turn", combatSummary, "state"),
-      node("Rules", "player first · attack = Personal Combat · defend = max(0, damage - armor × 2) · enemy always attacks", "content"),
+      node("Rules", "player first · attack = Personal Combat · defend = max(0, damage - armor × 2) · armor comes from equipment · enemy always attacks", "content"),
       group(`Log (${combatLog.length})`, combatLog.length ? "most recent entries" : "empty",
         combatLog.slice(-6).map((line) => node(line, "", "state")), "state")
     ], combatState.active || combatState.winnerName ? "built" : "empty");
@@ -400,22 +421,30 @@
     /* Actions ------------------------------------------------------------- */
     const actionState = modules.actions || {};
     const actions = Array.isArray(actionState.actions) ? actionState.actions : [];
-    const actionItems = actions.map((action) => node(
-      action.name || action.id,
-      action.description || "",
-      "placeholder",
-      [],
-      "choose"
-    ));
-    const actionsBranch = node("actions", `v0.1 · ${actions.length} loaded · choices are placeholders`, "module", [
+    const lastAction = actionState.lastAction || null;
+    const actionItems = actions.map((action) => {
+      const costs = (action.costs || []).map((cost) => `${cost.delta > 0 ? "+" : ""}${cost.delta} ${cost.stat}`).join(", ");
+      return node(
+        action.name || action.id,
+        `${action.description || ""}${action.timeMinutes ? ` · ${action.timeMinutes} min` : ""}${costs ? ` · ${costs}` : ""}`,
+        "state",
+        [],
+        action.requiresDestination ? "travel" : "choose"
+      );
+    });
+    const lastLine = lastAction
+      ? `${lastAction.name} → ${lastAction.outcomeName || "travel"} · ${lastAction.timeMinutes || 0} min${lastAction.travelTo ? ` · to ${lastAction.travelTo}` : ""}`
+      : "no choice yet";
+    const actionsBranch = node("actions", `v0.2 · ${actions.length} loaded · ${lastAction ? "resolved" : "no choice yet"}`, "module", [
       node("Area", `${actionState.locationName || "none"}${actionState.biomeKey ? " · " + actionState.biomeKey : ""}${actionState.locationId ? " · " + actionState.locationId : ""}`, "state"),
       group(`Actions (${actions.length})`, actions.length ? "loaded from the last visited area" : "visit a location to load five", actionItems, "state"),
-      node("Resolution", "action:chosen only — no stat, time, reward or travel yet", "warn", [], "placeholder")
-    ], "placeholder");
+      node("Last resolution", lastLine, lastAction ? "state" : "warn", [], lastAction ? "resolved" : "pending"),
+      node("Resolution", "action:resolved → mainCharacter effects · equipment item · UI time and travel", "content")
+    ], actions.length ? "built" : "empty");
 
-    const modulesBranch = node("Modules", "5 registered · event-driven · one slice each", "state", [
-      chars, mainCharacter, combatBranch, locationsBranch, actionsBranch
-    ], "5");
+    const modulesBranch = node("Modules", "6 registered · event-driven · one slice each", "state", [
+      chars, mainCharacter, equipmentBranch, combatBranch, locationsBranch, actionsBranch
+    ], "6");
 
     /* Content ------------------------------------------------------------- */
     const biomeNodes = biomes.map((biome) => {
@@ -434,10 +463,11 @@
       node("characters/statsData.js", `${ST.stats.length} stats · ${ST.stats.filter((d) => d.kind === "resource").length} resources · ${ST.stats.filter((d) => d.kind === "skill").length} skills · ${ST.stats.filter((d) => d.kind === "equipment").length} equipment`, "content"),
       node("mainCharacterData.js", `portrait ${MC.imageSize ?? 256}px · upload ≤ ${Math.round((MC.maxUploadBytes || 0) / 1048576)} MB · ${(MC.genders || []).length} genders`, "content"),
       node("locations/data.js", `${biomes.length} biomes · ${weatherTotal} weather entries · ${(LOC.namePrefixes || []).length} prefixes · ${(LOC.nameSuffixes || []).length} suffixes · ${(LOC.namePatterns || []).length} name patterns`, "content"),
-      node("actions/data.js", `${defaultActions.length} default actions · ${overrides.length} biome override(s)`, "content"),
+      node("actions/data.js", `${defaultActions.length} default actions · ${overrides.length} biome override(s) · ${defaultActions.reduce((sum, action) => sum + ((action.outcomes || []).length), 0)} outcomes`, "content"),
+      node("equipment/data.js", `${(EQD.items || []).length} armor items · ${(EQD.slots || []).length} slot(s) · max armor ${EQD.maxArmor ?? 100} · auto-equip ${EQD.autoEquip === false ? "off" : "on"}`, "content"),
       node("combat/data.js", `${(CBD.actions || []).length} actions · attack ${(CBD.attack && CBD.attack.stat) || "personalCombat"} × ${(CBD.attack && CBD.attack.multiplier) || 1} · defend armor × ${(CBD.defend && CBD.defend.armorMultiplier) || 2}`, "content"),
       group(`Biome events (${biomes.length} files)`, eventsSummary, biomeNodes, "content"),
-      node("Docs", "ENGINE_SPEC.md v0.8 · HANDOFF.md · README.md · actions/README.md · combat/README.md · locations/README.md · locations/events/README.md · characters/mainChar/README.md", "content")
+      node("Docs", "ENGINE_SPEC.md v0.9 · MODULES.md · HANDOFF.md · README.md · actions/README.md · equipment/README.md · combat/README.md · locations/README.md · locations/events/README.md · characters/mainChar/README.md", "content")
     ], "data");
 
     /* Events -------------------------------------------------------------- */
@@ -448,7 +478,10 @@
         node("character:clearTemp", "UI → characters.clearTemp()", "event"),
         node("location:add", "UI → locations.add() · data { count? }", "event"),
         node("location:changed", "UI → characters clears Temporary Spawn", "event"),
-        node("action:choose", "UI → actions.choose() · data { actionId }", "event"),
+        node("action:choose", "UI → actions.choose() · data { actionId, destinationId? }", "event"),
+        node("equipment:add", "UI → equipment.add() · data { key? }", "event"),
+        node("equipment:equip", "UI → equipment.equip() · data { itemId }", "event"),
+        node("equipment:unequip", "UI → equipment.unequip() · no data", "event"),
         node("combat:start", "UI → combat.start() · data { player, enemy } snapshots", "event"),
         node("combat:action", "UI → combat.action() · data { action: attack|defend }", "event")
       ], "event"),
@@ -461,14 +494,20 @@
         node("location:event", "locations · event data + effects", "event"),
         node("actions:loaded", "actions · five actions for the area", "event"),
         node("action:chosen", "actions · { actionId, name, locationId, locationName }", "event"),
+        node("action:resolved", "actions · costs, effects, time, equipmentKey, travelTo", "event"),
+        node("action:blocked", "actions · { actionId, name, reason }", "event"),
         node("mainCharacter:saved", "mainCharacter · identity only (no image)", "event"),
         node("mainCharacter:statChanged", "mainCharacter · any non-equipment stat: stat, delta, value, max", "event"),
+        node("mainCharacter:armorChanged", "mainCharacter · armor mirrored from equipment", "event"),
+        node("equipment:added", "equipment · { itemId, key, name, armor, equipped, source }", "event"),
+        node("equipment:equipped", "equipment · { itemId, name, armor, totalArmor, previousItemId }", "event"),
+        node("equipment:unequipped", "equipment · { itemId, name, armor, totalArmor: 0 }", "event"),
         node("combat:started", "combat · player/enemy ids and names", "event"),
         node("combat:damage", "combat · source, target, amount, hpBefore/After, armor", "event"),
         node("combat:defended", "combat · player brace, armor and reduction", "event"),
         node("combat:ended", "combat · winner, loser, rounds", "event")
       ], "event")
-    ], "22");
+    ], "31");
 
     /* Docs & tests -------------------------------------------------------- */
     const testsBranch = node("Tests", "Node only · npm test", "test", [
@@ -477,10 +516,11 @@
       node("characters.test.cjs", "NPC stats · generation · save/clear · legacy load", "test"),
       node("main-character.test.cjs", "validation · image · base stats · effects · mirror", "test"),
       node("biome-events.test.cjs", "JSON loading · visit rolls · stat effects · reset", "test"),
-      node("actions.test.cjs", "five actions · overrides · choices · reset · save/load", "test"),
+      node("actions.test.cjs", "five actions · outcomes · costs · travel · equipment · reset", "test"),
+      node("equipment.test.cjs", "inventory · auto-equip · armor · combat · reset · save/load", "test"),
       node("combat.test.cjs", "player-first turns · attack · defend/armor · death · reset · save/load", "test"),
       node("serve.cjs", "static server on 127.0.0.1:8765", "test")
-    ], "8");
+    ], "9");
 
     const rootSub = live.state
       ? `${live.source} · ${clockText(time)} · tick ${time.tick}`
@@ -655,6 +695,8 @@
     const named = Object.values((state.modules.characters || {}).named || {});
     const temp = Object.values((state.modules.characters || {}).temp || {});
     const combat = state.modules.combat || {};
+    const gear = state.modules.equipment || {};
+    const equippedGear = gear.equippedId ? (gear.items || {})[gear.equippedId] : null;
     const mcRows = statRows(mc && mc.stats);
     const hp = mcRows.find((row) => row.def.key === "hp");
     const sta = mcRows.find((row) => row.def.key === "stamina");
@@ -662,9 +704,10 @@
       `${clockText(time)} · tick ${time.tick}`,
       `${time.tickMinutes} min/tick`,
       mc && hp && sta ? `HP ${hp.value ?? "—"}/${hp.max} · Stamina ${sta.value ?? "—"}/${sta.max}` : "No main character",
+      `Armor ${equippedGear ? equippedGear.armor : 0}/100`,
       combat.active ? `Combat: round ${combat.round}` : combat.winnerName ? `Combat: ${combat.winnerName} won` : "No combat",
       `${locs.length} location${locs.length === 1 ? "" : "s"}`,
-      `${acts.length} action${acts.length === 1 ? "" : "s"} (placeholder)`,
+      `${acts.length} action${acts.length === 1 ? "" : "s"}`,
       `${named.length} named · ${temp.length} temporary`,
       events ? `${events.enabled} biome event${events.enabled === 1 ? "" : "s"} active` : "Biome events…",
       `${state.eventLog ? state.eventLog.length : 0} logged`

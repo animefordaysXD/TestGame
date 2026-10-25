@@ -27,3 +27,8 @@ Locations/
 
 Combat is separate from visiting locations. A visit rolls biome events; fights start from
 an NPC card's **Fight** button. See `combat/README.md`.
+
+The **Travel** area action does not edit this slice directly. It resolves its cost, then
+the UI calls `locations.visit(destinationId)`; that is the same path as the **Visit**
+button, so the destination's actions load and its biome events roll. See
+`actions/README.md`.

@@ -3,10 +3,11 @@
 **Repository:** <https://github.com/animefordaysXD/TestGame>
 
 > **New AI session? Start with [HANDOFF.md](HANDOFF.md).** It summarizes the current
-> state, architecture rules, tests, known limitations and next steps.
+> state, architecture rules, tests, known limitations and next steps. For a per-module
+> map and "where do I change this?" guide, use [MODULES.md](MODULES.md).
 
-Current build: core v0.2, characters v0.3, main character v0.4, combat v0.1,
-locations v0.2, actions v0.1, plus the read-only status viewer.
+Current build: core v0.2, characters v0.3, main character v0.4, equipment v0.1,
+combat v0.1, locations v0.2, actions v0.2, plus the read-only status viewer.
 
 ## Run
 
@@ -36,20 +37,22 @@ System Access API; it does not prove the real browser folder picker works.
 On Windows, if PowerShell blocks `npm.ps1`, use `npm.cmd test` or run the test files
 directly with `node test/locations.test.cjs`, `node test/locations-disk.test.cjs`,
 `node test/characters.test.cjs`, `node test/main-character.test.cjs`,
-`node test/biome-events.test.cjs`, `node test/actions.test.cjs`, and
-`node test/combat.test.cjs`.
+`node test/biome-events.test.cjs`, `node test/actions.test.cjs`,
+`node test/equipment.test.cjs`, and `node test/combat.test.cjs`.
 
 ## Layout
 
 - `engine.js` — core (unchanged v0.2)
 - `characters/` — NPC generator, shared base stats, main character creator and storage
+- `equipment/` — armor catalogue and main-character inventory (equip/unequip)
 - `combat/` — basic player-first duels (Attack/Defend)
 - `locations/` — procedural map locations
 - `locations/events/` — per-biome event JSON (copy/paste templates and the tundra sample)
-- `actions/` — five placeholder area actions and optional biome overrides
+- `actions/` — five area actions with costs/outcomes and optional biome overrides
 - `Locations/` — JSON mirror folder (written after connecting it in the page)
 - `status.html` — read-only node-tree viewer for the current game state
 - `ENGINE_SPEC.md` — current engine contract and event catalog
+- `MODULES.md` — living per-module handbook: role, code map, events, adjustment guide
 - `HANDOFF.md` — session handoff and continuation notes
 
 ## Status tree
@@ -59,8 +62,9 @@ same `localStorage` slot (`save1`) as the game and shows:
 
 - the world clock, seed and event-log size;
 - every module and its live state slice: NPCs with personality traits and stats, the
-  main character with HP/Stamina/Mana, armor and skills, the current combat and its log,
-  locations with the current marker, and the five loaded actions;
+  main character with HP/Stamina/Mana, armor and skills, the equipment inventory, the
+  current combat and its log, locations with the current marker, and the five loaded
+  actions plus the last resolution;
 - content data counts and the enabled/total events in each biome file;
 - the event catalog and the Node test files.
 
@@ -86,10 +90,10 @@ runtime-only and are not stored in the save, so the tree cannot show them.
   are resources; the skills are 1-20; armor is 0-100 and starts at 0. The main character
   starts at 100/100 HP, 100/100 Stamina, 50/50 Mana, 0 armor and 10 in each skill. NPCs
   roll their values.
-- Location events can change any non-equipment base stat; the current values are saved
-  with the character. Armor is reserved for equipment and is ignored by location events.
-  The main-character panel shows all stats in a grid, and each NPC card shows a compact
-  stat line.
+- Location events and resolved area actions can change any non-equipment base stat; the
+  current values are saved with the character. Armor is written by the equipment module
+  and is ignored by event/action effects. The main-character panel shows all stats in a
+  grid, and each NPC card shows a compact stat line.
 - The main character is separate from the generated NPCs in Named NPC / Temporary Spawn.
   NPCs keep their five personality traits; those will feed a future behaviour system.
 
@@ -99,15 +103,26 @@ runtime-only and are not stored in the save, so the tree cannot show them.
   first.
 - The player always moves first. **Attack** deals damage based on the attacker's
   Personal Combat; a surviving enemy immediately counterattacks.
-- **Defend** braces for the next attack. The provisional formula is
-  `max(0, damage - armor * 2)`. Armor is 0 for everyone until equipment is added, so
-  Defend currently blocks nothing.
+- **Defend** braces for the next attack. The formula is
+  `max(0, damage - armor * 2)`. Armor comes from equipped equipment; with no armor,
+  Defend blocks nothing.
 - `combat:damage` lowers the real main/NPC HP; 0 HP ends the duel. A lethal player hit
   skips the enemy counterattack.
 - The enemy always attacks in this basic version. There is no flee, initiative, hit
   chance or damage variance yet.
 - Tuning lives in `combat/data.js`; the turn flow and events are documented in
   `combat/README.md` and `ENGINE_SPEC.md`.
+
+## Equipment
+
+- **Find armor** adds a random item from `equipment/data.js`; the first item is equipped
+  automatically. Each item has **Equip** / **Unequip**.
+- Armor is written into the main character's Armor stat and used by combat's Defend
+  action (`armor × 2` damage blocked). The panel shows the equipped item and total armor.
+- Scavenging can also award armor through an action outcome.
+- The catalogue (name, slot, armor, weight) lives in `equipment/data.js`. Only the main
+  character can equip in this version; NPCs still have armor 0.
+- See `equipment/README.md`.
 
 ## Locations module
 
@@ -138,10 +153,15 @@ runtime-only and are not stored in the save, so the tree cannot show them.
 
 ## Area actions
 
-- Visiting a location loads five placeholder actions in the **Actions** panel.
-- The default actions are Scout, Scavenge, Rest, Hunt and Travel.
-- Every **Choose** button logs `action:chosen`; no stat, time, item or travel effects
-  are applied yet.
-- Edit `actions/data.js` to change the default list or add a biome-specific list under
-  `biomes.<biomeKey>`.
-- See `actions/README.md` for the action shape and override example.
+- Visiting a location loads five actions in the **Actions** panel.
+- The default actions are Scout, Scavenge, Rest, Hunt and Travel. Each has a time cost,
+  stat costs and one weighted outcome; the last resolution is shown in the panel.
+- Choosing an action emits `action:chosen` then `action:resolved`. The main-character
+  module applies the effects, equipment can award an item, and the UI advances the clock
+  by the action's `timeMinutes`.
+- **Travel** shows a destination dropdown. A destination is required; choosing it costs
+  stamina and visits that location through the locations module, which reloads the area's
+  actions and rolls its biome events.
+- Edit `actions/data.js` to change the default list, outcomes or add a biome-specific
+  list under `biomes.<biomeKey>`.
+- See `actions/README.md` for the full action shape and override example.
