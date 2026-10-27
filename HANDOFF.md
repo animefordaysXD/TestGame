@@ -2,16 +2,17 @@
 
 **Repository:** <https://github.com/animefordaysXD/TestGame>
 
-**Last updated:** 2026-10-24
-**Current spec:** `ENGINE_SPEC.md` v0.9
+**Last updated:** 2026-10-27
+**Current spec:** `ENGINE_SPEC.md` v1.0
 **Status:** working test page with procedural locations, biome events, a main-character
 creator with nine base stats plus armor, NPCs with the same stats and personality traits,
 basic player-first combat (Attack/Defend), an equipment module whose armor feeds Defend,
-five area actions with costs/outcomes/time and Travel through the locations module, and a
-live node-tree status page.
+five area actions with costs/outcomes/time, timed travel with 5-minute event checks and
+pause/resume, and a live node-tree status page.
 
 This file is the starting point for a new AI session. Read it first, then `README.md`,
-`ENGINE_SPEC.md` and `MODULES.md` (the per-module map and adjustment guide).
+`DESIGN.md` (what the game is and why), `ENGINE_SPEC.md` and `MODULES.md` (the per-module
+map and adjustment guide). `IDEAS.md` is the running list of ideas that are not decisions.
 
 ## Clone
 
@@ -63,6 +64,8 @@ Tests currently cover:
   stat costs, time, travel through locations, equipment rewards, reset, save/load.
 - `test/equipment.test.cjs` — inventory, auto-equip, swap/unequip, armor bridge,
   combat/Defend integration, reset, save/load.
+- `test/travel.test.cjs` — 5-minute checks, event pause/resume, effects, duration
+  rounding, cancel, reset, save/load.
 - `test/combat.test.cjs` — player-first turns, attack damage, defend/armor, lethal hits,
   invalid actions, reset, save/load.
 
@@ -81,6 +84,9 @@ Tests currently cover:
 - **Update `MODULES.md` in the same change whenever a module changes.** It is the
   practical map (role, code map, events, adjustment table) and the update log. Add a
   row to its update log, and keep it consistent with the code, the spec and status.
+- **`DESIGN.md` is the product source of truth.** Check a request against its pillars and
+  decisions before building. Record new decisions there, and in `IDEAS.md` when an idea
+  arrives. Do not present a **Proposed** item as decided.
 - Keep State slices JSON-safe. Never cache a slice object; `load()` replaces the state.
 
 ## Git workflow
@@ -99,6 +105,7 @@ Tests currently cover:
 | `combat` | `active`, `round`, `turn`, `player`, `enemy`, `defending`, `winner*`, `log[]` | basic player-first duels; Attack/Defend |
 | `locations` | `seed`, `createdAt`, `nextId`, `locations{}`, `currentId` | procedural locations, visit rolls, JSON mirror |
 | `actions` | `locationId`, `locationName`, `biomeKey`, `actions[]`, `lastAction` | five area actions with costs, outcomes, time and Travel |
+| `travel` | `active`, `paused`, route, `elapsedMinutes`, `durationMinutes`, `checks`, `eventCount`, `lastEvent`, `lastCompleted` | 5-minute journey checks, event pause/resume, arrival handoff |
 
 ### Main character
 
@@ -116,6 +123,8 @@ Tests currently cover:
   the module emits `mainCharacter:statChanged` at `depth + 1`. Armor is ignored here.
 - `action:resolved` effects use the same clamping path (`applyActionEffects`), so action
   costs and outcomes can change any non-equipment stat; `eventId` is the action id.
+- `travel:event` effects use the same path (`applyTravelEffects`), so an interrupted
+  journey applies its stat changes; `eventId` is the travel event id.
 - `equipment:equipped` / `equipment:unequipped` write `stats.armor` through
   `applyEquipment` and emit `mainCharacter:armorChanged` at `depth + 1`.
 - `combat:damage` targeting `main` lowers HP directly; the combat module already logs the
@@ -179,12 +188,35 @@ Tests currently cover:
   `action:resolved` at `depth + 1` with combined costs/effects, `timeMinutes`,
   `equipmentKey` and `travelTo`.
 - The actions module applies nothing itself. `mainCharacter` applies the effects,
-  `equipment` adds an awarded item, and the UI advances the clock by whole ticks.
+  `equipment` adds an awarded item, and the UI advances the clock by whole ticks for a
+  normal action.
 - Travel requires a destination; without one the module emits `action:blocked` and
-  resolves nothing. The UI then calls `locations.visit(travelTo)`, so the destination's
-  actions load and its biome events roll. No module edits another's slice.
+  resolves nothing. For a valid journey the UI starts the travel module, which spends
+  `timeMinutes` in 5-minute checks. On completion the UI calls `locations.visit(travelTo)`,
+  so the destination's actions load and its biome events roll. No module edits another's
+  slice.
 - The UI shows an **Actions** panel with the area name, five actions, cost/time text, a
   destination dropdown for Travel, and the last resolution in the status line.
+
+### Travel
+
+- `travel/data.js` owns `minutesPerCheck` (5), `chancePercent` (8% fallback),
+  `chanceByBiome` overrides (6-10% across the ten biomes) and the travel event catalogue.
+  Each event has `{ id, name, text, weight, enabled, effects }`.
+- A journey starts from `travel:start` after a Travel action resolves. The UI passes a
+  destination snapshot and `durationMinutes`; the module never reads the locations slice.
+- Duration is rounded up to whole checks. The UI temporarily sets a 5-minute tick,
+  advances one check, fires `travel:advance`, and repeats. It restores the previous tick
+  size after a pause or completion.
+- Each check rolls once. On a hit the journey pauses, stores `lastEvent`, emits
+  `travel:event`, and `mainCharacter.applyTravelEffects()` applies the effects. Press
+  **Continue travel** to emit `travel:continue` and resume.
+- Quiet checks emit `travel:progress`; the last one emits `travel:completed`. An event on
+  the final check pauses first; Continue then completes without adding time.
+- On completion the UI calls `locations.visit(destinationId)`. Travel events are separate
+  from biome events, which still roll on arrival.
+- A paused/in-flight journey is saved. The UI shows **Continue travel** after load.
+  **Cancel journey** abandons it without a refund.
 
 ### Equipment
 
@@ -220,9 +252,25 @@ UI Choose action
   -> mainCharacter.applyActionEffects() -> mainCharacter:statChanged
   -> equipment.add() for a rewarded item -> equipment:added/equipped
   -> UI engine.flush()
-  -> UI engine.step(ceil(timeMinutes / tickMinutes))
-  -> for Travel: locations.visit(travelTo) -> location:visited -> actions:loaded + biome events
+  -> normal action: UI engine.step(ceil(timeMinutes / tickMinutes))
+  -> Travel: UI travel:start -> travel:started
+     -> UI sets 5-minute ticks, steps one tick, then travel:advance
+        -> travel:progress (loop continues)
+        -> travel:event (pause; mainCharacter applies effects)
+           -> Continue -> travel:continue -> travel:resumed -> loop resumes
+        -> travel:completed
+           -> UI restores tick size and calls locations.visit(destinationId)
+              -> location:visited -> actions:loaded + biome events
   -> engine.flush() from the UI
+```
+
+```text
+UI Travel interruption
+  -> travel:advance
+  -> travel:event { text, effects }
+  -> mainCharacter.applyTravelEffects() -> mainCharacter:statChanged
+  -> UI shows the event and disables the Actions buttons
+  -> no clock/journey progress until travel:continue
 ```
 
 ```text
@@ -246,6 +294,21 @@ UI Fight on an NPC
 
 ## Recent work
 
+- Added `DESIGN.md` (vision, pillars, decisions, roadmap) and `IDEAS.md` (running idea
+  list) to the repository, and wired them into the reading order, architecture rules,
+  `README.md`, `MODULES.md` and the status page's Docs node. `DESIGN.md` records timed
+  travel and the action time model; its status snapshot now matches the code versions.
+- Added the `travel` module: a journey owns elapsed time, 5-minute checks, event rolls and
+  pause/resume. `travel/data.js` has six interruption events and per-biome chance
+  overrides. The UI drives a temporary 5-minute tick, restores the player's tick size,
+  and calls `locations.visit` only on arrival.
+- Main character v0.5 applies `travel:event` effects via `applyTravelEffects`, so
+  interruptions use the same clamp/`statChanged` path as location and action effects.
+- Added the Travel panel (**Continue travel**, **Cancel journey**, route/progress/event)
+  and disabled Actions while a journey is active. The tick-size selector now offers 5 min.
+- Added `test/travel.test.cjs` covering checks, pause/resume, effects, cancel, duration
+  rounding, reset and save/load. The travel test controls `TravelData.chancePercent` for
+  deterministic event rolls.
 - Added the `equipment` module: a six-item body-armor catalogue, inventory with
   auto-equip/swap/unequip, `equipment:add/equip/unequip` requests and
   `equipment:added/equipped/unequipped` events. Armor is mirrored into the main
@@ -253,21 +316,17 @@ UI Fight on an NPC
 - Made area actions playable: each default action now has a time cost, stat costs and
   weighted outcomes. `action:resolved` carries effects, `timeMinutes`, an optional
   `equipmentKey` and an optional `travelTo`; `lastAction` is saved for the UI/status tree.
-- Travel now uses the locations module. The Actions panel shows a destination dropdown;
-  choosing Travel pays its stamina cost, advances time, then calls `locations.visit`,
-  which reloads actions and rolls biome events. `action:blocked` covers a missing
-  destination.
 - Added the **Equipment** panel (Find armor, inventory, Equip/Unequip) and the **Actions**
   panel's cost/time/travel UI. Armor is shown in the main stat grid and combat note.
 - Defend now has a visible effect: with equipment equipped, `combat:damage` reports the
   armor reduction and the real HP loss is smaller.
 - Added `test/equipment.test.cjs`, rewrote `test/actions.test.cjs` for outcomes/time/
   travel/equipment, and extended the status tree with equipment, action resolution,
-  events and content counts. Docs are at `ENGINE_SPEC.md` v0.9.
-- All eight Node test files pass. Browser checks passed for: saving a character, adding
-  and visiting locations, Rest advancing 60 minutes, Find armor/Equip/Unequip, Travel to
-  another location, a Defend with armor 1 blocking 2 damage, and the new status branches.
-  No console errors.
+  events and content counts. Docs are at `ENGINE_SPEC.md` v1.0.
+- All nine Node test files pass. Browser checks passed for: saving a character, adding
+  and visiting locations, Rest advancing 60 minutes, Find armor/Equip/Unequip, a
+  30-minute Travel pausing at 5 minutes then completing after Continue, a Defend with
+  armor 1 blocking 2 damage, and the new status branches. No console errors.
 - Added `MODULES.md`, a living per-module handbook: role, files, state, code map, events,
   adjustment tables, gotchas and an update log. It must be updated with every module
   change (also listed in the architecture rules).
@@ -275,8 +334,12 @@ UI Fight on an NPC
 ## Known limitations and quirks
 
 - Area actions resolve costs, one weighted outcome, time and travel, but have no
-  requirements or skill checks yet. Travel can reach any charted location.
-- The UI applies action time by stepping whole ticks; there is no separate time-cost API.
+  requirements or skill checks yet. Travel can reach any charted location; a journey
+  spends its action time in 5-minute checks.
+- Normal action time is applied by stepping whole ticks. Travel temporarily switches to
+  5-minute ticks, then restores the previous tick size.
+- Travel interruptions are stat-effect scenes: they cannot start combat or offer choices,
+  and they do not depend on route distance, weather or hostility.
 - Base stats are stored, and location events/actions can change them. Combat uses Personal
   Combat and armor, but there is no progression, training or opposed-roll system yet.
 - Combat is one-on-one and player-first. There is no flee, positioning, initiative, hit
@@ -288,8 +351,8 @@ UI Fight on an NPC
 - Biome events have no cooldowns, once-only flags, weather filters or requirements.
   Every enabled event is an independent roll on each visit.
 - `location:changed` still only clears Temporary Spawn; there is no travel graph,
-  coordinates or location connections. Travel moves `currentId` through any known
-  location.
+  coordinates or location connections. The travel module runs the in-between journey and
+  the UI calls `locations.visit` on arrival, moving `currentId` to any known location.
 - The real OS folder pickers are untested in a browser. The disk tests use an in-memory
   File System Access API mock. Chrome/Edge is required.
 - `mainChar/` is a write mirror, not an import source. `localStorage` or the in-game load
@@ -311,21 +374,28 @@ UI Fight on an NPC
    inventory limits; keep the armor-to-stat bridge event-based.
 2. Use stats in action and event checks (success/chance based on skill and difficulty)
    and add requirements such as minimum stamina or a needed item.
-3. Add a travel graph/connections between locations with distance and travel time,
-   instead of letting Travel reach any charted location.
-4. Add per-biome action overrides and test them in the UI.
-5. Add event conditions (weather, time, once/cooldown) to the biome event schema.
-6. Expand combat: enemy AI, flee, multiple opponents, hit chance/damage variance, or
+3. Add a travel graph/connections between locations with route distance, route-specific
+   encounters and per-route travel times, instead of letting Travel reach any charted
+   location.
+4. Add travel interruption choices (press on, turn back, fight) by handing off to other
+   modules through new request/event pairs; keep travel resolution modular.
+5. Add per-biome action overrides and test them in the UI.
+6. Add event conditions (weather, time, once/cooldown) to the biome event schema.
+7. Expand combat: enemy AI, flee, multiple opponents, hit chance/damage variance, or
    initiative, depending on the desired feel.
-7. Decide how stats progress through training, actions and equipment.
-8. Manually verify both real folder pickers in Chrome/Edge.
+8. Decide how stats progress through training, actions and equipment.
+9. Manually verify both real folder pickers in Chrome/Edge.
 
 ## Quick prompt for a new AI
 
 ```text
 Continue the project at https://github.com/animefordaysXD/TestGame.
-Read HANDOFF.md first, then README.md and ENGINE_SPEC.md. Follow the architecture rules
-in HANDOFF.md. Run the tests with npm test (Windows: npm.cmd test).
+Read HANDOFF.md first, then README.md, DESIGN.md and ENGINE_SPEC.md. Follow the
+architecture rules in HANDOFF.md. Run the tests with npm test (Windows: npm.cmd test).
+
+DESIGN.md is the product source of truth: check requests against its pillars and decisions,
+and do not build Proposed items as if they were decided. Record new ideas in IDEAS.md in
+the same turn.
 
 Do not edit engine.js (core v0.2). Keep every module's state slice JSON-safe and make
 modules communicate only through events. UI events must be followed by engine.flush();
@@ -336,7 +406,7 @@ and update MODULES.md (role, code map, events, adjustment table, update log) whe
 module changes.
 
 Current state: locations, biome events, main-character and NPC base stats, equipment and
-armor, personality traits, five area actions with costs/outcomes/time and Travel through
-the locations module, and basic player-first combat (Attack/Defend) are working. Start by
-asking what feature to build next; do not add unrequested scope.
+armor, personality traits, five area actions with costs/outcomes/time, timed travel with
+5-minute event checks and pause/resume, and basic player-first combat (Attack/Defend) are
+working. Start by asking what feature to build next; do not add unrequested scope.
 ```

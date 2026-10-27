@@ -1,14 +1,16 @@
-# Modular Text-RPG Engine — Spec v0.9
+# Modular Text-RPG Engine — Spec v1.0
 
 Plain JS/HTML, no build step, no dependencies. A small core runs the clock, event bus,
 RNG, state and save/load. All gameplay lives in modules that own one state slice and talk
 only through events. Code is the source of truth; this file is the quick contract.
 For the per-module code map and "where do I change this?" guide, see `MODULES.md`.
+For product intent — vision, pillars, decisions and roadmap — see `DESIGN.md`; unapproved
+ideas live in `IDEAS.md`.
 
 ## Core behaviour
 
-- **Time:** simulation clock. Each tick advances by `tickMinutes` (1, 10, 15, 30, 60,
-  360 or 1440). Start date defaults to `1000-01-01T06:00:00Z`.
+- **Time:** simulation clock. Each tick advances by `tickMinutes` (the UI offers 1, 5,
+  10, 15, 30, 60, 360 or 1440). Start date defaults to `1000-01-01T06:00:00Z`.
 - **Event checking:** each tick every registered generator gets its own roll (0-1) and
   may return one event, several, or nothing. The core ships with no generators.
 - **Event queue:** events are logged and announced as `event:<type>` then `event`.
@@ -95,6 +97,16 @@ Slices are JSON-safe. Never cache a slice object; `load()` replaces the whole st
 | action:chosen | actions | `{ actionId, name, locationId, locationName }` |
 | action:resolved | actions | `{ actionId, name, outcomeId, outcomeName, text, effects, timeMinutes, equipmentKey, travelTo, locationId, locationName, atTick, at }` |
 | action:blocked | actions | `{ actionId, name, reason, locationId, locationName }` |
+| travel:start (request) | UI | `{ destinationId, destinationName, durationMinutes, originId?, originName?, destinationBiomeKey? }` |
+| travel:advance (request) | UI | `{ minutes? }` (one check) |
+| travel:continue (request) | UI | none |
+| travel:cancel (request) | UI | none |
+| travel:started | travel | `{ destinationId, destinationName, destinationBiomeKey, originId, originName, durationMinutes, minutesPerCheck }` |
+| travel:progress | travel | `{ destinationId, destinationName, elapsedMinutes, durationMinutes, remainingMinutes, checks }` |
+| travel:event | travel | `{ eventId, name, text, effects, roll, elapsedMinutes, durationMinutes, destinationId, destinationName, atTick, at }` |
+| travel:resumed | travel | `{ destinationId, destinationName, elapsedMinutes, durationMinutes, remainingMinutes }` |
+| travel:completed | travel | `{ destinationId, destinationName, originId, originName, elapsedMinutes, durationMinutes, eventCount, atTick, at }` |
+| travel:cancelled | travel | `{ destinationId, destinationName, elapsedMinutes, durationMinutes }` |
 | equipment:add (request) | UI | `{ key? }` (omit to pick randomly) |
 | equipment:equip (request) | UI | `{ itemId }` |
 | equipment:unequip (request) | UI | none |
@@ -117,10 +129,11 @@ Slices are JSON-safe. Never cache a slice object; `load()` replaces the whole st
 |---|---|---|---|
 | core | none | `time`, `eventLog` | clock, state, save/load, event checking |
 | characters | none | `nextId`, `named{}`, `temp{}` | NPC generator with base stats; Named NPC / Temporary Spawn |
-| mainCharacter | none | `character` | player character; base stats; profile image; JSON mirror |
+| mainCharacter | none | `character` | player character; base stats; profile image; event/action/travel effects; JSON mirror |
 | combat | none | `active`, `round`, `turn`, `player`, `enemy`, `defending`, `winner*`, `log[]` | basic player-first duel; attack/defend |
 | locations | none | `seed`, `createdAt`, `nextId`, `locations{}`, `currentId` | map locations; visit/event checker; JSON mirror |
 | actions | none | `locationId`, `locationName`, `biomeKey`, `actions[]`, `lastAction` | five area actions with costs, outcomes, time and travel |
+| travel | none | `active`, `paused`, route, `elapsedMinutes`, `durationMinutes`, `checks`, `eventCount`, `lastEvent`, `lastCompleted` | 5-minute journey checks; pause/resume on travel events |
 | equipment | none | `nextId`, `items{}`, `equippedId` | main-character armor; mirrors armor into the character stat |
 
 ## Characters module v0.3
@@ -184,7 +197,7 @@ Slices are JSON-safe. Never cache a slice object; `load()` replaces the whole st
   `npcBell: true` averages three rolls for a mid-range cluster.
 - Personality (`traits`) is unchanged and remains NPC-only for now.
 
-## Main character module v0.4
+## Main character module v0.5
 
 - Files: `characters/mainCharacterData.js`, `characters/mainCharacter.js`.
 - Slice:
@@ -236,6 +249,9 @@ mainCharacter: {
 - It subscribes once to `action:resolved` and applies the combined costs and outcome
   effects through `applyActionEffects()` with the same clamping. The stat event's
   `eventId` is the action id.
+- It subscribes once to `travel:event` and applies the interruption effects through
+  `applyTravelEffects()` with the same clamping. The stat event's `eventId` is the
+  travel event id.
 - It subscribes once to `equipment:equipped` / `equipment:unequipped`. The announced
   `totalArmor` is clamped to 0-100, written to `stats.armor`, and announced as
   `mainCharacter:armorChanged` at `depth + 1`. The module never reads the equipment
@@ -254,8 +270,8 @@ mainCharacter: {
 - `writeToFolder()` rewrites the mirror from state. `folderConnected` reports whether a
   folder handle is held.
 - No tick generator. `init()` creates the slice and subscribes once to `location:event`,
-  `action:resolved`, `equipment:equipped` / `equipment:unequipped` and `combat:damage`;
-  reset clears the character but keeps those single subscriptions.
+  `action:resolved`, `travel:event`, `equipment:equipped` / `equipment:unequipped` and
+  `combat:damage`; reset clears the character but keeps those single subscriptions.
 - UI on the test page: name, gender, age, image picker with preview, a stat grid
   (nine base stats plus armor), **Save main character**, and **Connect mainChar folder**.
 
@@ -423,8 +439,9 @@ actions: {
   itself:
   - `mainCharacter` applies the effects and emits `mainCharacter:statChanged`.
   - `equipment` adds the item named by `equipmentKey`.
-  - the UI advances the clock by whole ticks and, for `travelTo`, calls
-    `locations.visit(destinationId)`.
+  - the UI advances the clock by whole ticks for a normal action. For `travelTo`, the UI
+    starts the travel module, which drives 5-minute checks; the destination is visited
+    only after the journey completes.
 - Travel actions set `requiresDestination: true` and have no outcomes. Without a
   destination the module emits `action:blocked` and resolves nothing. Movement stays in
   the locations module; actions never edits the locations slice.
@@ -434,6 +451,63 @@ actions: {
   `onLoad()` normalizes the loaded slice for the UI.
 - UI on the test page: an **Actions** panel with five **Choose** buttons, cost/time text
   in each row, a destination dropdown for Travel, and the last resolution in the status.
+
+## Travel module v0.1
+
+- Files: `travel/data.js`, `travel/travel.js`; notes in `travel/README.md`.
+- Slice:
+
+```js
+travel: {
+  active: false,
+  paused: false,
+  originId: null, originName: "",
+  destinationId: null, destinationName: "", destinationBiomeKey: "",
+  elapsedMinutes: 0,
+  durationMinutes: 0,       // rounded up to whole checks
+  minutesPerCheck: 5,
+  checks: 0,
+  eventCount: 0,
+  pausedAtMinutes: null,
+  lastEvent: null,          // interruption that caused the current pause
+  lastCompleted: null       // most recent arrival summary
+}
+```
+
+- A journey starts from `travel:start` after the UI resolves a Travel action. The UI
+  passes a destination snapshot (`destinationId`, `destinationName`,
+  `destinationBiomeKey`) and `durationMinutes`; the module never reads the locations
+  slice.
+- Duration is rounded up to a whole number of checks. A 30-minute journey is six
+  5-minute checks; a 27-minute journey becomes 30.
+- The UI drives time. It temporarily sets the core tick size to
+  `TravelData.minutesPerCheck` (5), steps one tick, fires `travel:advance`, and repeats.
+  It restores the previous tick size after a pause or completion. The module itself
+  does not touch `state.time`. Generators and `onTick` modules, if added later, see one
+  5-minute tick per travel check.
+- After each check the module rolls once: `chancePercent` (or
+  `chanceByBiome[destinationBiomeKey]`) is the per-check chance. On a hit it picks one
+  enabled event by `weight`, sets `paused`, stores `lastEvent`, and emits
+  `travel:event`. Positive and negative events both pause.
+- `travel:event` carries `effects`; `mainCharacter` applies them with
+  `applyTravelEffects()` and emits `mainCharacter:statChanged` at `depth + 1`.
+- Quiet checks emit `travel:progress`; the final quiet check emits `travel:completed`.
+  An event on the final check pauses first; after `travel:continue` the next
+  `travel:advance` completes without adding time.
+- `travel:continue` clears the pause and emits `travel:resumed`; the UI then resumes the
+  check loop. `travel:cancel` abandons the journey without a refund.
+- The module calls no other module. On `travel:completed` the UI calls
+  `locations.visit(destinationId)`, so locations remains the only mover.
+- Travel events are a separate catalogue from biome events. Biome events still roll
+  once when the destination is visited.
+- `init()` subscribes once and `onLoad()` normalizes the slice, including an in-flight
+  journey. A paused journey survives save/load; the player resumes with **Continue
+  travel**.
+- UI on the test page: a **Travel** panel with route, elapsed/duration, check count, the
+  paused event, **Continue travel** and **Cancel journey**. Actions are disabled while a
+  journey is active.
+- Content: `travel/data.js` owns `minutesPerCheck`, `chancePercent`,
+  `chanceByBiome` and `events: [{ id, name, text, weight, enabled, effects }]`.
 
 ## Equipment module v0.1
 
@@ -485,6 +559,10 @@ actions/
   actions.js
   data.js
   README.md
+travel/
+  travel.js
+  data.js
+  README.md
 equipment/
   equipment.js
   data.js
@@ -532,6 +610,7 @@ test/
   main-character.test.cjs
   biome-events.test.cjs
   actions.test.cjs
+  travel.test.cjs
   equipment.test.cjs
   combat.test.cjs
   serve.cjs
@@ -544,6 +623,10 @@ test/
 - `location:changed` still only clears Temporary Spawn; it does not move the party.
 - Locations have no coordinates, connections, population or resources. The Travel action
   can visit any known location; `currentId` marks the last visit, not a travel graph.
+  Travel time is the action's `timeMinutes`, rounded up to whole 5-minute checks.
+- Travel events are generic interruptions with stat effects. They do not start combat,
+  offer choices or depend on route distance, weather or hostility. Each check is an
+  independent roll.
 - Biome events have no cooldowns, once-only flags, weather filters or requirements.
   Each enabled event is an independent roll on every visit.
 - Base stats are stored, and location events and area actions can change them. Combat uses
@@ -557,7 +640,9 @@ test/
   requires a saved character before **Find armor**; an action reward equipped before the
   character exists will not change `stats.armor` later.
 - Area actions resolve costs, one weighted outcome, time and travel, but have no
-  requirements or skill checks, and travel can reach any charted location.
+  requirements or skill checks, and travel can reach any charted location. A journey
+  spends time in 5-minute checks and pauses on interruptions; there is no route map or
+  encounter choice yet.
 - Biome event JSON is fetched with `fetch`; open the page through the static server,
   not `file://`.
 - The real mainChar folder picker is untested in a browser; its write logic is covered

@@ -10,6 +10,6 @@ folder, the module uses this folder and writes:
 - `profile.webp` / `.png` / `.jpg` / `.svg` — a viewable copy of the profile picture
 
 The game state is the source of truth. `main.json` is rewritten on each save; it is not
-imported automatically. Biome events, actions and combat can change HP/stats between
-saves; the next save writes the current values. Armor is written by the equipment module
-when armor is equipped and is preserved by later profile saves.
+imported automatically. Biome events, actions, travel interruptions and combat can change
+HP/stats between saves; the next save writes the current values. Armor is written by the
+equipment module when armor is equipped and is preserved by later profile saves.

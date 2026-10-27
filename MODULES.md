@@ -6,11 +6,13 @@
 >
 > - `ENGINE_SPEC.md` - the contract: core rules, event catalog, module registry.
 > - `HANDOFF.md` - session state and what to do next.
+> - `DESIGN.md` - what the game is and why: vision, pillars, decisions, roadmap.
+> - `IDEAS.md` - running idea list; decisions graduate to `DESIGN.md`.
 > - `MODULES.md` (this file) - practical per-module map and adjustment guide.
 
-**Last updated:** 2026-10-24
-**Build:** core v0.2, characters v0.3, mainCharacter v0.4, equipment v0.1,
-combat v0.1, locations v0.2, actions v0.2, status viewer (not a module).
+**Last updated:** 2026-10-27
+**Build:** core v0.2, characters v0.3, mainCharacter v0.5, equipment v0.1,
+locations v0.2, actions v0.2, travel v0.1, combat v0.1, status viewer (not a module).
 
 ---
 
@@ -27,6 +29,8 @@ Use this checklist in every change that touches a module:
 6. Run `npm test` (Windows: `npm.cmd test`) and update the module's test file.
 7. If the module version changed, bump it in the file header comment, the
    **At a glance** table and the matching `status.html` node.
+8. If the change alters what the game is or why, update `DESIGN.md`; log new ideas in
+   `IDEAS.md` in the same turn.
 
 Do not record secrets, browser handles or absolute local paths here. Folder
 connections are runtime-only and never part of a save.
@@ -39,6 +43,8 @@ Newest first. Keep entries short; details live in the module sections.
 
 | Date | Change | Files |
 |---|---|---|
+| 2026-10-27 | Added the product docs to the repo: `DESIGN.md` (vision, decisions, travel/time model, roadmap) and `IDEAS.md`; wired them into the reading order and status Docs node. | `DESIGN.md`, `IDEAS.md`, `README.md`, `HANDOFF.md`, `MODULES.md`, `status.html` |
+| 2026-10-25 | Travel v0.1: journeys spend time in 5-minute checks, roll a travel event each check, pause on an event, and resume on Continue. The UI drives the clock and calls `locations.visit` only on completion. | `travel/*`, `index.html`, `actions/data.js`, `characters/mainCharacter.js`, `test/travel.test.cjs`, docs, `status.html`, `package.json` |
 | 2026-10-24 | Created the module handbook and added it to the doc rules. | `MODULES.md`, `README.md`, `HANDOFF.md`, `ENGINE_SPEC.md`, `status.html` |
 | 2026-10-24 | Documented the current six-item armor catalogue and removed stale "no equipment yet" comments. | `HANDOFF.md`, `combat/data.js` |
 | 2026-10-24 | Standardized spelling on "armor" and updated the mainCharacter subscription list in the spec. | `ENGINE_SPEC.md`, `equipment/*`, `status.html` |
@@ -55,14 +61,15 @@ Newest first. Keep entries short; details live in the module sections.
 |---|---|---|---|---|---|---|
 | core (engine) | 0.2 | `time`, `eventLog`, `version`, `seed`, `rngState` | - | bus + tick events | clock/log | covered indirectly |
 | characters | 0.3 | `nextId`, `named{}`, `temp{}` | `character:spawn/save/clearTemp`, `location:changed`, `combat:damage` | `character:spawned/saved/tempCleared` | NPC cards | `characters.test.cjs` |
-| mainCharacter | 0.4 | `character` | `location:event`, `action:resolved`, `equipment:equipped/unequipped`, `combat:damage` | `mainCharacter:saved/statChanged/armorChanged` | Main character | `main-character.test.cjs` |
+| mainCharacter | 0.5 | `character` | `location:event`, `action:resolved`, `travel:event`, `equipment:equipped/unequipped`, `combat:damage` | `mainCharacter:saved/statChanged/armorChanged` | Main character | `main-character.test.cjs` |
 | equipment | 0.1 | `nextId`, `items{}`, `equippedId` | `equipment:add/equip/unequip`, `action:resolved` | `equipment:added/equipped/unequipped` | Equipment | `equipment.test.cjs` |
-| combat | 0.1 | `active`, `round`, `turn`, snapshots, `log[]` | `combat:start/action` | `combat:started/damage/defended/ended` | Combat | `combat.test.cjs` |
 | locations | 0.2 | `seed`, `createdAt`, `nextId`, `locations{}`, `currentId` | `location:add` | `location:added/visited/event` | Locations + biome events | `locations.test.cjs`, `locations-disk.test.cjs`, `biome-events.test.cjs` |
 | actions | 0.2 | `locationId`, `locationName`, `biomeKey`, `actions[]`, `lastAction` | `location:visited`, `action:choose` | `actions:loaded`, `action:chosen/resolved/blocked` | Actions | `actions.test.cjs` |
+| travel | 0.1 | `active`, `paused`, route, `elapsedMinutes`, `durationMinutes`, `checks`, `eventCount`, `lastEvent`, `lastCompleted` | `travel:start/advance/continue/cancel` | `travel:started/progress/event/resumed/completed/cancelled` | Travel | `travel.test.cjs` |
+| combat | 0.1 | `active`, `round`, `turn`, snapshots, `log[]` | `combat:start/action` | `combat:started/damage/defended/ended` | Combat | `combat.test.cjs` |
 
 Registration order in `index.html`: characters -> mainCharacter -> equipment ->
-locations -> actions -> combat. Keep dependencies registered earlier.
+locations -> actions -> travel -> combat. Keep dependencies registered earlier.
 
 ---
 
@@ -88,7 +95,7 @@ What it does:
   world. Modules use `engine.rng` (or the tick `rng`), never `Math.random`.
 
 If you need a new shared engine capability, stop and discuss it first: changing core
-invalidates `ENGINE_SPEC.md` v0.9 and every test's assumptions.
+invalidates `ENGINE_SPEC.md` v1.0 and every test's assumptions.
 
 ---
 
@@ -185,14 +192,14 @@ Has no tick generator; spawning is UI-driven.
 
 ---
 
-## Main character (`characters/mainCharacter.js` v0.4)
+## Main character (`characters/mainCharacter.js` v0.5)
 
 ### Role
 
-Owns the one player character: identity, portrait, shared stats, event/action effects,
-combat HP and the armor mirror. It never reads the equipment, actions or combat
-slices; everything arrives through events. The UI calls `save()` directly and then
-`engine.flush()`.
+Owns the one player character: identity, portrait, shared stats, event/action/travel
+effects, combat HP and the armor mirror. It never reads the equipment, actions,
+travel or combat slices; everything arrives through events. The UI calls `save()`
+directly and then `engine.flush()`.
 
 ### Files and state
 
@@ -214,6 +221,7 @@ slices; everything arrives through events. The UI calls `save()` directly and th
 | `save(data, depth)` | Validates, preserves stats and the previous custom image, stores, emits `mainCharacter:saved` |
 | `applyEffects(depth, effects, eventId)` | Shared clamp-and-apply loop for `{ stat, delta }`; emits one `statChanged` per real change |
 | `applyEventEffects` / `applyActionEffects` | Thin wrappers that pass the location event id / action id |
+| `applyTravelEffects` | Thin wrapper that applies a `travel:event` interruption with its event id |
 | `applyEquipment(data, depth)` | Mirrors `totalArmor` into `stats.armor`; emits `armorChanged` only when it changes |
 | `applyCombatDamage(data)` | Lowers HP when `targetId === "main"`; no duplicate event |
 | `toJSON()` | Pretty character JSON for the UI |
@@ -223,6 +231,7 @@ slices; everything arrives through events. The UI calls `save()` directly and th
 
 - Listens once: `location:event` -> `applyEventEffects`;
   `action:resolved` -> `applyActionEffects`;
+  `travel:event` -> `applyTravelEffects`;
   `equipment:equipped` / `equipment:unequipped` -> `applyEquipment`;
   `combat:damage` -> `applyCombatDamage`.
 - Emits: `mainCharacter:saved` (identity only, no image); `mainCharacter:statChanged`
@@ -385,8 +394,9 @@ Damage is announced; the character modules apply it to the real characters.
 
 Generates charted locations and rolls their biome events on a visit. All randomness
 uses `engine.rng`. Generation is button-driven; there is no tick generator and no
-travel graph. The actions module loads actions from `location:visited`, and the UI
-calls `visit()` for both the Visit button and Travel.
+travel graph. The actions module loads actions from `location:visited`, the travel
+module runs the journey, and the UI calls `visit()` for both the Visit button and a
+completed journey.
 
 ### Files and state
 
@@ -453,7 +463,8 @@ calls `visit()` for both the Visit button and Travel.
 - Name generation retries 40 times, then appends a number to keep names unique.
 - The location mirror writes under `Locations/<seed>/`; on Windows `Locations/` and
   `locations/` are the same folder (case-insensitive). Do not add a broad ignore rule.
-- `currentId` means "last visited", not a travel graph. Travel can reach any location.
+- `currentId` means "last visited", not a travel graph. Travel can reach any location;
+  the travel module owns the in-between journey and the UI calls `visit()` on arrival.
 - `location:changed` only clears Temporary Spawn; it does not move the party or
   change `currentId`.
 
@@ -465,7 +476,8 @@ calls `visit()` for both the Visit button and Travel.
 
 Loads five area actions for the visited biome. On a choice it announces one weighted
 outcome plus costs and time. It applies nothing itself: the character module applies
-effects, equipment adds rewards, and the UI advances the clock and moves for travel.
+effects, equipment adds rewards, the UI advances the clock, and the travel module runs
+a journey when the resolved action carries `travelTo`.
 
 ### Files and state
 
@@ -510,7 +522,8 @@ effects, equipment adds rewards, and the UI advances the clock and moves for tra
 | Award armor | Outcome `equipmentKey` matching `equipment/data.js` |
 | Give an item on every use | Not supported yet; add an outcome with no effects and an `equipmentKey`, or add a new event |
 | Make a new travel action | `requiresDestination: true`, `outcomes: []`, `travelText` |
-| Change how time is applied | `index.html` `chooseAction()` (whole ticks, at least 1) |
+| Change how time is applied | `index.html` `chooseAction()` for normal actions; `driveTravel()` for journeys |
+| Change a journey's duration | The Travel action's `timeMinutes`; travel rounds it up to whole 5-minute checks |
 | Add requirements/skill checks | New logic in `choose()` plus a new event; document it |
 
 ### Gotchas
@@ -525,9 +538,106 @@ effects, equipment adds rewards, and the UI advances the clock and moves for tra
 - Effects are the merged costs + outcome effects; the module never edits stats.
 - Saves keep the loaded `actions[]`. Editing `actions/data.js` does not change a save
   until the next visit reloads the area.
-- The UI steps `ceil(timeMinutes / tickMinutes)` ticks only when time > 0, then calls
-  `locations.visit(travelTo)` and flushes again.
+- The UI steps `ceil(timeMinutes / tickMinutes)` ticks only for non-travel actions.
+  Travel hands `timeMinutes` to the travel module and calls `locations.visit(travelTo)`
+  only after the journey completes.
 - `lastAction` clears on the next visit; it is not a history log.
+
+---
+
+## Travel (`travel/travel.js` v0.1)
+
+### Role
+
+Runs a journey from the current location to a destination after a Travel action
+resolves. It owns the in-between state: elapsed minutes, checks, pauses and the last
+interruption. Travel spends time in 5-minute checks; after every check it rolls for a
+travel event. An event pauses the journey until the player presses **Continue travel**.
+The module never advances the clock and never moves the party: the UI steps the clock
+and calls `locations.visit(destinationId)` after `travel:completed`.
+
+### Files and state
+
+- `travel/data.js` - `minutesPerCheck` (5), `chancePercent` per check, optional
+  `chanceByBiome` overrides, and the travel event catalogue.
+- `travel/travel.js` - journey lifecycle, checks, pause/resume, duration rounding.
+- Slice:
+  `{ active, paused, originId, originName, destinationId, destinationName,
+  destinationBiomeKey, elapsedMinutes, durationMinutes, minutesPerCheck, checks,
+  eventCount, pausedAtMinutes, lastEvent, lastCompleted }`.
+- Event: `{ id, name, text, weight, enabled, effects: [{ stat, delta }] }`; disabled
+  entries are skipped at load.
+- `lastEvent` stores the interruption that caused the current pause:
+  `{ eventId, name, text, effects, roll, elapsedMinutes, durationMinutes,
+  destinationId, destinationName, atTick, at }`.
+- `lastCompleted` stores the arrival summary:
+  `{ destinationId, destinationName, originId, originName, elapsedMinutes,
+  durationMinutes, eventCount, atTick, at }`.
+
+### Code map
+
+| Symbol | What it does |
+|---|---|
+| `cleanEffects(list)` | Drops invalid/zero `{ stat, delta }` entries |
+| `cleanEvent(raw, index)` | Normalizes one travel event and skips `enabled: false` |
+| `weightedPick(rng, events)` | Picks one event by relative weight |
+| `chanceFor(biomeKey)` | Per-check chance from the biome override, else `chancePercent` |
+| `normalize()` | Repairs a loaded slice and clears invalid active journeys |
+| `start(data, depth)` | Stores the route and duration; rounds duration up to whole checks; emits `travel:started` |
+| `advance(depth, data)` | Adds one check, rolls for an event, pauses or emits progress/completion |
+| `complete(depth)` | Clears `active`, writes `lastCompleted`, emits `travel:completed` |
+| `resume(depth)` | Clears `paused` and emits `travel:resumed`; the next advance continues/completes |
+| `cancel(depth)` | Abandons the journey without completing it; no refund |
+
+### Events
+
+- Listens: `travel:start` (`{ destinationId, destinationName, durationMinutes,
+  originId?, originName?, destinationBiomeKey? }`), `travel:advance`
+  (`{ minutes? }`), `travel:continue`, `travel:cancel`.
+- Emits at `depth + 1`: `travel:started`, `travel:progress`, `travel:event`,
+  `travel:resumed`, `travel:completed`, `travel:cancelled`.
+- `travel:event` carries `effects`; `mainCharacter` listens and applies them, emitting
+  `mainCharacter:statChanged` one depth deeper.
+- The UI emits `travel:advance` once per 5-minute step; the module does not schedule
+  itself.
+
+### Adjust it
+
+| If you want to... | Change |
+|---|---|
+| Change check length | `travel/data.js` `minutesPerCheck` (keep 5 unless the UI tick loop is updated) |
+| Make interruptions more/less common | `chancePercent`, or a biome entry in `chanceByBiome` |
+| Add/retune a travel event | `travel/data.js` `events` (`weight`, `text`, `effects`) |
+| Disable an event without deleting it | `enabled: false` |
+| Change event effects | `effects: [{ stat, delta }]` using `statsData.js` keys; armor is ignored |
+| Change journey duration | The Travel action's `timeMinutes` in `actions/data.js` |
+| Change pause/resume wording or UX | `travel/travel.js` event text plus the Travel panel in `index.html` |
+| Add event choices (fight/continue/turn back) | Add a request event and options; keep resolution in modules, not the UI |
+| Let travel move the party | It already asks the UI to call `locations.visit` on completion; do not call locations from this module |
+| Change tick behavior during travel | `index.html` `driveTravel()`; it temporarily uses 5-minute ticks and restores the old size |
+
+### Gotchas
+
+- Travel events are a separate catalogue from biome events. Biome events still roll
+  once when the destination is visited at the end of the journey.
+- Positive events pause travel too, because every event is a scene the player sees.
+- Duration is rounded up to a whole number of checks: 27 minutes becomes 30, in three
+  5-minute checks. The action still announced 27 minutes, so keep travel times
+  multiples of 5 in content.
+- An event on the final check pauses the journey; after Continue, the next
+  `travel:advance` completes without adding a phantom check. The UI checks
+  `elapsed >= duration` and does not step another tick before that advance.
+- The module does not move `state.time`; the UI owns the clock. This keeps travel
+  testable without a real clock and avoids editing core state directly.
+- `driveTravel()` restores the player's previous tick size after completion or pause.
+  A 5-minute tick size is a temporary travel setting. Any future generator or `onTick`
+  module runs once per travel check while the journey is being driven.
+- Starting a journey while one is active is ignored. Cancel does not refund time,
+  costs or stat effects already spent.
+- A saved in-flight journey survives `load()` (including a pause and `lastEvent`).
+  Continue works after load; the UI does not auto-resume on its own.
+- Travel events cannot start combat yet. Use effects only; add a new request/event pair
+  if an interruption should hand off to the combat module.
 
 ---
 
@@ -537,12 +647,14 @@ The page is not a module. It registers modules, renders panels and fires request
 
 | Area | Key symbols | Notes |
 |---|---|---|
-| Module registration | `createCharactersModule`, `createMainCharacterModule`, `createEquipmentModule`, `createLocationsModule`, `createActionsModule`, `createCombatModule` | Registration order matters; add new modules before their dependents |
+| Module registration | `createCharactersModule`, `createMainCharacterModule`, `createEquipmentModule`, `createLocationsModule`, `createActionsModule`, `createTravelModule`, `createCombatModule` | Registration order matters; add new modules before their dependents |
 | Request helper | `act(type, data)` | `engine.fire(...)` then `engine.flush()`; use it for simple buttons |
-| Action flow | `chooseAction(action, destinationId)` | Fires, flushes, steps time, then visits for travel; guards re-entry |
+| Action flow | `chooseAction(action, destinationId)` | Fires, flushes, then steps time for a normal action or hands `travelTo` to `beginTravel()` |
+| Travel flow | `beginTravel(last)` / `driveTravel()` / `arriveTravel(completed)` | Starts a journey, steps the clock one 5-minute tick per check, restores the tick size, and visits the destination only on completion |
+| Travel panel | `renderTravel()` / `#travelContinue` / `#travelCancel` | Shows route, elapsed minutes, checks and the paused event; Continue clears the pause and resumes |
 | Main character | `#mcSave` handler | Calls `mainCharModule.save(...)` directly, then `engine.flush()` |
 | Combat | `combatSnapshot(c)` / `startCombat(c)` | Snapshots include `stats.armor`; the module never reads slices |
-| Renderers | `renderChars`, `renderMainCharacter`, `renderMainStats`, `renderEquipment`, `renderActions`, `renderCombat`, `renderLocations` | Re-run on their module events and on reset/load; the clock renderer runs on tick end |
+| Renderers | `renderChars`, `renderMainCharacter`, `renderMainStats`, `renderEquipment`, `renderActions`, `renderTravel`, `renderCombat`, `renderLocations` | Re-run on their module events and on reset/load; the clock renderer runs on tick end |
 
 When adding a panel: add markup, a render function, subscribe to the module's events,
 call the renderer on `reset`/`load`, and add the script tag if a new data file is used.
@@ -554,7 +666,7 @@ registers modules. Keep it in sync:
 
 - Per-module branches with version strings and live slice fields.
 - The event catalog nodes and its count.
-- Content nodes (catalogue counts, actions, biome events).
+- Content nodes (catalogue counts, actions, travel events, biome events).
 - The test list and its count.
 - The **Docs** node.
 
@@ -596,8 +708,25 @@ Choose action
        -> mainCharacter applies effects
        -> equipment adds a rewarded item (equipment:added/equipped)
           -> mainCharacter mirrors armor (mainCharacter:armorChanged)
-  -> UI flush, step whole ticks
-  -> if travelTo: locations.visit(travelTo) -> the Visit flow for the destination
+  -> UI flush
+     -> normal action: step whole ticks
+     -> travelTo: travel:start -> travel:started
+        -> UI steps a 5-minute tick, then travel:advance
+           -> travel:progress (quiet check; loop continues)
+           -> travel:event (pause)
+              -> mainCharacter applies effects; Continue -> travel:resumed
+           -> travel:completed
+              -> UI restores tick size and calls locations.visit(destinationId)
+                 -> the Visit flow above
+```
+
+```text
+Travel interruption
+  travel:advance
+    -> travel:event (paused, effects)
+       -> mainCharacter applies effects (mainCharacter:statChanged)
+  -> UI shows the event and waits; no clock or journey progress while paused
+  -> travel:continue -> travel:resumed -> UI resumes the 5-minute loop
 ```
 
 ```text
@@ -613,6 +742,8 @@ Fight
 
 | Goal | File |
 |---|---|
+| Vision, pillars, decisions, roadmap | `DESIGN.md` |
+| New idea or unapproved preference | `IDEAS.md` |
 | Add/tune a stat | `characters/statsData.js` |
 | More NPC names or traits | `characters/data.js` |
 | Character creation rules or portrait limits | `characters/mainCharacterData.js` |
@@ -621,6 +752,9 @@ Fight
 | Biomes, weather, naming, hostility bands | `locations/data.js` |
 | Biome event text/chance/effects | `locations/events/<biome>/events.json` |
 | Area actions, costs, outcomes, travel | `actions/data.js` |
+| Travel event text/chance/effects, check length | `travel/data.js` |
+| Journey duration | Travel action `timeMinutes` in `actions/data.js` |
+| Travel pause/resume UI | `index.html` Travel panel + `driveTravel()` |
 | Draw order, new fields in generation | The module's `ATTRIBUTES` array |
 | Event names or depth handling | The emitting module, then `ENGINE_SPEC.md` + `status.html` |
 | Panel markup or button wiring | `index.html` |

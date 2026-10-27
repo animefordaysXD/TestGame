@@ -103,12 +103,12 @@ window.LocationActionsData = {
     },
     {
       id: "travel", name: "Travel",
-      description: "Leave this area and choose another location.",
+      description: "Set out for another location; the journey can be interrupted.",
       timeMinutes: 30,
       costs: [{ stat: "stamina", delta: -5 }],
       outcomes: [],
       requiresDestination: true,
-      travelText: "You break camp and set out for another location."
+      travelText: "You break camp and set out; the road may have other plans."
     }
   ],
 

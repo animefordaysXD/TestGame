@@ -68,7 +68,7 @@
     <button id="play">Play</button>
     <label>Tick size
       <select id="size">
-        <option value="1">1 min</option><option value="10" selected>10 min</option><option value="15">15 min</option>
+        <option value="1">1 min</option><option value="5">5 min</option><option value="10" selected>10 min</option><option value="15">15 min</option>
         <option value="30">30 min</option><option value="60">1 hour</option><option value="360">6 hours</option><option value="1440">1 day</option>
       </select>
     </label>
@@ -156,7 +156,16 @@
   <h2>Actions <span class="seed" id="actionArea"></span></h2>
   <p class="meta" id="actionStatus">Visit a location to load five actions.</p>
   <ul class="chars" id="actions"></ul>
-  <p class="meta">Costs and outcomes are applied to the main character; travel moves through the locations module. Time costs advance the clock.</p>
+  <p class="meta">Costs and outcomes are applied to the main character. Time costs advance the clock. Travel runs in 5-minute steps and can pause on an event; the locations module still performs arrival.</p>
+
+  <h2>Travel <span class="seed" id="travelRoute"></span></h2>
+  <p class="meta" id="travelStatus">Choose Travel in the Actions panel to begin a journey.</p>
+  <div class="bar">
+    <button id="travelContinue" disabled>Continue travel</button>
+    <button id="travelCancel" disabled>Cancel journey</button>
+  </div>
+  <p class="meta" id="travelEvent" hidden></p>
+  <p class="meta">Travel advances the clock in 5-minute steps. A travel event pauses the journey until you continue.</p>
 
   <h2>Event log</h2>
   <ul id="log"></ul>
@@ -175,6 +184,8 @@
 <script src="locations/locations.js"></script>
 <script src="actions/data.js"></script>
 <script src="actions/actions.js"></script>
+<script src="travel/data.js"></script>
+<script src="travel/travel.js"></script>
 <script src="combat/data.js"></script>
 <script src="combat/combat.js"></script>
 <script>
@@ -211,6 +222,9 @@
   engine.register(locationsModule);
 
   engine.register(createActionsModule());
+
+  const travelModule = createTravelModule();
+  engine.register(travelModule);
 
   const combatModule = createCombatModule();
   engine.register(combatModule);
@@ -330,6 +344,7 @@
   function renderActions() {
     const s = engine.state.modules.actions;
     const actions = s && Array.isArray(s.actions) ? s.actions : [];
+    const travelActive = !!(engine.state.modules.travel && engine.state.modules.travel.active);
 
     $("actionArea").textContent = s && s.locationName ? `— ${s.locationName}` : "";
     const ul = $("actions");
@@ -344,7 +359,9 @@
       return;
     }
 
-    $("actionStatus").textContent = `Choose an action in ${s.locationName || "the area"}. Costs and outcomes use the main character's stats.`;
+    $("actionStatus").textContent = travelActive
+      ? "Travel in progress. Use the Travel panel to continue or cancel."
+      : `Choose an action in ${s.locationName || "the area"}. Costs and outcomes use the main character's stats.`;
 
     const locState = engine.state.modules.locations;
     const otherLocations = Object.values(locState && locState.locations ? locState.locations : {})
@@ -388,7 +405,7 @@
       const b = document.createElement("button");
       b.textContent = "Choose";
       b.title = `Choose ${action.name}`;
-      b.disabled = !!(action.requiresDestination && !otherLocations.length);
+      b.disabled = !!(travelActive || (action.requiresDestination && !otherLocations.length));
       b.onclick = () => chooseAction(action, destination ? destination.value : "");
 
       row.append(b);
@@ -398,8 +415,11 @@
   }
 
   let choosingAction = false;
+  let drivingTravel = false;
+
   async function chooseAction(action, destinationId) {
     if (choosingAction) return;
+    if (engine.state.modules.travel && engine.state.modules.travel.active) return;
     choosingAction = true;
     try {
       engine.fire({ type: "action:choose", data: { actionId: action.id, destinationId } });
@@ -408,29 +428,150 @@
       const last = engine.state.modules.actions.lastAction;
       if (!last || last.actionId !== action.id) return;
 
-      // Time is core state: advance whole ticks instead of editing the clock directly.
+      // Travel spends its time in 5-minute checks instead of one block.
+      if (last.travelTo) {
+        await beginTravel(last);
+        return;
+      }
+
+      // Other actions spend their time immediately, in whole core ticks.
       if (last.timeMinutes > 0) {
         const tickMinutes = Math.max(1, engine.now.tickMinutes);
         engine.step(Math.max(1, Math.ceil(last.timeMinutes / tickMinutes)));
         engine.flush();
       }
-
-      if (last.travelTo) {
-        const result = await locationsModule.visit(last.travelTo);
-        engine.flush();
-        const names = result.events.map((event) => event.name);
-        const suffix = names.length ? ` Triggered: ${names.join(", ")}.` : " No biome events.";
-        $("actionStatus").textContent = `You travel to ${result.location.name}.${suffix}`;
-        $("locVisitStatus").textContent = `Current location: ${result.location.name}.`;
-      } else {
-        $("actionStatus").textContent = `${last.text}${last.timeMinutes ? ` (${last.timeMinutes} min)` : ""}`;
-      }
+      $("actionStatus").textContent = `${last.text}${last.timeMinutes ? ` (${last.timeMinutes} min)` : ""}`;
     } catch (error) {
       alert("Could not resolve that action: " + error.message);
     } finally {
       choosingAction = false;
     }
   }
+
+  async function beginTravel(last) {
+    const locState = engine.state.modules.locations;
+    const destination = locState && locState.locations ? locState.locations[last.travelTo] : null;
+    if (!destination) {
+      alert("That destination is no longer on the map.");
+      return;
+    }
+
+    act("travel:start", {
+      originId: last.locationId,
+      originName: last.locationName,
+      destinationId: destination.id,
+      destinationName: destination.name,
+      destinationBiomeKey: destination.biomeKey,
+      durationMinutes: last.timeMinutes
+    });
+
+    const journey = engine.state.modules.travel;
+    if (!journey || !journey.active) {
+      $("actionStatus").textContent = "The journey could not begin.";
+      return;
+    }
+    await driveTravel();
+  }
+
+  // Drive a journey one 5-minute check at a time. The UI owns the clock: it switches
+  // to 5-minute ticks, steps once per check, then restores the player's tick size.
+  async function driveTravel() {
+    if (drivingTravel) return;
+    drivingTravel = true;
+    const originalTick = engine.now.tickMinutes;
+    let completed = null;
+    try {
+      if (engine.now.tickMinutes !== travelModule.minutesPerCheck) {
+        engine.setTickMinutes(travelModule.minutesPerCheck);
+      }
+      for (;;) {
+        const journey = engine.state.modules.travel;
+        if (!journey || !journey.active || journey.paused) break;
+
+        // A continued journey that was already at its destination (an event on the
+        // final check) completes without adding another tick.
+        if (journey.elapsedMinutes < journey.durationMinutes) {
+          engine.step(1);
+          engine.flush();
+        }
+        act("travel:advance", { minutes: travelModule.minutesPerCheck });
+
+        const after = engine.state.modules.travel;
+        if (!after.active) { completed = after.lastCompleted; break; }
+        if (after.paused) break;
+      }
+    } finally {
+      if (engine.now.tickMinutes !== originalTick) engine.setTickMinutes(originalTick);
+      drivingTravel = false;
+      renderTravel();
+    }
+
+    if (completed) await arriveTravel(completed);
+  }
+
+  async function arriveTravel(completed) {
+    let arrival = `You reach ${completed.destinationName} after ${completed.elapsedMinutes} min.`;
+    try {
+      const result = await locationsModule.visit(completed.destinationId);
+      engine.flush();
+      const names = result.events.map((event) => event.name);
+      arrival = `You reach ${result.location.name} after ${completed.elapsedMinutes} min.${names.length ? ` Triggered: ${names.join(", ")}.` : " No biome events."}`;
+      $("locVisitStatus").textContent = `Current location: ${result.location.name}.`;
+    } catch (error) {
+      alert("Could not finish the journey: " + error.message);
+    }
+    renderTravel();
+    renderActions();
+    $("actionStatus").textContent = arrival;
+  }
+
+  function renderTravel() {
+    const s = engine.state.modules.travel || {};
+    const active = !!s.active;
+
+    $("travelContinue").disabled = !active;
+    $("travelCancel").disabled = !active;
+    $("travelRoute").textContent = active
+      ? `— ${s.originName || "here"} to ${s.destinationName || "somewhere"}`
+      : "";
+
+    const eventBox = $("travelEvent");
+    if (active) {
+      $("travelStatus").textContent = [
+        `${s.elapsedMinutes}/${s.durationMinutes} min`,
+        s.paused ? "paused by an event" : "travelling",
+        `${s.checks} check${s.checks === 1 ? "" : "s"}`
+      ].join(" · ");
+      if (s.paused && s.lastEvent) {
+        eventBox.hidden = false;
+        eventBox.textContent = `${s.lastEvent.name}: ${s.lastEvent.text} Continue when ready.`;
+      } else {
+        eventBox.hidden = true;
+        eventBox.textContent = "";
+      }
+    } else if (s.lastCompleted) {
+      $("travelStatus").textContent = `Arrived at ${s.lastCompleted.destinationName} after ${s.lastCompleted.elapsedMinutes} minutes.`;
+      eventBox.hidden = true;
+      eventBox.textContent = "";
+    } else {
+      $("travelStatus").textContent = "Choose Travel in the Actions panel to begin a journey.";
+      eventBox.hidden = true;
+      eventBox.textContent = "";
+    }
+  }
+
+  $("travelContinue").onclick = async () => {
+    const journey = engine.state.modules.travel;
+    if (!journey || !journey.active) return;
+    if (journey.paused) act("travel:continue");
+    await driveTravel();
+  };
+
+  $("travelCancel").onclick = () => {
+    if (!confirm("Abandon this journey? Time and costs already spent are not refunded.")) return;
+    act("travel:cancel");
+    renderTravel();
+  };
 
   engine.on("event:actions:loaded", renderActions);
   engine.on("event:action:resolved", (e) => {
@@ -439,6 +580,10 @@
   });
   engine.on("event:action:blocked", (e) => { $("actionStatus").textContent = e.text; });
   engine.on("event:location:added", renderActions);
+
+  for (const name of ["travel:started", "travel:progress", "travel:event", "travel:resumed", "travel:completed", "travel:cancelled"]) {
+    engine.on(`event:${name}`, () => { renderTravel(); renderActions(); });
+  }
 
   // ----- Main character panel -----
   const mcData = MainCharacterData;
@@ -619,6 +764,7 @@
       renderMainCharacter();
       renderEquipment();
       renderActions();
+      renderTravel();
       renderCombat();
     }
     render();
@@ -765,6 +911,7 @@
   renderEquipment();
   renderLocations();
   renderActions();
+  renderTravel();
   renderCombat();
   render();
   updateBiomeEventStatus();

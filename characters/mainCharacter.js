@@ -1,7 +1,7 @@
-/* Main character module v0.4 — one player character with a profile picture and base stats.
+/* Main character module v0.5 — one player character with a profile picture and base stats.
    The UI calls save()/prepareImage()/connectFolder() directly; other modules read the
    state slice or listen for mainCharacter:saved / mainCharacter:statChanged.
-   Location events and combat damage are applied here through the event bus. See ENGINE_SPEC.md. */
+   Location, action, travel and combat effects are applied here through the event bus. See ENGINE_SPEC.md. */
 (function (global) {
   "use strict";
   const D = global.MainCharacterData;
@@ -165,6 +165,7 @@
         bound = true;
         engine.on("event:location:event", (e) => mod.applyEventEffects(e.depth + 1, e.data || {}));
         engine.on("event:action:resolved", (e) => mod.applyActionEffects(e.depth + 1, e.data || {}));
+        engine.on("event:travel:event", (e) => mod.applyTravelEffects(e.depth + 1, e.data || {}));
         engine.on("event:equipment:equipped", (e) => mod.applyEquipment(e.data || {}, e.depth + 1));
         engine.on("event:equipment:unequipped", (e) => mod.applyEquipment(e.data || {}, e.depth + 1));
         engine.on("event:combat:damage", (e) => mod.applyCombatDamage(e.data || {}));
@@ -295,6 +296,12 @@
       // Area actions carry their costs and outcome effects in action:resolved.
       applyActionEffects(depth = 0, data = {}) {
         return mod.applyEffects(depth, data.effects, data.actionId || null);
+      },
+
+      // Travel interruptions carry their own effects; the event id is stored with the
+      // resulting stat changes so the log and status page can trace them.
+      applyTravelEffects(depth = 0, data = {}) {
+        return mod.applyEffects(depth, data.effects, data.eventId || null);
       },
 
       // Equipment is the source of truth for armor. This module never reads the

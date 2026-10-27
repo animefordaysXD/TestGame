@@ -33,9 +33,11 @@ costs, an outcome, time and (for Travel) a destination.
 4. The `mainCharacter` module applies the combined `effects` (costs plus outcome) and
    emits `mainCharacter:statChanged`. The `equipment` module adds an item when
    `equipmentKey` names an entry in `equipment/data.js`.
-5. The UI advances the clock by `timeMinutes` (whole ticks) and, for `travelTo`, visits
-   that location through the locations module. That fires `location:visited`, which
-   reloads the destination's five actions and rolls its biome events.
+5. For a normal action the UI advances the clock by `timeMinutes` (whole ticks). For
+   `travelTo`, the UI starts the `travel` module, which spends the time in 5-minute
+   checks. On completion the UI visits the destination through the locations module.
+   That fires `location:visited`, which reloads the destination's five actions and rolls
+   its biome events.
 
 The slice keeps the last resolution in `lastAction` so the status page and save/load can
 show it; visiting a new area clears it.
@@ -44,8 +46,11 @@ show it; visiting a new area clears it.
 
 Travel has `requiresDestination: true` and no outcomes. The UI shows a destination
 dropdown of every other known location and sends its id as `destinationId`. A missing
-destination emits `action:blocked` and resolves nothing. Movement itself is done by the
-locations module (`locations.visit`), not by editing the locations slice here.
+destination emits `action:blocked` and resolves nothing. The UI then starts a journey
+through the `travel` module. Travel spends `timeMinutes` in 5-minute checks and can pause
+on an interruption; on `travel:completed` the UI calls `locations.visit(destinationId)`.
+Movement itself is done by the locations module, not by editing the locations slice here.
+See `travel/README.md`.
 
 ## Biome overrides
 

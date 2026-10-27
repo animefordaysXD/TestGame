@@ -158,6 +158,7 @@
 <script src="equipment/data.js"></script>
 <script src="locations/data.js"></script>
 <script src="actions/data.js"></script>
+<script src="travel/data.js"></script>
 <script src="combat/data.js"></script>
 <!-- Read-only viewer. It registers no modules and never writes the save.
      The module/event branches are hand-maintained; update them with ENGINE_SPEC.md. -->
@@ -169,6 +170,7 @@
   const ST = window.CharacterStatsData || { stats: [] };
   const LOC = window.LocationData || { biomes: [] };
   const ACT = window.LocationActionsData || { default: [], biomes: {} };
+  const TRD = window.TravelData || { events: [], minutesPerCheck: 5, chancePercent: 0 };
   const EQD = window.EquipmentData || { items: [], slots: [] };
   const CBD = window.CombatData || { actions: [], attack: {}, defend: {} };
   const CD = window.CharacterData || { traits: [], opposites: [] };
@@ -207,7 +209,16 @@
         },
         locations: { seed: 0, createdAt: "", nextId: 1, locations: {}, currentId: null },
         actions: { locationId: null, locationName: "", biomeKey: "", actions: [], lastAction: null },
-        equipment: { nextId: 1, items: {}, equippedId: null }
+        equipment: { nextId: 1, items: {}, equippedId: null },
+        travel: {
+          active: false, paused: false,
+          originId: null, originName: "",
+          destinationId: null, destinationName: "", destinationBiomeKey: "",
+          elapsedMinutes: 0, durationMinutes: 0, minutesPerCheck: 5,
+          checks: 0, eventCount: 0,
+          pausedAtMinutes: null,
+          lastEvent: null, lastCompleted: null
+        }
       }
     };
   }
@@ -358,7 +369,7 @@
     const mcSummary = mc && hpRow && staRow
       ? `HP ${hpRow.value ?? "—"}/${hpRow.max} · Stamina ${staRow.value ?? "—"}/${staRow.max}`
       : "not created";
-    const mainCharacter = node("mainCharacter", `v0.4 · ${mcSummary}`, "module", mcChildren, mc ? "built" : "empty");
+    const mainCharacter = node("mainCharacter", `v0.5 · ${mcSummary}`, "module", mcChildren, mc ? "built" : "empty");
 
     /* Equipment ----------------------------------------------------------- */
     const equipState = modules.equipment || {};
@@ -442,9 +453,34 @@
       node("Resolution", "action:resolved → mainCharacter effects · equipment item · UI time and travel", "content")
     ], actions.length ? "built" : "empty");
 
-    const modulesBranch = node("Modules", "6 registered · event-driven · one slice each", "state", [
-      chars, mainCharacter, equipmentBranch, combatBranch, locationsBranch, actionsBranch
-    ], "6");
+    /* Travel -------------------------------------------------------------- */
+    const travelState = modules.travel || {};
+    const travelActive = !!travelState.active;
+    const travelEvent = travelState.lastEvent || null;
+    const travelDone = travelState.lastCompleted || null;
+    const travelSummary = travelActive
+      ? `${travelState.elapsedMinutes}/${travelState.durationMinutes} min · ${travelState.paused ? "paused" : "travelling"}`
+      : travelDone
+        ? `arrived · ${travelDone.destinationName} · ${travelDone.elapsedMinutes} min`
+        : "no journey";
+    const travelBranch = node("travel", `v0.1 · ${travelSummary}`, "module", [
+      node("Route", travelActive
+        ? `${travelState.originName || "here"} → ${travelState.destinationName || "somewhere"} · ${travelState.destinationBiomeKey || "?"}`
+        : travelDone
+          ? `${travelDone.originName || "?"} → ${travelDone.destinationName || "?"}`
+          : "none", travelActive || travelDone ? "state" : "warn"),
+      node("Progress", travelActive
+        ? `${travelState.elapsedMinutes}/${travelState.durationMinutes} min · ${travelState.checks} check(s) · ${travelState.eventCount} event(s)${travelState.paused ? ` · paused at ${travelState.pausedAtMinutes} min` : ""}`
+        : "5-minute checks · travel pauses on an event", "state"),
+      node("Last interruption", travelEvent
+        ? `${travelEvent.name} · ${travelEvent.text}${travelEvent.effects && travelEvent.effects.length ? ` · ${travelEvent.effects.map((e) => `${e.delta > 0 ? "+" : ""}${e.delta} ${e.stat}`).join(", ")}` : ""}`
+        : "none", travelEvent ? "state" : "warn", [], travelEvent ? "event" : "pending"),
+      node("Rules", "UI advances 5-minute ticks · travel:event pauses · Continue resumes · completion calls locations.visit", "content")
+    ], travelActive || travelDone ? "built" : "empty");
+
+    const modulesBranch = node("Modules", "7 registered · event-driven · one slice each", "state", [
+      chars, mainCharacter, equipmentBranch, combatBranch, locationsBranch, actionsBranch, travelBranch
+    ], "7");
 
     /* Content ------------------------------------------------------------- */
     const biomeNodes = biomes.map((biome) => {
@@ -464,10 +500,11 @@
       node("mainCharacterData.js", `portrait ${MC.imageSize ?? 256}px · upload ≤ ${Math.round((MC.maxUploadBytes || 0) / 1048576)} MB · ${(MC.genders || []).length} genders`, "content"),
       node("locations/data.js", `${biomes.length} biomes · ${weatherTotal} weather entries · ${(LOC.namePrefixes || []).length} prefixes · ${(LOC.nameSuffixes || []).length} suffixes · ${(LOC.namePatterns || []).length} name patterns`, "content"),
       node("actions/data.js", `${defaultActions.length} default actions · ${overrides.length} biome override(s) · ${defaultActions.reduce((sum, action) => sum + ((action.outcomes || []).length), 0)} outcomes`, "content"),
+      node("travel/data.js", `${(TRD.events || []).length} travel events · ${TRD.chancePercent ?? 0}% per check · every ${TRD.minutesPerCheck ?? 5} min · ${Object.keys(TRD.chanceByBiome || {}).length} biome override(s)`, "content"),
       node("equipment/data.js", `${(EQD.items || []).length} armor items · ${(EQD.slots || []).length} slot(s) · max armor ${EQD.maxArmor ?? 100} · auto-equip ${EQD.autoEquip === false ? "off" : "on"}`, "content"),
       node("combat/data.js", `${(CBD.actions || []).length} actions · attack ${(CBD.attack && CBD.attack.stat) || "personalCombat"} × ${(CBD.attack && CBD.attack.multiplier) || 1} · defend armor × ${(CBD.defend && CBD.defend.armorMultiplier) || 2}`, "content"),
       group(`Biome events (${biomes.length} files)`, eventsSummary, biomeNodes, "content"),
-      node("Docs", "ENGINE_SPEC.md v0.9 · MODULES.md · HANDOFF.md · README.md · actions/README.md · equipment/README.md · combat/README.md · locations/README.md · locations/events/README.md · characters/mainChar/README.md", "content")
+      node("Docs", "DESIGN.md · IDEAS.md · ENGINE_SPEC.md v1.0 · MODULES.md · HANDOFF.md · README.md · actions/README.md · equipment/README.md · travel/README.md · combat/README.md · locations/README.md · locations/events/README.md · characters/mainChar/README.md", "content")
     ], "data");
 
     /* Events -------------------------------------------------------------- */
@@ -479,6 +516,10 @@
         node("location:add", "UI → locations.add() · data { count? }", "event"),
         node("location:changed", "UI → characters clears Temporary Spawn", "event"),
         node("action:choose", "UI → actions.choose() · data { actionId, destinationId? }", "event"),
+        node("travel:start", "UI → travel.start() · destination and duration snapshot", "event"),
+        node("travel:advance", "UI → travel.advance() · one 5-minute check", "event"),
+        node("travel:continue", "UI → travel.resume() · clears the event pause", "event"),
+        node("travel:cancel", "UI → travel.cancel() · abandons the journey", "event"),
         node("equipment:add", "UI → equipment.add() · data { key? }", "event"),
         node("equipment:equip", "UI → equipment.equip() · data { itemId }", "event"),
         node("equipment:unequip", "UI → equipment.unequip() · no data", "event"),
@@ -496,6 +537,12 @@
         node("action:chosen", "actions · { actionId, name, locationId, locationName }", "event"),
         node("action:resolved", "actions · costs, effects, time, equipmentKey, travelTo", "event"),
         node("action:blocked", "actions · { actionId, name, reason }", "event"),
+        node("travel:started", "travel · destination, duration, 5-minute checks", "event"),
+        node("travel:progress", "travel · elapsed/duration after a quiet check", "event"),
+        node("travel:event", "travel · interruption + effects; journey pauses", "event"),
+        node("travel:resumed", "travel · remaining minutes after Continue", "event"),
+        node("travel:completed", "travel · arrival summary; UI calls locations.visit", "event"),
+        node("travel:cancelled", "travel · abandoned journey summary", "event"),
         node("mainCharacter:saved", "mainCharacter · identity only (no image)", "event"),
         node("mainCharacter:statChanged", "mainCharacter · any non-equipment stat: stat, delta, value, max", "event"),
         node("mainCharacter:armorChanged", "mainCharacter · armor mirrored from equipment", "event"),
@@ -507,7 +554,7 @@
         node("combat:defended", "combat · player brace, armor and reduction", "event"),
         node("combat:ended", "combat · winner, loser, rounds", "event")
       ], "event")
-    ], "31");
+    ], "41");
 
     /* Docs & tests -------------------------------------------------------- */
     const testsBranch = node("Tests", "Node only · npm test", "test", [
@@ -518,9 +565,10 @@
       node("biome-events.test.cjs", "JSON loading · visit rolls · stat effects · reset", "test"),
       node("actions.test.cjs", "five actions · outcomes · costs · travel · equipment · reset", "test"),
       node("equipment.test.cjs", "inventory · auto-equip · armor · combat · reset · save/load", "test"),
+      node("travel.test.cjs", "5-minute checks · pause/resume · effects · cancel · reset · save/load", "test"),
       node("combat.test.cjs", "player-first turns · attack · defend/armor · death · reset · save/load", "test"),
       node("serve.cjs", "static server on 127.0.0.1:8765", "test")
-    ], "9");
+    ], "10");
 
     const rootSub = live.state
       ? `${live.source} · ${clockText(time)} · tick ${time.tick}`
@@ -696,6 +744,7 @@
     const temp = Object.values((state.modules.characters || {}).temp || {});
     const combat = state.modules.combat || {};
     const gear = state.modules.equipment || {};
+    const travel = state.modules.travel || {};
     const equippedGear = gear.equippedId ? (gear.items || {})[gear.equippedId] : null;
     const mcRows = statRows(mc && mc.stats);
     const hp = mcRows.find((row) => row.def.key === "hp");
@@ -706,6 +755,7 @@
       mc && hp && sta ? `HP ${hp.value ?? "—"}/${hp.max} · Stamina ${sta.value ?? "—"}/${sta.max}` : "No main character",
       `Armor ${equippedGear ? equippedGear.armor : 0}/100`,
       combat.active ? `Combat: round ${combat.round}` : combat.winnerName ? `Combat: ${combat.winnerName} won` : "No combat",
+      travel.active ? `Travel: ${travel.elapsedMinutes}/${travel.durationMinutes} min${travel.paused ? " paused" : ""}` : travel.lastCompleted ? `Travel: arrived at ${travel.lastCompleted.destinationName}` : "No journey",
       `${locs.length} location${locs.length === 1 ? "" : "s"}`,
       `${acts.length} action${acts.length === 1 ? "" : "s"}`,
       `${named.length} named · ${temp.length} temporary`,
