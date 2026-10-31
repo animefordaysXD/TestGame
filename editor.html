@@ -1,0 +1,612 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Content editor</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f6f5f2; --panel: #fffefb; --ink: #1d1d1b; --mute: #6b6a64; --line: #dedbd3;
+    --accent: #2f5d50; --accent-ink: #ffffff; --bad: #a33a2a; --warn: #8a6a1c; --sel: #e6eee8;
+    --sans: system-ui, "Segoe UI", sans-serif; --serif: Georgia, "Times New Roman", serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #161715; --panel: #1d1f1c; --ink: #e8e6df; --mute: #9a988f; --line: #34362f;
+            --accent: #7fb5a3; --accent-ink: #10231d; --bad: #e08a78; --warn: #d9b862; --sel: #243029; }
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.45 var(--sans); display: flex; flex-direction: column; }
+  h1, h2, h3 { font-family: var(--serif); font-weight: 600; margin: 0; }
+  button, input, select, textarea { font: inherit; color: inherit; }
+  button { border: 1px solid var(--line); background: var(--panel); border-radius: 6px; padding: 5px 11px; cursor: pointer; }
+  button:hover:not(:disabled) { border-color: var(--accent); }
+  button:disabled { opacity: .45; cursor: default; }
+  button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  button.quiet { border-color: transparent; background: transparent; color: var(--mute); padding: 3px 7px; }
+  button.quiet:hover:not(:disabled) { color: var(--ink); border-color: var(--line); }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .meta { color: var(--mute); font-size: 12.5px; }
+
+  .bar { display: flex; align-items: center; gap: 14px; padding: 10px 18px; border-bottom: 1px solid var(--line); background: var(--panel); flex-wrap: wrap; }
+  .bar h1 { font-size: 20px; }
+  .bar .source { flex: 1; min-width: 160px; }
+  .bar .actions { display: flex; gap: 8px; }
+  #status { min-height: 0; padding: 0 18px; font-size: 13px; }
+  #status:not(:empty) { padding: 7px 18px; border-bottom: 1px solid var(--line); }
+  #status.bad { color: var(--bad); } #status.ok { color: var(--accent); } #status.warn { color: var(--warn); }
+
+  #app { flex: 1; min-height: 0; display: grid; grid-template-columns: 230px 290px minmax(0, 1fr); }
+  #app.noList { grid-template-columns: 230px minmax(0, 1fr); }
+  #app > * { overflow: auto; min-height: 0; }
+  #nav { border-right: 1px solid var(--line); padding: 10px 8px 24px; }
+  #nav h2 { font-size: 13px; color: var(--mute); font-family: var(--sans); font-weight: 600; padding: 12px 8px 4px; }
+  .nav-item { display: flex; width: 100%; align-items: center; gap: 6px; text-align: left; border: 0; background: transparent; padding: 5px 8px; border-radius: 6px; }
+  .nav-item .t { flex: 1; }
+  .nav-item.on { background: var(--sel); font-weight: 600; }
+  .count { color: var(--mute); font-size: 12px; }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); display: inline-block; }
+  .badge { font-size: 11.5px; border-radius: 9px; padding: 0 6px; border: 1px solid currentColor; }
+  .badge.bad { color: var(--bad); } .badge.warn { color: var(--warn); }
+
+  #list { border-right: 1px solid var(--line); padding: 10px; display: flex; flex-direction: column; gap: 8px; }
+  #list[hidden] { display: none; }
+  #list .tools { display: flex; flex-wrap: wrap; gap: 4px; }
+  #list input[type=search] { width: 100%; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); }
+  #list ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+  .entry { display: flex; width: 100%; gap: 8px; align-items: baseline; text-align: left; border: 1px solid transparent; background: transparent; padding: 6px 8px; border-radius: 6px; }
+  .entry .t { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .entry.on { background: var(--sel); border-color: var(--line); }
+  .entry.off .t { color: var(--mute); text-decoration: line-through; }
+  .entry .sub { color: var(--mute); font-size: 12px; white-space: nowrap; }
+  .entry .flag { color: var(--bad); font-weight: 700; }
+  .entry .flag.warn { color: var(--warn); }
+
+  #form { padding: 18px 26px 60px; }
+  #form .head { display: flex; flex-direction: column; gap: 2px; margin-bottom: 14px; }
+  #form h2 { font-size: 24px; }
+  .fields { display: grid; gap: 14px; max-width: 720px; }
+  .field > label, .field > .lab { display: block; font-weight: 600; margin-bottom: 3px; }
+  .field .help { color: var(--mute); font-size: 12.5px; margin-top: 3px; }
+  .field input[type=text], .field input[type=number], .field textarea, .field select {
+    width: 100%; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); }
+  .field input.mono { font-family: ui-monospace, Consolas, monospace; font-size: 13px; }
+  .field textarea { resize: vertical; }
+  .field.bool label { display: flex; gap: 8px; align-items: center; font-weight: 600; }
+  .field.multiselect .opts { display: flex; flex-wrap: wrap; gap: 6px 16px; padding: 6px 2px; }
+  .field.multiselect .opts label { display: inline-flex; gap: 6px; align-items: center; font-weight: 500; }
+  .field.multiselect .opts label.missing { color: var(--bad); }
+  .field input[type=number] { max-width: 140px; }
+  .field.invalid input, .field.invalid select, .field.invalid textarea { border-color: var(--bad); }
+  .rows { display: grid; gap: 6px; }
+  .row { display: flex; gap: 6px; align-items: center; }
+  .row select { flex: 1; min-width: 0; }
+  .row .k { flex: 1; }
+  .row input[type=number] { width: 96px; max-width: 96px; }
+  details.sub { border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; background: var(--panel); margin-bottom: 8px; }
+  details.sub > summary { cursor: pointer; display: flex; gap: 8px; align-items: center; font-weight: 600; }
+  details.sub > summary .t { flex: 1; }
+  details.sub .fields { margin-top: 12px; }
+
+  #preview, #issues { max-width: 720px; margin-top: 26px; }
+  #preview h3, #issues h3 { font-family: var(--sans); font-size: 13px; color: var(--mute); margin-bottom: 6px; }
+  .card { border-left: 3px solid var(--accent); background: var(--panel); border-radius: 0 8px 8px 0; padding: 12px 16px; display: grid; gap: 8px; }
+  .card .log { font: 16px/1.5 var(--serif); margin: 0; }
+  .card .note { margin: 0; color: var(--mute); font-size: 13px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip { border: 1px solid var(--line); border-radius: 999px; padding: 1px 9px; font-size: 12.5px; }
+  .chip.pos { color: var(--accent); border-color: var(--accent); } .chip.neg { color: var(--bad); border-color: var(--bad); }
+  #issues ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+  #issues li { padding-left: 14px; position: relative; }
+  #issues li::before { content: ""; position: absolute; left: 0; top: .55em; width: 7px; height: 7px; border-radius: 50%; background: var(--warn); }
+  #issues li.error::before { background: var(--bad); }
+  #issues .ok { color: var(--mute); margin: 0; }
+
+  .empty { grid-column: 1 / -1; max-width: 560px; margin: 8vh auto; padding: 0 20px; display: grid; gap: 12px; }
+  .empty h2 { font-size: 26px; }
+  .empty code { background: var(--panel); border: 1px solid var(--line); border-radius: 4px; padding: 1px 5px; }
+
+  @media (max-width: 900px) {
+    body { display: block; }
+    #app, #app.noList { display: block; }
+    #nav, #list { border-right: 0; border-bottom: 1px solid var(--line); }
+    #app > * { overflow: visible; }
+  }
+</style>
+</head>
+<body>
+<header class="bar">
+  <h1>Content editor</h1>
+  <span class="meta source" id="source">No folder open</span>
+  <div class="actions">
+    <button id="openFolder">Open game folder</button>
+    <button id="reload" disabled>Reload from disk</button>
+    <button id="saveAll" class="primary" disabled>Save changes</button>
+  </div>
+</header>
+<div id="status" role="status" aria-live="polite"></div>
+<main id="app"></main>
+
+<script src="editor/core.js"></script>
+<script src="editor/schemas.js"></script>
+<script>
+(() => {
+  "use strict";
+  const C = window.EditorCore, S = window.EditorSchemas;
+  let uid = 0;
+
+  // ---------- tiny DOM helper ----------
+  function h(tag, attrs, ...kids) {
+    const el = document.createElement(tag);
+    for (const [k, v] of Object.entries(attrs || {})) {
+      if (v === null || v === undefined || v === false) continue;
+      if (k.startsWith("on")) el.addEventListener(k.slice(2), v);
+      else if (k === "class") el.className = v;
+      else if (["value", "checked", "disabled", "hidden", "selected", "open"].includes(k)) el[k] = v;
+      else el.setAttribute(k, v === true ? "" : v);
+    }
+    const add = (kid) => {
+      if (kid === null || kid === undefined || kid === false) return;
+      if (Array.isArray(kid)) kid.forEach(add);
+      else el.append(kid.nodeType ? kid : document.createTextNode(String(kid)));
+    };
+    kids.forEach(add);
+    return el;
+  }
+  const $ = (sel) => document.querySelector(sel);
+
+  // ---------- state ----------
+  const state = { files: {}, refs: {}, root: null, source: "", sel: { section: null, index: 0 }, filter: "", issues: [], ctx: null, sections: [], loadErrors: [] };
+
+  const dataMap = () => Object.fromEntries(Object.entries(state.files).filter(([, f]) => f.data).map(([id, f]) => [id, f.data]));
+  const secById = (id) => state.sections.find((s) => s.id === id);
+  const current = () => secById(state.sel.section);
+  function resolve(sec) {
+    const f = state.files[sec.file];
+    let node = f && f.data;
+    for (const k of sec.at) node = node === undefined || node === null ? undefined : node[k];
+    return node;
+  }
+  const target = (sec) => (sec.kind === "list" ? (resolve(sec) || [])[state.sel.index] : resolve(sec));
+
+  const serialize = (f) => f.spec.format === "js"
+    ? C.serializeDataFile({ header: f.header, global: f.spec.global, data: f.data, eol: f.eol })
+    : C.serializeJsonFile({ data: f.data, eol: f.eol });
+  const isDirty = (f) => !!f.data && (f.lossy ? f.edited : (f.edited && serialize(f) !== f.text0));
+  const dirtyFiles = () => Object.values(state.files).filter(isDirty);
+
+  function setStatus(msg, tone) { const el = $("#status"); el.textContent = msg || ""; el.className = tone || ""; }
+
+  // ---------- loading and saving ----------
+  async function readText(path) {
+    if (state.root) {
+      const parts = path.split("/");
+      let dir = state.root;
+      for (const p of parts.slice(0, -1)) dir = await dir.getDirectoryHandle(p);
+      return (await (await dir.getFileHandle(parts[parts.length - 1])).getFile()).text();
+    }
+    const r = await fetch(path, { cache: "no-store" });
+    if (!r.ok) throw new Error(`${path}: HTTP ${r.status}`);
+    return r.text();
+  }
+  async function writeText(path, text) {
+    const parts = path.split("/");
+    let dir = state.root;
+    for (const p of parts.slice(0, -1)) dir = await dir.getDirectoryHandle(p);
+    const w = await (await dir.getFileHandle(parts[parts.length - 1])).createWritable();
+    await w.write(text);
+    await w.close();
+  }
+  // Downloads cannot keep folders, so flatten the path: travel/data.js -> travel-data.js.
+  const downloadName = (path) => path.replace(/[\\/]+/g, "-");
+  const defaultDownload = (name, text) => {
+    const url = URL.createObjectURL(new Blob([text], { type: "text/plain" }));
+    const a = h("a", { href: url, download: name });
+    document.body.append(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+
+  async function loadAll() {
+    state.files = {}; state.refs = {}; state.loadErrors = [];
+    for (const r of S.REFS) {
+      try { state.refs[r.id] = C.parseDataFile(await readText(r.path), r.global, { allowEval: true }).data; }
+      catch (e) { state.loadErrors.push(`${r.path}: ${e.message}`); }
+    }
+    for (const spec of S.FILES) {
+      const f = { spec, data: null, error: null, edited: false };
+      try {
+        const text = await readText(spec.path);
+        f.text0 = text;
+        if (spec.format === "js") Object.assign(f, C.parseDataFile(text, spec.global, { allowEval: true }));
+        else Object.assign(f, C.parseJsonFile(text));
+      } catch (e) { f.error = e.message; state.loadErrors.push(`${spec.path}: ${e.message}`); }
+      state.files[spec.id] = f;
+    }
+    return Object.values(state.files).some((f) => f.data);
+  }
+
+  function blockingIssues(files) {
+    const ids = new Set(files.map((f) => f.spec.id));
+    return state.issues.filter((i) => i.level === "error" && (!i.section || ids.has(secById(i.section)?.file)));
+  }
+
+  async function saveFiles(files) {
+    if (!files.length) return setStatus("Nothing to save.", "");
+    const errors = blockingIssues(files);
+    if (errors.length) {
+      const first = errors[0];
+      if (first.section) select(first.section, first.index === null ? 0 : first.index);
+      return setStatus(`Fix ${errors.length} error${errors.length > 1 ? "s" : ""} before saving: ${first.message}`, "bad");
+    }
+    const saved = [];
+    for (const f of files) {
+      if (f.lossy && !confirm(`${f.spec.path} uses JavaScript syntax. Saving rewrites it as strict JSON and drops any comments inside the object. Continue?`)) continue;
+      const text = serialize(f);
+      try {
+        if (state.root) await writeText(f.spec.path, text);
+        else (window.editorDownload || defaultDownload)(downloadName(f.spec.path), text);
+      } catch (e) { return setStatus(`Could not write ${f.spec.path}: ${e.message}`, "bad"); }
+      f.text0 = text; f.edited = false; f.lossy = false;
+      saved.push(f.spec.path);
+    }
+    renderAll();
+    if (saved.length) setStatus(state.root
+      ? `Saved ${saved.join(", ")}.`
+      : `Downloaded ${saved.join(", ")}. Put ${saved.length > 1 ? "them" : "it"} at the same path in the game folder, or open the folder here to save directly.`, "ok");
+  }
+
+  // ---------- model refresh ----------
+  function revalidate() {
+    const data = dataMap();
+    state.sections = S.sectionsFor(data);
+    state.ctx = S.buildContext(data, state.refs);
+    state.issues = S.validateAll(data, state.refs);
+  }
+  const issuesFor = (section, index) => state.issues.filter((i) => i.section === section && (index === undefined || i.index === index));
+
+  function touch(fileId) {
+    state.files[fileId].edited = true;
+    revalidate();
+    renderNav(); renderListItems(); renderPreview(); renderIssues(); updateBar();
+  }
+
+  // ---------- navigation ----------
+  function select(section, index = 0) {
+    state.sel = { section, index }; state.filter = "";
+    renderAll();
+  }
+
+  function renderNav() {
+    const nav = $("#nav");
+    nav.replaceChildren();
+    let group = null;
+    for (const sec of state.sections) {
+      if (sec.group !== group) { group = sec.group; nav.append(h("h2", {}, group)); }
+      const f = state.files[sec.file];
+      const list = sec.kind === "list" ? resolve(sec) : null;
+      const found = issuesFor(sec.id);
+      const errs = found.filter((i) => i.level === "error").length, warns = found.length - errs;
+      nav.append(h("button", { class: "nav-item" + (sec.id === state.sel.section ? " on" : ""), "aria-current": sec.id === state.sel.section ? "page" : null, onclick: () => select(sec.id, 0) },
+        h("span", { class: "t" }, sec.title),
+        f && f.error ? h("span", { class: "badge bad", title: f.error }, "unreadable") : null,
+        errs ? h("span", { class: "badge bad", title: `${errs} error${errs > 1 ? "s" : ""}` }, errs) : (warns ? h("span", { class: "badge warn", title: `${warns} warning${warns > 1 ? "s" : ""}` }, warns) : null),
+        f && isDirty(f) ? h("i", { class: "dot", title: "Unsaved changes" }) : null,
+        list ? h("span", { class: "count" }, list.length) : null));
+    }
+  }
+
+  function renderList() {
+    const sec = current(), pane = $("#list");
+    $("#app").classList.toggle("noList", sec.kind !== "list");
+    pane.hidden = sec.kind !== "list";
+    if (sec.kind !== "list") return;
+    const list = resolve(sec) || [], i = state.sel.index;
+    pane.replaceChildren(
+      h("input", { type: "search", placeholder: "Filter", "aria-label": "Filter entries", value: state.filter, oninput: (e) => { state.filter = e.target.value; renderListItems(); } }),
+      h("div", { class: "tools" },
+        h("button", { onclick: () => listOp("add") }, "Add"),
+        h("button", { class: "quiet", disabled: !list[i], onclick: () => listOp("duplicate") }, "Duplicate"),
+        h("button", { class: "quiet", disabled: !list[i], onclick: () => listOp("delete") }, "Delete"),
+        h("button", { class: "quiet", disabled: i <= 0, "aria-label": "Move up", onclick: () => listOp("up") }, "Up"),
+        h("button", { class: "quiet", disabled: !(i < list.length - 1), "aria-label": "Move down", onclick: () => listOp("down") }, "Down")),
+      h("ul", { id: "entries" }));
+    renderListItems();
+  }
+
+  function renderListItems() {
+    const sec = current(), ul = $("#entries");
+    if (!ul || sec.kind !== "list") return;
+    const list = resolve(sec) || [], q = state.filter.trim().toLowerCase();
+    ul.replaceChildren();
+    list.forEach((item, index) => {
+      const label = sec.label(item), sub = sec.sub ? sec.sub(item) : "";
+      if (q && !(label + " " + sub).toLowerCase().includes(q)) return;
+      const found = issuesFor(sec.id, index);
+      const level = found.some((x) => x.level === "error") ? "error" : (found.length ? "warn" : "");
+      ul.append(h("li", {}, h("button", { class: "entry" + (index === state.sel.index ? " on" : "") + (sec.off && sec.off(item) ? " off" : ""), onclick: () => { state.sel.index = index; renderList(); renderForm(); } },
+        h("span", { class: "t" }, label), h("span", { class: "sub" }, sub), level ? h("span", { class: "flag " + (level === "warn" ? "warn" : ""), title: found[0].message }, "!") : null)));
+    });
+    if (!ul.children.length) ul.append(h("li", { class: "meta" }, list.length ? "No entries match." : "No entries yet. Use Add."));
+  }
+
+  function listOp(op) {
+    const sec = current(), list = resolve(sec), i = state.sel.index;
+    if (!list) return;
+    if (op === "add") { list.push(sec.newItem(state.ctx, list)); state.sel.index = list.length - 1; }
+    else if (op === "duplicate" && list[i]) {
+      const copy = C.clone(list[i]), key = "id" in copy ? "id" : "key";
+      copy[key] = C.uniqueId(list.map((x) => x[key]), copy[key] + "_copy");
+      if (copy.name) copy.name += " (copy)";
+      // Outcome ids must be unique across the whole actions file, not just this action.
+      if (sec.file === "actions") S.duplicateOutcomeIds(copy, dataMap());
+      list.splice(i + 1, 0, copy); state.sel.index = i + 1;
+    } else if (op === "delete" && list[i]) {
+      if (!confirm(`Delete "${sec.label(list[i])}"?`)) return;
+      list.splice(i, 1); state.sel.index = Math.max(0, Math.min(i, list.length - 1));
+    } else if (op === "up") state.sel.index = C.move(list, i, -1);
+    else if (op === "down") state.sel.index = C.move(list, i, 1);
+    touch(sec.file); renderList(); renderForm();
+  }
+
+  // ---------- form ----------
+  function setField(f, obj, v) {
+    if (f.omitIfEmpty && (v === "" || v === false || v === undefined || v === null)) C.deletePath(obj, f.key);
+    else C.setPath(obj, f.key, v);
+  }
+  const num = (input) => (input.value === "" ? "" : Number(input.value));
+
+  function fillSelect(select, f, current) {
+    const opts = S.optionsFor(f.source, state.ctx);
+    select.replaceChildren();
+    if (f.allowEmpty) select.append(h("option", { value: "" }, "None"));
+    if (current !== undefined && current !== "" && !opts.some((o) => o.value === current)) select.append(h("option", { value: current }, `${current} (not found)`));
+    for (const o of opts) select.append(h("option", { value: o.value }, o.label));
+    select.value = current === undefined || current === null ? "" : current;
+  }
+  function selectEl(f, current, onChange, label) {
+    const s = h("select", { "aria-label": label || f.label, onchange: (e) => onChange(e.target.value) });
+    fillSelect(s, f, current);
+    s.addEventListener("focus", () => fillSelect(s, f, s.value));   // lists like traits can change while editing
+    return s;
+  }
+
+  function renderField(f, obj, ctx) {
+    const id = "f" + (++uid), val = C.getPath(obj, f.key);
+    const touchIt = () => touch(state.sel.fileId);
+    const again = () => renderForm();
+    const wrap = h("div", { class: "field " + f.type, "data-key": f.key });
+    const help = f.help ? h("div", { class: "help" }, f.help) : null;
+
+    if (f.type === "bool") {
+      wrap.append(h("label", {}, h("input", { type: "checkbox", checked: f.defaultTrue ? val !== false : !!val, onchange: (e) => { setField(f, obj, e.target.checked); touchIt(); } }), f.label));
+      if (help) wrap.append(help);
+      return wrap;
+    }
+    wrap.append(h("label", { for: id }, f.label));
+
+    if (f.type === "text" || f.type === "number" || f.type === "textarea") {
+      const input = f.type === "textarea" ? h("textarea", { id, rows: f.rows || 3 }) : h("input", { id, type: f.type, class: f.mono ? "mono" : "", min: f.min, max: f.max, step: f.step });
+      input.value = val === undefined || val === null ? "" : val;
+      input.addEventListener("input", () => { setField(f, obj, f.type === "number" ? num(input) : input.value); touchIt(); });
+      wrap.append(input);
+    } else if (f.type === "select") {
+      const s = selectEl(f, val, (v) => { setField(f, obj, v); touchIt(); });
+      s.id = id; wrap.append(s);
+    } else if (f.type === "multiselect") {
+      const opts = S.optionsFor(f.source, state.ctx);
+      const current = Array.isArray(val) ? val : [];
+      const box = h("div", { class: "opts" });
+      const toggle = (value, checked) => {
+        const cur = Array.isArray(C.getPath(obj, f.key)) ? C.getPath(obj, f.key).slice() : [];
+        const seen = cur.filter((v) => v !== value);
+        if (checked) seen.push(value);
+        const ordered = opts.map((o) => o.value).filter((v) => seen.includes(v));
+        for (const v of seen) if (!ordered.includes(v)) ordered.push(v);
+        setField(f, obj, ordered); touchIt();
+      };
+      for (const o of opts) {
+        box.append(h("label", {}, h("input", {
+          type: "checkbox", value: o.value, checked: current.includes(o.value),
+          onchange: (e) => toggle(o.value, e.target.checked)
+        }), o.label));
+      }
+      for (const missing of current.filter((v) => !opts.some((o) => o.value === v))) {
+        box.append(h("label", { class: "missing" }, h("input", {
+          type: "checkbox", value: missing, checked: true,
+          onchange: (e) => toggle(missing, e.target.checked)
+        }), `${missing} (not found)`));
+      }
+      wrap.append(box);
+    } else if (f.type === "effects") wrap.append(effectsEditor(f, obj, val, touchIt, again));
+    else if (f.type === "lines") {
+      const arr = Array.isArray(val) ? val : [];
+      const area = h("textarea", { id, rows: Math.min(14, Math.max(4, arr.length + 1)) });
+      const count = h("span", {}, `${arr.length} entries`);
+      area.value = arr.join("\n");
+      area.addEventListener("input", () => {
+        const next = area.value.split("\n").map((s) => s.trim()).filter(Boolean);
+        C.setPath(obj, f.key, next); count.textContent = `${next.length} entries`; touchIt();
+      });
+      wrap.append(area, h("div", { class: "help" }, count, f.help ? " · " + f.help : ""));
+      return wrap;
+    } else if (f.type === "pairs") wrap.append(pairsEditor(f, obj, val, touchIt, again));
+    else if (f.type === "map") wrap.append(mapEditor(f, obj, val, touchIt, again));
+    else if (f.type === "range") {
+      const [lo, hi] = Array.isArray(val) ? val : ["", ""];
+      const mk = (v, idx, name) => h("input", { type: "number", "aria-label": name, min: f.min, max: f.max, value: v, oninput: (e) => { const a = Array.isArray(C.getPath(obj, f.key)) ? C.getPath(obj, f.key).slice() : ["", ""]; a[idx] = num(e.target); C.setPath(obj, f.key, a); touchIt(); } });
+      wrap.append(h("div", { class: "row" }, mk(lo, 0, "Youngest"), "to", mk(hi, 1, "Oldest")));
+    } else if (f.type === "list") {
+      const arr = Array.isArray(val) ? val : [];
+      const box = h("div", {});
+      arr.forEach((item, i) => {
+        const title = h("span", { class: "t" }, item[f.itemTitle] || `Item ${i + 1}`);
+        const body = h("div", { class: "fields" }, f.itemFields.map((sub) => renderField(sub, item, ctx)));
+        body.addEventListener("input", () => { title.textContent = item[f.itemTitle] || `Item ${i + 1}`; });
+        box.append(h("details", { class: "sub", open: arr.length <= 3 },
+          h("summary", {}, title,
+            h("button", { class: "quiet", "aria-label": "Move up", disabled: i === 0, onclick: (e) => { e.preventDefault(); C.move(arr, i, -1); touchIt(); again(); } }, "Up"),
+            h("button", { class: "quiet", "aria-label": "Move down", disabled: i === arr.length - 1, onclick: (e) => { e.preventDefault(); C.move(arr, i, 1); touchIt(); again(); } }, "Down"),
+            h("button", { class: "quiet", onclick: (e) => { e.preventDefault(); arr.splice(i, 1); touchIt(); again(); } }, "Remove")),
+          body));
+      });
+      box.append(h("button", { onclick: () => { const list = Array.isArray(C.getPath(obj, f.key)) ? C.getPath(obj, f.key) : (C.setPath(obj, f.key, []), C.getPath(obj, f.key)); list.push(f.newItem(ctx, list)); touchIt(); again(); } }, `Add ${f.label.toLowerCase().replace(/s$/, "")}`));
+      wrap.append(box);
+    }
+    if (help) wrap.append(help);
+    return wrap;
+  }
+
+  function ensureList(obj, key) {
+    if (!Array.isArray(C.getPath(obj, key))) C.setPath(obj, key, []);
+    return C.getPath(obj, key);
+  }
+
+  function effectsEditor(f, obj, val, touchIt, again) {
+    const arr = Array.isArray(val) ? val : [];
+    const rows = h("div", { class: "rows" });
+    arr.forEach((e, i) => {
+      rows.append(h("div", { class: "row" },
+        selectEl({ source: "stats", label: "Stat" }, e.stat, (v) => { e.stat = v; touchIt(); }, "Stat"),
+        h("input", { type: "number", step: 1, value: e.delta === undefined ? "" : e.delta, "aria-label": "Change", oninput: (ev) => { e.delta = num(ev.target); touchIt(); } }),
+        h("button", { class: "quiet", "aria-label": "Remove effect", onclick: () => { arr.splice(i, 1); touchIt(); again(); } }, "Remove")));
+    });
+    rows.append(h("div", {}, h("button", { onclick: () => { ensureList(obj, f.key).push({ stat: state.ctx.statKeys[0] || "hp", delta: 1 }); touchIt(); again(); } }, "Add effect")));
+    return rows;
+  }
+
+  function pairsEditor(f, obj, val, touchIt, again) {
+    const arr = Array.isArray(val) ? val : [];
+    const rows = h("div", { class: "rows" });
+    arr.forEach((p, i) => {
+      rows.append(h("div", { class: "row" },
+        selectEl({ source: f.source, label: "First trait" }, p[0], (v) => { p[0] = v; touchIt(); }, "First trait"), "and",
+        selectEl({ source: f.source, label: "Second trait" }, p[1], (v) => { p[1] = v; touchIt(); }, "Second trait"),
+        h("button", { class: "quiet", "aria-label": "Remove pair", onclick: () => { arr.splice(i, 1); touchIt(); again(); } }, "Remove")));
+    });
+    rows.append(h("div", {}, h("button", { onclick: () => { const t = state.ctx.traits; ensureList(obj, f.key).push([t[0] || "", t[1] || t[0] || ""]); touchIt(); again(); } }, "Add pair")));
+    return rows;
+  }
+
+  function mapEditor(f, obj, val, touchIt, again) {
+    const map = val && typeof val === "object" ? val : {};
+    const rows = h("div", { class: "rows" });
+    for (const key of Object.keys(map)) {
+      rows.append(h("div", { class: "row" }, h("span", { class: "k" }, key),
+        h("input", { type: "number", min: f.min, max: f.max, "aria-label": key, value: map[key], oninput: (e) => { map[key] = num(e.target); touchIt(); } }),
+        h("button", { class: "quiet", "aria-label": `Remove ${key}`, onclick: () => { delete map[key]; touchIt(); again(); } }, "Remove")));
+    }
+    const missing = S.optionsFor(f.keySource, state.ctx).filter((o) => !(o.value in map));
+    if (missing.length) {
+      const pick = h("select", { "aria-label": "Biome to add" }, missing.map((o) => h("option", { value: o.value }, o.label)));
+      rows.append(h("div", { class: "row" }, pick, h("button", { onclick: () => { if (!obj[f.key] || typeof obj[f.key] !== "object") obj[f.key] = {}; obj[f.key][pick.value] = typeof obj.chancePercent === "number" ? obj.chancePercent : 5; touchIt(); again(); } }, "Add")));
+    }
+    return rows;
+  }
+
+  function renderForm() {
+    const sec = current(), pane = $("#form"), f = state.files[sec.file];
+    state.sel.fileId = sec.file;
+    pane.replaceChildren();
+    if (!f || f.error || !f.data) {
+      pane.append(h("div", { class: "head" }, h("h2", {}, sec.title), h("p", { class: "meta" }, sec.file)), h("p", { style: "color:var(--bad)" }, `This file could not be read: ${f ? f.error : "not loaded"}`));
+      return;
+    }
+    const t = target(sec);
+    if (!t) { pane.append(h("div", { class: "head" }, h("h2", {}, sec.title)), h("p", { class: "meta" }, "Nothing selected. Use Add to create the first entry.")); renderPreview(); renderIssues(); return; }
+    pane.append(h("div", { class: "head" }, h("h2", {}, sec.kind === "list" ? sec.label(t) : sec.title), h("span", { class: "meta" }, f.spec.path),
+      f.lossy ? h("span", { class: "meta", style: "color:var(--warn)" }, "This file uses JavaScript syntax. Saving rewrites it as strict JSON and drops any comments inside the object.") : null));
+    pane.append(h("div", { class: "fields" }, sec.fields.map((fl) => renderField(fl, t, state.ctx))));
+    pane.append(h("div", { id: "preview" }), h("div", { id: "issues" }));
+    renderPreview(); renderIssues();
+  }
+
+  function renderPreview() {
+    const el = $("#preview"), sec = current();
+    if (!el) return;
+    el.replaceChildren();
+    const t = sec && target(sec);
+    if (!t || !sec.preview) return;
+    let p;
+    try { p = sec.preview(t, state.ctx, dataMap()); } catch (e) { return; }
+    el.append(h("h3", {}, "In the game"),
+      h("div", { class: "card" },
+        p.log ? h("p", { class: "log" }, p.log) : null,
+        p.chips && p.chips.length ? h("div", { class: "chips" }, p.chips.map((c) => h("span", { class: "chip " + c.tone }, c.text))) : null,
+        (p.notes || []).map((n) => h("p", { class: "note" }, n))));
+  }
+
+  function renderIssues() {
+    const el = $("#issues"), sec = current();
+    if (!el) return;
+    const found = sec.kind === "list" ? issuesFor(sec.id).filter((i) => i.index === state.sel.index || i.index === null) : issuesFor(sec.id);
+    el.replaceChildren(h("h3", {}, "Checks"),
+      found.length ? h("ul", {}, found.map((i) => h("li", { class: i.level }, i.message))) : h("p", { class: "ok" }, "No problems found."));
+  }
+
+  // ---------- shell ----------
+  function updateBar() {
+    const n = dirtyFiles().length;
+    $("#saveAll").disabled = !n;
+    $("#saveAll").textContent = n ? `Save changes (${n} file${n > 1 ? "s" : ""})` : "Save changes";
+    $("#reload").disabled = !Object.keys(state.files).length;
+    $("#source").textContent = state.source || "No folder open";
+  }
+
+  function renderAll() {
+    const app = $("#app");
+    if (!app.querySelector("#nav")) app.replaceChildren(h("nav", { id: "nav", "aria-label": "Content" }), h("aside", { id: "list" }), h("section", { id: "form" }));
+    revalidate();
+    if (!current()) state.sel = { section: state.sections[0].id, index: 0 };
+    const sec = current(), list = sec.kind === "list" ? resolve(sec) || [] : null;
+    if (list && state.sel.index >= list.length) state.sel.index = Math.max(0, list.length - 1);
+    renderNav(); renderList(); renderForm(); updateBar();
+  }
+
+  function showEmpty(message) {
+    $("#app").replaceChildren(h("div", { class: "empty" },
+      h("h2", {}, "Open the game folder to start"),
+      h("p", {}, "Choose the game folder. Changes are written straight into its content files, and you commit them with git as usual."),
+      h("p", { class: "meta" }, "No write access in this browser, or no folder yet? Run ", h("code", {}, "npm run serve"), " and open ", h("code", {}, "http://127.0.0.1:8765/editor.html"),
+        ". You can browse and edit there, and saving downloads the changed files."),
+      message ? h("p", { class: "meta", style: "color:var(--bad)" }, message) : null));
+    updateBar();
+  }
+
+  async function start(fromFolder) {
+    setStatus("Loading", "");
+    const ok = await loadAll();
+    setStatus("", "");
+    if (!ok) return showEmpty(state.loadErrors[0] || "Could not read any content file.");
+    if (state.loadErrors.length) setStatus(`${state.loadErrors.length} file${state.loadErrors.length > 1 ? "s" : ""} could not be read: ${state.loadErrors[0]}`, "warn");
+    renderAll();
+  }
+
+  async function openFolder() {
+    if (!window.showDirectoryPicker) return setStatus("This browser cannot write to folders. Use Chrome or Edge, or run npm run serve and save by download.", "warn");
+    if (dirtyFiles().length && !confirm("You have unsaved changes. Discard them and load from the folder?")) return;
+    let root;
+    try { root = await window.showDirectoryPicker({ mode: "readwrite" }); } catch (e) { return; }
+    try { await root.getFileHandle("engine.js"); }
+    catch (e) { return setStatus("That folder does not look like the game (no engine.js). Pick the text-rpg folder.", "bad"); }
+    state.root = root; state.source = `Folder ${root.name}. Saves write straight to disk.`;
+    await start();
+  }
+
+  $("#openFolder").onclick = openFolder;
+  $("#saveAll").onclick = () => saveFiles(dirtyFiles());
+  $("#reload").onclick = async () => {
+    if (dirtyFiles().length && !confirm("Discard unsaved changes and reload from disk?")) return;
+    await start();
+  };
+  window.addEventListener("keydown", (e) => { if ((e.ctrlKey || e.metaKey) && e.key === "s") { e.preventDefault(); saveFiles(dirtyFiles()); } });
+  window.addEventListener("beforeunload", (e) => { if (dirtyFiles().length) { e.preventDefault(); e.returnValue = ""; } });
+
+  // Served over http (npm run serve): load from the server straight away.
+  if (location.protocol.startsWith("http")) { state.source = `Loaded from ${location.host}. Saving downloads files; open the folder to save directly.`; start(); }
+  else showEmpty("");
+  window.__editor = { state, select, saveFiles, dirtyFiles };   // for tests and debugging
+})();
+</script>
+</body>
+</html>

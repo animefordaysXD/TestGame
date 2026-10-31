@@ -25,11 +25,11 @@ costs, an outcome, time and (for Travel) a destination.
 
 ## Resolution
 
-1. The UI fires `action:choose` with `{ actionId, destinationId? }`.
+1. The UI fires `action:choose` with `{ actionId, destinationId?, distance?, durationMinutes? }`.
 2. `actions` emits `action:chosen`, then picks one outcome with `engine.rng` (weighted by
    `weight`; default 1) and emits `action:resolved` at `depth + 1`.
 3. `action:resolved` carries `{ actionId, name, outcomeId, outcomeName, text, effects,
-   timeMinutes, equipmentKey, travelTo, locationId, locationName }`.
+   timeMinutes, equipmentKey, travelTo, travelDistance, locationId, locationName }`.
 4. The `mainCharacter` module applies the combined `effects` (costs plus outcome) and
    emits `mainCharacter:statChanged`. The `equipment` module adds an item when
    `equipmentKey` names an entry in `equipment/data.js`.
@@ -45,12 +45,15 @@ show it; visiting a new area clears it.
 ## Travel
 
 Travel has `requiresDestination: true` and no outcomes. The UI shows a destination
-dropdown of every other known location and sends its id as `destinationId`. A missing
-destination emits `action:blocked` and resolves nothing. The UI then starts a journey
-through the `travel` module. Travel spends `timeMinutes` in 5-minute checks and can pause
-on an interruption; on `travel:completed` the UI calls `locations.visit(destinationId)`.
-Movement itself is done by the locations module, not by editing the locations slice here.
-See `travel/README.md`.
+dropdown of **direct routes** from the current location and sends the chosen id as
+`destinationId`, plus the route's `distance` and `minutes` as `distance` and
+`durationMinutes`. A missing destination emits `action:blocked` and resolves nothing.
+`durationMinutes` overrides the action's fallback `timeMinutes`, so journey length comes
+from the travel graph; `travelDistance` is echoed in the resolution for the UI/status.
+The UI then starts a journey through the `travel` module. Travel spends that time in
+5-minute checks and can pause on an interruption; on `travel:completed` the UI calls
+`locations.visit(destinationId)`. Movement itself is done by the locations module, not by
+editing the locations slice here. See `travel/README.md`.
 
 ## Biome overrides
 

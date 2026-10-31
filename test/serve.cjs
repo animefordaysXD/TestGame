@@ -21,7 +21,10 @@ http.createServer((req, res) => {
 
   fs.readFile(file, (err, data) => {
     if (err) { res.writeHead(404); res.end("Not found"); return; }
-    res.writeHead(200, { "Content-Type": types[path.extname(file).toLowerCase()] || "application/octet-stream" });
+    res.writeHead(200, {
+      "Content-Type": types[path.extname(file).toLowerCase()] || "application/octet-stream",
+      "Cache-Control": "no-store"   // always serve the current file while editing
+    });
     res.end(data);
   });
 }).listen(port, "127.0.0.1", () => console.log(`Serving ${root} at http://127.0.0.1:${port}/`));

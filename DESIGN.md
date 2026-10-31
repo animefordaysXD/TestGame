@@ -1,6 +1,6 @@
 # Design — Living Medieval Sandbox
 
-**Last updated:** 2026-10-27
+**Last updated:** 2026-10-29
 **Owner:** Jo (decisions) · **PM role:** the AI session (proposals, tracking, trade-offs)
 
 This file is the source of truth for **what the game is and why**. `HANDOFF.md` says how the
@@ -47,7 +47,7 @@ ruling land. Technology is medieval; magic exists. The player has a family and c
 
 ## 3. Decisions
 
-### 3.1 Time model — Decided, Implemented (engine v0.2, actions v0.2, travel v0.1)
+### 3.1 Time model — Decided, Implemented (engine v0.2, actions v0.3, travel v0.2)
 Turn-based. Time advances when the player acts, by the cost of the action (a journey of three
 days is a three-day step). The core already supports this through `engine.step(n)` and
 `setTickMinutes`; the real-time `engine.run()` loop is simply not used by the game.
@@ -72,8 +72,8 @@ days is a three-day step). The core already supports this through `engine.step(n
 - **What happens on death:** **Open.** Proposed default until inheritance is decided: death ends
   the run.
 
-### 3.4 NPC tiers — Decided, Implemented (characters v0.3)
-NPCs are procedurally generated and live in one of three tiers (slice `characters`):
+### 3.4 NPC tiers — Decided, Planned (current approximation: characters v0.5)
+The target model has three tiers (slice `characters`):
 
 | tier | meaning | cleared by `location:changed`? |
 |---|---|---|
@@ -84,24 +84,39 @@ NPCs are procedurally generated and live in one of three tiers (slice `character
 - Promotion only moves up: `ephemeral -> notable -> saved`. Never down.
 - Promotion can happen because something happens to a character (the player saves, robs or
   hires them), so the game does not need to know in advance who matters.
-- Events: `character:promote { id, tier }` (request), `character:promoted { id, from, to }`.
-  `character:save` still works and means "promote to saved".
+- Planned events: `character:promote { id, tier }` (request),
+  `character:promoted { id, from, to }`. `character:save` will keep its meaning of "promote to
+  saved".
 - Saves, family members and companions belong in `saved`. A notable that is tied to a place will
   later be regenerable from the world seed (see 3.6).
 
+**Current code:** `characters` v0.5 has only `temp` (Temporary Spawn) and `named` (Named NPC).
+That approximates ephemeral vs saved: `temp` is cleared by `location:changed` and `named`
+survives. There is **no** `notable` tier, no `tier` field and no
+`character:promote`/`character:promoted` event yet. Read the table above as the target, not
+the current schema.
+
 ### 3.5 Personality, dialogue and NPC events — Decided direction, Planned
-- NPCs already have 5 traits from a 30-trait pool with opposite pairs. They are meant to drive
-  **dialogue** and to **affect the player** according to personality.
+- NPCs roll 1 of 30 named personality archetypes. Each archetype owns five traits from a
+  30-trait pool with opposite pairs, plus an eight-axis behavior profile. Personality is
+  meant to drive **dialogue** and to **affect the player** according to character.
+- **Built (data foundation):** `character.personality` (`{ id, name }`), `character.traits[5]`
+  and `character.behavior` with `aggression`, `caution`, `sociability`, `honesty`,
+  `generosity`, `loyalty`, `curiosity` and `ambition`, each 0-100. Archetypes and axes live in
+  `characters/data.js`. Nothing reads behavior yet; generation, saves and the UI only store,
+  migrate and display it.
 - A **separate NPC event checker** rolls events for NPCs present at the current location, e.g. a
   cunning commoner trying to steal from the player.
 - **Proposed shape (not built):**
-  - Dialogue is data: lines tagged by intent (greet, haggle, threaten, refuse) and by trait,
-    plus context (class, mood). Pick by how many traits match, using the RNG, with neutral
-    fallbacks. A few lines per trait is enough to start.
+  - Dialogue is data: lines tagged by intent (greet, haggle, threaten, refuse) and by
+    personality/trait, plus context (class, mood). Pick by how many traits match, using the
+    RNG, with neutral fallbacks. A few lines per trait is enough to start.
   - The NPC event checker is its own module and data file, like biome events but with a
-    `requires` block (for example `{ traitsAny: ["cunning","greedy"], class: "commoner" }`).
+    `requires` block (for example `{ behavior: { aggression: { min: 60 } }, class: "commoner" }`).
     Outcomes resolve with a skill check (for example Intrigue against Intrigue). Location
     hostility can scale the odds.
+  - Future AI should read `character.behavior` as the primary signal and use traits as
+    flavour/fallback, so tuning one data table changes dialogue, events and combat together.
 
 ### 3.6 World model — Decided concept, Planned
 Two layers plus changes:
@@ -153,20 +168,20 @@ Thrones-flavoured politics. How magic works is **Open** (the `mana` stat already
 The player can tame beasts. **Proposed:** a tamed beast is a character with stats in a
 companion slot, which falls out of the unified character model for free.
 
-### 3.11 Save files — Decided, Implemented (saves v0.1)
+### 3.11 Save files — Decided, Implemented (save helper v0.1)
 A save is a **JSON file holding the world seed plus the changes made since a fresh world**.
 
 ```json
 {
   "format": "text-rpg-save",
   "formatVersion": 1,
-  "savedAt": "2026-10-25T14:00:00.000Z",
+  "savedAt": "2026-10-29T12:00:00.000Z",
   "label": "1000-01-03 06:00",
-  "seed": 20261025,
+  "seed": 20261029,
   "baseline": { "startDate": "1000-01-01T06:00:00Z", "tickMinutes": 10 },
   "changes": [
-    { "op": "set", "path": ["modules", "characters", "saved", "npc_0001"], "value": { } },
-    { "op": "delete", "path": ["modules", "characters", "ephemeral", "npc_0002"] }
+    { "op": "set", "path": ["modules", "characters", "named", "npc_0001"], "value": { } },
+    { "op": "delete", "path": ["modules", "characters", "temp", "npc_0002"] }
   ]
 }
 ```
@@ -175,17 +190,20 @@ A save is a **JSON file holding the world seed plus the changes made since a fre
 - **Loading** reads the file, rebuilds the fresh world from the file's own seed and baseline,
   applies the changes, and hands the result to `engine.load()`. The file is the reference; the
   live engine's own seed is ignored.
-- `formatVersion` plus a migration table (`GameSave.MIGRATIONS`) handles older files. Files from
+- `formatVersion` plus a migration table (`GameSave.MIGRATIONS`) handles older files. A raw
+  full-state save from before v1 is migrated by rebuilding its baseline and diffing. Files from
   a newer version are refused with a clear message.
-- Save files are untrusted input: paths that could reach the prototype chain are rejected.
+- Save files are untrusted input: paths that could reach the prototype chain, or that point
+  outside the engine state, are rejected.
 - Both the page and the tests supply a `buildEngine(opts)` that returns a **new** engine with
-  every module registered. **Rule:** a new module must be registered in `registerModules()` in
+  every module registered. **Rule:** a new module must be registered in `buildEngine()` in
   `index.html`, or saves will not rebuild its baseline correctly.
+- The page has **Export save file** and **Import save file** for this format. The quick
+  **Save / Load** buttons still use `localStorage` slot `save1`, which `status.html` reads.
 - Today a save is about as large as the full state, because everything in the world is created
   by the player's actions. The size benefit arrives once the world is derived from the seed
   (see 3.6).
-- The quick **Save / Load** buttons still use `localStorage` slot `save1`, which `status.html`
-  reads. **Proposed:** IndexedDB autosave plus the file as export and backup.
+- **Proposed:** IndexedDB autosave plus the file as export and backup.
 
 ### 3.12 Scale of simulation — Proposed
 A world this size cannot simulate everything. **Proposed:** named, stat-bearing characters are
@@ -196,9 +214,13 @@ distant realms tick in aggregate at coarse steps.
 `engine.js` (v0.2) is not edited. The current needs (turn-based time, scoped event checking,
 keyed RNG, saves) can all be met from modules and helpers. Reopen only if a real limit appears.
 
-### 3.14 Travel — Decided, Implemented (actions v0.2, travel v0.1)
+### 3.14 Travel — Decided, Implemented (locations v0.4, actions v0.3, travel v0.2)
 - **Travel is an action.** It has a time and stamina cost, requires a destination, and resolves
   through `action:resolved`.
+- **Locations form a travel graph.** Each location owns bidirectional `connections` with a
+  distance in leagues. Travel offers only direct routes from the current location, and the route
+  distance sets the journey time (`distance × 15` minutes). The Travel action's own time is a
+  fallback. **Decided and built.** The graph is an abstract link graph, not a coordinate map.
 - **A journey spends its duration in 5-minute checks.** The UI temporarily switches to a
   5-minute tick, steps once per check, and restores the previous tick size. Normal actions still
   step whole ticks.
@@ -209,9 +231,44 @@ keyed RNG, saves) can all be met from modules and helpers. Reopen only if a real
 - **Travel never moves the party.** On completion the UI calls `locations.visit(destinationId)`,
   so locations remains the only module that changes `currentId`. The destination's biome events
   roll as usual on arrival.
-- **Not built yet:** a travel graph (routes, connections, distance-based times), route-specific
-  encounters, and weather/hostility affecting the journey. Today Travel can reach any charted
-  location.
+- **Not built yet:** route-specific encounters, weather/hostility affecting the journey, and
+  multi-hop route planning. The graph has no coordinates or map view.
+
+### 3.15 Content editing — Decided, Implemented (editor tool v0.1)
+
+Content stays in data files, but hand-editing them is error-prone and slows down playtesting.
+`editor.html` is a form-based tool over the same files: it validates entries, shows previews,
+and writes the data back without touching the game or the engine.
+
+- **A tool, not a module.** It has no state slice, fires no events, and is never registered in
+  `buildEngine()`. It cannot change a running game.
+- **Strict JSON in a JS wrapper.** Files keep their `window.X = { ... };` form and header
+  comment, but the object is strict JSON so the editor can round-trip it losslessly. Unknown
+  fields survive saves; older JavaScript-syntax files open with a lossy warning.
+- **Editable today:** biome events, travel events/tuning, armor items/settings, area actions
+  and outcomes, and character names/traits/ages. Map, locations, stats, combat tuning,
+  body layout, behavior axes and personality archetypes are not editable yet.
+- **Direct or downloaded saves.** With a folder connection (Chrome/Edge) saves write straight
+  to disk; otherwise files download and must be moved back by hand.
+
+### 3.16 Character bodies — Decided, Implemented (characters v0.5, mainCharacter v0.6)
+
+Every character, including the player, has a detailed humanoid body rather than a single
+abstract health pool. The body is structural: equipment already targets its parts, and it
+gives future injury and dismemberment rules a stable shape without committing to those rules
+yet.
+
+- **Ten parts:** `head`, `torso`, left/right leg, left/right arm, left/right hand and
+  left/right foot. Each part records its side, its parent part and whether it is vital
+  (`head`, `torso`).
+- **Status is per character.** Each part starts `"intact"`; the status is saved but no
+  injury, combat, healing or equipment rule reads or changes it yet. Equipment targets the
+  part keys; the two systems stay independent for now.
+- **Shared shape, data-driven layout.** `characters/bodyData.js` owns the part list and
+  metadata; `characters/body.js` creates/normalises the body for both character modules.
+  Old saves gain missing parts and keep saved statuses.
+- **Visible in the UI.** The main-character panel has a Body grid and NPC cards show a
+  compact body line; `status.html` expands the parts.
 
 ## 4. Roadmap — Proposed
 
@@ -225,24 +282,31 @@ Build playable slices, not systems in isolation. Each slice is a game you can pl
 | 4. Family and court | people matter | marriage, children, ageing, death, opinions driven by traits, dialogue, NPC events, schemes |
 | 5. War and magic | the big systems | armies and mercenary contracts, magic, races, the atlas and map at full scale |
 
-**Progress:** slice 1 is partly built. Five area actions with time, costs and weighted outcomes,
-timed travel with interruption checks, and biome rolls on arrival exist. The travel graph,
-hostility-driven risk, and events for most biomes are still missing. Slice 2 is partly built:
-armor/equipment and the armor bridge exist, but money, companions and beasts do not.
+**Progress:** slice 1 is mostly built. The travel graph (connections, distances and
+distance-based times), five area actions with time, costs and weighted outcomes, timed travel
+with interruption checks, and biome rolls on arrival exist. A placeholder map spawner now
+creates a configurable batch of random locations plus fixed tavern/castle/shack landmarks;
+real layouts and atlas slots are still missing. Hostility-driven risk and events
+for most biomes are still missing. Slice 2 is partly built: armor/equipment and the armor
+bridge exist, but money, companions and beasts do not.
 
 ## 5. Status snapshot
 
 | area | state |
 |---|---|
 | engine core v0.2, event bus, seeded RNG, turn stepping | working, frozen |
-| characters v0.3: stats, traits, **three NPC tiers** | working |
-| main character v0.5: stats, portrait, effect bridges, armor mirror | working |
-| equipment v0.1: body armor, inventory, equip/unequip | working |
-| actions v0.2: five area actions with time, costs, outcomes | working |
-| travel v0.1: 5-minute checks, event pause/resume, arrival handoff | working |
-| locations v0.2, combat v0.1 | working |
+| characters v0.5: stats, ten-part body, 30 personality archetypes with traits and 0-100 behavior profiles (data-only); `temp`/`named` approximation (three-tier model planned) | working |
+| main character v0.6: stats, ten-part body, portrait, effect bridges, armor mirror | working |
+| equipment v0.2: body-part armor, multi-part coverage, summed armor, inventory, equip/unequip | working |
+| actions v0.3: five area actions with time, costs, outcomes, route-aware Travel | working |
+| travel v0.2: 5-minute checks, event pause/resume, arrival handoff | working |
+| locations v0.4: procedural locations and a travel graph with distances; fixed `kind` landmarks | working |
+| map v0.1: placeholder map spawner with a configurable random batch and fixed tavern/castle/shack | working |
+| combat v0.1 | working |
 | biome events | 1 of 10 biomes has a live event |
-| **save files v0.1 (seed + changes)** | working |
+| **save files v0.1 (seed + changes, JSON export/import)** | working |
+| **content editor v0.1 (`editor.html`, tool — not a module)** | working for biome events, travel, armor, actions, character names/traits/ages |
+| character injury, healing and body-part effects | not started (body shape + status field exist) |
 | atlas, slots, keyed RNG, founding/razing | not started |
 | family, inheritance, courts, dialogue, NPC event checker | not started |
 | map rendering | not started |
@@ -252,7 +316,8 @@ armor/equipment and the armor bridge exist, but money, companions and beasts do 
 1. Inheritance: yes, no, or later? What happens on the player's death until then?
 2. How does magic work (schools, mana costs, who can use it)?
 3. Which 4–5 starting backgrounds, and what bonuses?
-4. Should the map be drawn as provinces (regions) or as a node graph with roads?
+4. Should the drawn map use provinces (regions) or show the route graph with roads? The travel
+   graph exists as data; the visual map is still open.
 
 ## 7. Change process
 

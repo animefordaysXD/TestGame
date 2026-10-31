@@ -120,6 +120,7 @@ async function writeJson(dir, name, data) {
   assert.equal(Object.keys(s.locations).length, 3);
   assert.equal(s.locations.loc_0009.name, "Hand Made");
   assert.equal(s.locations.loc_0009.seed, s.seed, "imported location adopts the current world seed");
+  assert.ok(s.locations.loc_0009.connections.length > 0, "an imported isolated location joins the travel graph");
   assert.equal(s.locations.loc_0002.name, originalSecondName, "existing state id wins over a stale file");
   assert.equal(s.nextId, 10, "nextId moves past imported numeric ids");
 

@@ -62,6 +62,16 @@ window.LocationData = {
   nameSuffixes: ["Reach", "Crossing", "Rest", "Watch", "Pass", "Ford", "Vale", "Landing", "Hold", "March"],
   namePatterns: ["{prefix} {noun}", "The {prefix} {noun}", "{prefix} {suffix}"],
 
+  // Travel graph: each new location links to 1-2 existing locations. A route stores an
+  // abstract distance; duration is distance * minutesPerDistance. Every location after
+  // the first is linked, so the charted map stays connected.
+  travelGraph: {
+    distanceRange: [1, 4],
+    minutesPerDistance: 15,
+    links: [1, 2],
+    legacyDistance: 1
+  },
+
   // Labels only; the stored value is always an integer from 1 to 100.
   hostilityBands: [
     { max: 20, label: "Peaceful" },

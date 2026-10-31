@@ -2,13 +2,17 @@
 
 **Repository:** <https://github.com/animefordaysXD/TestGame>
 
-**Last updated:** 2026-10-27
-**Current spec:** `ENGINE_SPEC.md` v1.0
-**Status:** working test page with procedural locations, biome events, a main-character
-creator with nine base stats plus armor, NPCs with the same stats and personality traits,
-basic player-first combat (Attack/Defend), an equipment module whose armor feeds Defend,
-five area actions with costs/outcomes/time, timed travel with 5-minute event checks and
-pause/resume, and a live node-tree status page.
+**Last updated:** 2026-10-31
+**Current spec:** `ENGINE_SPEC.md` v1.5
+**Status:** working test page with a procedural map spawner (configurable random locations
+plus fixed tavern/castle/shack landmarks), a travel graph of connected locations,
+procedural locations, biome events, a main-character creator with nine base stats plus
+armor and a ten-part body, NPCs with the same stats, bodies and 30 named personality
+archetypes, basic player-first
+combat (Attack/Defend), an equipment module whose armor feeds Defend, five area actions
+with costs/outcomes/time, route-based timed travel with 5-minute event checks and
+pause/resume, real JSON save files (seed + baseline + changes) alongside the quick local
+save, and a live node-tree status page.
 
 This file is the starting point for a new AI session. Read it first, then `README.md`,
 `DESIGN.md` (what the game is and why), `ENGINE_SPEC.md` and `MODULES.md` (the per-module
@@ -52,22 +56,31 @@ npm.cmd test
 
 Tests currently cover:
 
-- `test/locations.test.cjs` — location generation, uniqueness, reset, save/load.
+- `test/locations.test.cjs` — location generation, uniqueness, bidirectional routes,
+  graph invariants, legacy graph repair, reset, save/load.
 - `test/locations-disk.test.cjs` — Locations folder mirror using an in-memory mock.
-- `test/characters.test.cjs` — NPC base stats, deterministic generation, save/clear,
-  reset, legacy saves without stats.
+- `test/map.test.cjs` — map batch size, fixed tavern/castle/shack landmarks, batch ids,
+  `map:generated`, travel-graph linking, save/load and reset.
+- `test/characters.test.cjs` — 30 personality archetypes (unique ids/names, five valid
+  non-opposite traits, 0-100 behavior axes), NPC base stats, deterministic generation,
+  save/clear, reset, legacy saves without stats or personality/behavior.
 - `test/main-character.test.cjs` — validation, image handling, base stats, effects,
   legacy stamina migration, save/load, reset, folder mirror.
 - `test/biome-events.test.cjs` — JSON loading, visit rolls, stat effects, reset,
   save/load.
 - `test/actions.test.cjs` — five-action loading, biome overrides, weighted outcomes,
-  stat costs, time, travel through locations, equipment rewards, reset, save/load.
-- `test/equipment.test.cjs` — inventory, auto-equip, swap/unequip, armor bridge,
-  combat/Defend integration, reset, save/load.
-- `test/travel.test.cjs` — 5-minute checks, event pause/resume, effects, duration
-  rounding, cancel, reset, save/load.
+  stat costs, time, route time/distance override, travel through locations, equipment
+  rewards, reset, save/load.
+- `test/equipment.test.cjs` — body-part inventory, free-part auto-equip, overlap replacement,
+  summed armor, armor bridge, combat/Defend integration, reset, save/load and v0.1 migration.
+- `test/travel.test.cjs` — 5-minute checks, event pause/resume, effects, distance
+  persistence, duration rounding, cancel, reset, save/load.
 - `test/combat.test.cjs` — player-first turns, attack damage, defend/armor, lethal hits,
   invalid actions, reset, save/load.
+- `test/save.test.cjs` — capture, exact restore, JSON round-trip, legacy v0 migration,
+  newer-format refusal, unsafe paths, `applyChanges`.
+- `test/editor.test.cjs` — editor formatter stability, byte-identical round-trips of every
+  content file, schema validation/previews, and global uniqueness of action outcome ids.
 
 ## Architecture rules
 
@@ -88,6 +101,9 @@ Tests currently cover:
   decisions before building. Record new decisions there, and in `IDEAS.md` when an idea
   arrives. Do not present a **Proposed** item as decided.
 - Keep State slices JSON-safe. Never cache a slice object; `load()` replaces the state.
+- **Save files:** register every module in `buildEngine(opts)` in `index.html`. The same factory
+  builds the live world and the fresh baseline for `GameSave.capture()` / `restore()`; a missing
+  module makes exported saves incomplete and imports lossy.
 
 ## Git workflow
 
@@ -99,13 +115,21 @@ Tests currently cover:
 
 | module | state slice | current behavior |
 |---|---|---|
-| `characters` | `nextId`, `named{}`, `temp{}` | NPC generator with base stats; Named NPC / Temporary Spawn |
+| `characters` | `nextId`, `named{}`, `temp{}` | NPC generator with personality, behavior and base stats; Named NPC / Temporary Spawn |
 | `mainCharacter` | `character` | one player character, profile image, base stats, JSON mirror |
-| `equipment` | `nextId`, `items{}`, `equippedId` | main-character armor inventory; mirrors armor into the character stat |
+| `equipment` | `nextId`, `items{}`, `equippedByPart{}` | main-character armor on body parts; sums worn armor into the character stat |
 | `combat` | `active`, `round`, `turn`, `player`, `enemy`, `defending`, `winner*`, `log[]` | basic player-first duels; Attack/Defend |
-| `locations` | `seed`, `createdAt`, `nextId`, `locations{}`, `currentId` | procedural locations, visit rolls, JSON mirror |
-| `actions` | `locationId`, `locationName`, `biomeKey`, `actions[]`, `lastAction` | five area actions with costs, outcomes, time and Travel |
-| `travel` | `active`, `paused`, route, `elapsedMinutes`, `durationMinutes`, `checks`, `eventCount`, `lastEvent`, `lastCompleted` | 5-minute journey checks, event pause/resume, arrival handoff |
+| `locations` | `seed`, `createdAt`, `nextId`, `locations{}` (with `connections[]`), `currentId` | procedural locations linked into a travel graph, visit rolls, JSON mirror |
+| `map` | `seed`, `size`, `total`, `lastGeneratedTick`, `lastGeneratedAt`, `landmarks{}` | map spawner: fixed tavern/castle/shack plus a configurable batch of random locations |
+| `actions` | `locationId`, `locationName`, `biomeKey`, `actions[]`, `lastAction` | five area actions with costs, outcomes, time and route-aware Travel |
+| `travel` | `active`, `paused`, `distance`, route, `elapsedMinutes`, `durationMinutes`, `checks`, `eventCount`, `lastEvent`, `lastCompleted` | 5-minute journey checks, event pause/resume, arrival handoff |
+
+`save/gameSave.js` is a helper, not a module: no slice and no events. It exports/imports the
+seed + baseline + changes format and migrates the old full-state saves.
+
+`editor.html` (with `editor/core.js` and `editor/schemas.js`) is also a tool, not a module: it
+has no slice, no events and is not registered in `buildEngine()`. It edits the content files
+directly; see the content-editor section below.
 
 ### Main character
 
@@ -135,10 +159,21 @@ Tests currently cover:
 
 ### NPCs and personality
 
-- `characters/data.js` owns names, surnames, ages and the 30-trait pool with opposite
-  pairs. Each NPC gets five non-conflicting traits.
-- Traits are kept as the personality hook for a future Crusader-Kings-style behaviour
-  system. No behaviour rules read them yet.
+- `characters/data.js` owns names, surnames, ages, the 30-trait pool with opposite pairs,
+  and 30 named personality archetypes. Each archetype carries exactly five traits and a
+  behavior profile over eight axes.
+- Every generated NPC stores `personality: { id, name }`, copies its archetype's five
+  traits, and copies the behavior values into `character.behavior`. Behavior axes are
+  `aggression`, `caution`, `sociability`, `honesty`, `generosity`, `loyalty`, `curiosity`
+  and `ambition`, each an integer 0-100.
+- The behavior profile is the foundation for a future Crusader-Kings-style AI. **No rule
+  reads it yet**: dialogue, NPC events, travel and combat are unchanged. Future AI should
+  read `character.behavior` rather than infer intent from the name or traits.
+- Legacy NPCs without `personality`/`behavior` are migrated deterministically on load: a
+  valid personality id is kept, otherwise the nearest archetype by trait overlap is used.
+  Missing traits and behavior axes fill from that archetype; behavior falls back to `50`.
+- The NPC card shows the personality name and lists the traits; hovering the trait line
+  shows the behavior values.
 - `characters/statsData.js` owns the shared stat definitions. Add or tune a stat there;
   both the NPC and main-character modules iterate the list.
 
@@ -159,20 +194,48 @@ Tests currently cover:
 
 ### Locations
 
-- Button-driven generation: `location:add` request, then `location:added`.
-- Each location has `id`, `name`, `biome`, `biomeKey`, `weather`, `hostility` 1-100,
-  `seed`, `createdAtTick`, `createdAt`.
+- Button-driven or map-driven generation: `location:add` request, then `location:added`.
+- Each location has `id`, `name`, `biome`, `biomeKey`, `kind`, `weather`, `hostility` 1-100,
+  `connections[]`, `seed`, `createdAtTick`, `createdAt`.
+- `kind` is empty for random locations or `tavern`/`castle`/`shack` for fixed landmarks.
+  Landmarks use `biomeKey: "landmark"` and therefore roll no biome events.
+- Every new location links to the current area plus a random neighbour. A connection is
+  `{ id, distance }` and is stored on both endpoints with the same distance; distance is
+  1-5 leagues. `travelGraph.minutesPerDistance` (15) turns distance into journey minutes.
+- `connectionsFor(id)` returns UI-ready routes sorted by distance then name;
+  `routeBetween(fromId, toId)` returns one route or `null`; `travelMinutes(distance)`
+  converts leagues to minutes.
+- Legacy saves and hand-edited imports without `connections` are repaired on load by
+  `normalizeGraph()` without using the RNG: isolated locations are linked deterministically
+  and distance falls back to `travelGraph.legacyDistance`.
 - Map seed is `engine.state.seed >>> 0` with fallback `1`.
 - `visit(id)` is async: it sets `currentId`, awaits biome event loading, emits
   `location:visited`, then rolls enabled events and emits `location:event` at
   `depth + 1`.
-- Biome event content lives in `locations/events/<biomeKey>/events.json` for all ten
+- The **Visit** button and `visitLocation()` only allow a direct route from the current
+  location (or any location when none is current). `visit()` itself stays permissive so
+  travel arrival and tests can call it directly.- Biome event content lives in `locations/events/<biomeKey>/events.json` for all ten
   biomes. Each file has a disabled copy/paste template. `tundra/events.json` has a
   working 10% Snowfall event that costs 10 stamina.
 - `loadEvents(force)` fetches and caches events; `eventStatus()` reports load counts and
   errors; the UI has **Reload biome events**.
 - `Locations/<map seed>/seed.json` and `loc_XXXX.json` are written when the folder is
   connected. Reconnecting imports unknown `loc_*.json` files.
+
+### Map spawner
+
+- `map/data.js` owns `defaultLocationCount` (20), the 0-100 range and the fixed landmarks:
+  a tavern (`The Broken Wheel`), a castle (`Greywatch Castle`) and a shack
+  (`Abandoned Shack`). These are placeholders and change freely.
+- `map:generate { count? }` clamps the count and fires one `location:add` with
+  `{ count, fixed, batch }`. The map module does not create locations itself.
+- Locations charts the fixed landmarks first, then the random count. Every map therefore
+  has exactly one tavern, castle and shack, linked into the same travel graph as the rest.
+- `map:generated` fires after the last `location:added` in the batch and reports the
+  landmark ids. The map slice stores `seed`, `size`, `total`, generation time and
+  `landmarks`.
+- The UI adds **Generate map** with a random-location count next to the manual **Add
+  location** buttons. Generating another map appends to the existing map.
 
 ### Actions
 
@@ -183,20 +246,23 @@ Tests currently cover:
   contain five valid actions.
 - The module listens to `location:visited`, replaces the action list, clears `lastAction`,
   and emits `actions:loaded` at `depth + 1`.
-- `action:choose` (`{ actionId, destinationId? }`) emits `action:chosen`, picks one
-  outcome with `engine.rng` (weighted by `weight`), stores `lastAction`, and emits
-  `action:resolved` at `depth + 1` with combined costs/effects, `timeMinutes`,
-  `equipmentKey` and `travelTo`.
+- `action:choose` (`{ actionId, destinationId?, distance?, durationMinutes? }`) emits
+  `action:chosen`, picks one outcome with `engine.rng` (weighted by `weight`), stores
+  `lastAction`, and emits `action:resolved` at `depth + 1` with combined costs/effects,
+  `timeMinutes`, `equipmentKey`, `travelTo` and `travelDistance`.
 - The actions module applies nothing itself. `mainCharacter` applies the effects,
   `equipment` adds an awarded item, and the UI advances the clock by whole ticks for a
   normal action.
 - Travel requires a destination; without one the module emits `action:blocked` and
-  resolves nothing. For a valid journey the UI starts the travel module, which spends
-  `timeMinutes` in 5-minute checks. On completion the UI calls `locations.visit(travelTo)`,
-  so the destination's actions load and its biome events roll. No module edits another's
-  slice.
+  resolves nothing. The UI only offers destinations with a direct route from the current
+  location; it sends the route's `distance` and `minutes`, so the journey time follows the
+  graph. `timeMinutes` is the fallback when a caller sends no route data.
+- For a valid journey the UI starts the travel module, which spends the route time in
+  5-minute checks. On completion the UI calls `locations.visit(travelTo)`, so the
+  destination's actions load and its biome events roll. No module edits another's slice.
 - The UI shows an **Actions** panel with the area name, five actions, cost/time text, a
-  destination dropdown for Travel, and the last resolution in the status line.
+  route-only destination dropdown (name, biome, distance, minutes), and the last
+  resolution in the status line.
 
 ### Travel
 
@@ -204,10 +270,15 @@ Tests currently cover:
   `chanceByBiome` overrides (6-10% across the ten biomes) and the travel event catalogue.
   Each event has `{ id, name, text, weight, enabled, effects }`.
 - A journey starts from `travel:start` after a Travel action resolves. The UI passes a
-  destination snapshot and `durationMinutes`; the module never reads the locations slice.
-- Duration is rounded up to whole checks. The UI temporarily sets a 5-minute tick,
-  advances one check, fires `travel:advance`, and repeats. It restores the previous tick
-  size after a pause or completion.
+  destination snapshot, the route `distance` and `durationMinutes`; the module never
+  reads the locations slice.
+- Duration comes from the travel graph (`distance * 15` minutes), rounded up to whole
+  checks. The Travel action's `timeMinutes` is only a fallback when no route data arrives.
+  The UI temporarily sets a 5-minute tick, advances one check, fires `travel:advance`, and
+  repeats. It restores the previous tick size after a pause or completion.
+- `distance` is stored in the slice and echoed in `travel:started` and `travel:completed`
+  for the panel/status. It does not change the per-check event chance; longer routes get
+  more checks, so they see more total risk.
 - Each check rolls once. On a hit the journey pauses, stores `lastEvent`, emits
   `travel:event`, and `mainCharacter.applyTravelEffects()` applies the effects. Press
   **Continue travel** to emit `travel:continue` and resume.
@@ -220,18 +291,64 @@ Tests currently cover:
 
 ### Equipment
 
-- `equipment/data.js` owns the armor catalogue (`key`, `name`, `slot`, `armor`, `weight`),
-  `maxArmor` and `autoEquip`. All six current items use the one `body` slot.
-- The first acquired item is auto-equipped; equipping another swaps it. Requests are
-  `equipment:add`, `equipment:equip` and `equipment:unequip`; module events are
-  `equipment:added`, `equipment:equipped` and `equipment:unequipped`.
+- `equipment/data.js` owns the armor catalogue (`key`, `name`, `parts`, `armor`, `weight`),
+  `maxArmor` and `autoEquip`. `parts` uses the ten keys from `characters/bodyData.js`.
+  Twelve items cover the head, torso, arms, hands, legs and feet.
+- An item can cover several parts. Several items can be worn at once as long as no part is
+  shared; equipping an overlapping item removes the conflicting items whole. Total armor is
+  the sum of the distinct worn items, clamped to `maxArmor`.
+- A new item auto-equips when every part it covers is free; otherwise it stays in the
+  inventory. Requests are `equipment:add`, `equipment:equip` and `equipment:unequip`
+  (`{ itemId? }`, omit to clear all); module events are `equipment:added`,
+  `equipment:equipped` and `equipment:unequipped`.
+- `equippedByPart` is the source of truth; v0.1 saves with `equippedId`/`slot` are migrated
+  on load.
 - The module listens to `action:resolved` and adds the item named by `equipmentKey`.
 - `mainCharacter` listens to the equipped/unequipped events, clamps `totalArmor` to
   0-100, writes `stats.armor` and emits `mainCharacter:armorChanged`. The equipment
   module never reads another slice.
 - Only the main character can equip. The UI has an **Equipment** panel with **Find
-  armor**, the inventory, and **Equip** / **Unequip**; Find armor needs a saved main
-  character. Scavenge can award armor.
+  armor**, total armor, covered parts, each item's target parts, per-item **Equip** /
+  **Unequip** and **Unequip all**; Find armor needs a saved main character. Scavenge can
+  award armor.
+
+### Content editor
+
+- `editor.html` edits content files in forms. It is not a module: no state slice, no
+  events, not registered in `buildEngine()`.
+- It edits `travel/data.js`, `equipment/data.js`, `actions/data.js`, `characters/data.js`
+  and every `locations/events/<biome>/events.json`. `locations/data.js`,
+  `characters/statsData.js`, `characters/bodyData.js` and `combat/data.js` are read-only
+  references. Armor items pick their `parts` from the body data with a multi-select.
+- The object in each `window.X = {...};` file is strict JSON, so it can be rewritten
+  losslessly. The header comment is preserved. Unknown fields are kept, so fields without
+  a form (for example `behaviorAxes` and `personalities`) survive a save.
+- **Open game folder** writes directly (Chrome/Edge). Without it, saving downloads each
+  changed file, flattening the path (`travel-data.js`).
+- `editor/schemas.js` owns the file/section/field model and validators;
+  `editor/core.js` owns parsing and formatting. To add a content type, extend the schemas;
+  `editor.html` needs no change.
+- `BIOMES` in `editor/schemas.js` mirrors `locations/data.js`; update both when adding a
+  biome.
+
+### Save files
+
+- `save/gameSave.js` is a helper, not a module. Format v1 is
+  `{ format: "text-rpg-save", formatVersion: 1, savedAt, label, seed, baseline:
+  { startDate, tickMinutes }, changes[] }`.
+- `GameSave.capture(engine, buildEngine)` diffs a fresh baseline against the live state.
+  `GameSave.restore(text, engine, { buildEngine })` rebuilds the file's seed/baseline, applies
+  the changes and calls `engine.load()`.
+- `buildEngine(opts)` in `index.html` is the single module-registration factory for both the
+  live page and save baselines. Register new modules there; `map` must come after
+  `locations`.
+- `MIGRATIONS[0]` turns a raw legacy engine state (the old full-state JSON) into v1 by rebuilding
+  and diffing. Newer `formatVersion` values are refused.
+- Change paths must start at a top-level state key; `__proto__`, `prototype` and `constructor`
+  are rejected. Limit: 20,000 changes.
+- The UI keeps **Quick save** / **Quick load** in `localStorage` slot `save1` and adds
+  **Export save file** / **Import save file** for real JSON downloads/uploads.
+- `save/README.md` documents the format, API, migration and limits.
 
 ## Current event flow
 
@@ -247,13 +364,13 @@ UI Visit
 
 ```text
 UI Choose action
-  -> action:choose { actionId, destinationId? }
+  -> action:choose { actionId, destinationId?, distance?, durationMinutes? }
   -> actions.choose() -> action:chosen, action:resolved
   -> mainCharacter.applyActionEffects() -> mainCharacter:statChanged
   -> equipment.add() for a rewarded item -> equipment:added/equipped
   -> UI engine.flush()
   -> normal action: UI engine.step(ceil(timeMinutes / tickMinutes))
-  -> Travel: UI travel:start -> travel:started
+  -> Travel: UI travel:start { distance, durationMinutes } -> travel:started
      -> UI sets 5-minute ticks, steps one tick, then travel:advance
         -> travel:progress (loop continues)
         -> travel:event (pause; mainCharacter applies effects)
@@ -292,8 +409,95 @@ UI Fight on an NPC
   -> engine.flush() from the UI
 ```
 
+```text
+UI Export save file
+  -> GameSave.capture(engine, buildEngine)
+  -> engine.serialize() + fresh buildEngine(seed/baseline)
+  -> changesBetween(fresh.state, live) -> v1 JSON download
+
+UI Import save file
+  -> GameSave.restore(fileText, engine, { buildEngine })
+  -> read/parse -> validate -> migrate legacy v0 if needed
+  -> buildEngine(file baseline) -> applyChanges -> engine.load()
+  -> modules normalize in onLoad(); the UI re-renders
+```
+
 ## Recent work
 
+- Equipment v0.2: armor now targets the ten body-part keys. Item `parts` can cover several
+  parts, several items can be worn at once, and overlapping items replace each other whole.
+  `equippedByPart` replaces `equippedId` with save migration; total armor is summed and
+  clamped. The catalogue grew to twelve pieces covering head, torso, arms, hands, legs and
+  feet, and the game/status views show per-part coverage. The content editor gained a
+  body-part multi-select, body-data reference, part checks and new previews. All twelve Node
+  test files pass.
+- Added ten-part humanoid bodies to every character. `characters/bodyData.js` defines
+  head, torso, left/right legs, arms, hands and feet with side/parent/vital metadata;
+  `characters/body.js` builds and normalises the shared shape. Characters v0.5 and
+  mainCharacter v0.6 generate/keep `body`, old saves gain missing parts, and saved part
+  statuses survive. The main-character panel shows a Body grid and NPC cards show a compact
+  body line; status.html shows body nodes. Part status starts at `"intact"` and is not read
+  by any injury, combat or healing rule yet; equipment targets the part keys. Browser
+  smoke-tested saving the main character, spawning an NPC and loading status.html with no
+  console errors; all twelve Node test files pass.
+- Added the content editor (`editor.html`, `editor/core.js`, `editor/schemas.js`) as a
+  tool, not a module. It edits biome events, travel events/tuning, armor items/settings,
+  area actions/outcomes, and character names/traits/ages in forms, with validation,
+  previews and both direct folder saves and per-file downloads.
+- Converted `travel/data.js`, `equipment/data.js`, `actions/data.js` and
+  `characters/data.js` to strict JSON inside their `window.X = { ... };` wrapper so the
+  editor can round-trip them byte-for-byte. The characters conversion preserves all 30
+  personalities and eight behavior axes; the editor leaves them untouched.
+- Fixed editor issues found while testing: literal `"null"` text under fields without help,
+  duplicated action outcomes keeping duplicate ids, and new outcome ids colliding across
+  actions. Outcome ids are now globally unique via `S.outcomeIds()` /
+  `S.duplicateOutcomeIds()`.
+- Added `test/editor.test.cjs` (formatter, round-trip, validation, previews, outcome ids)
+  to `npm test`, and added `Cache-Control: no-store` to the dev server so browser tests do
+  not load stale scripts.
+- Added the procedural map spawner (`map` v0.1) as a separate module. **Generate map**
+  requests a configurable number of random locations plus the fixed tavern/castle/shack
+  landmarks from `map/data.js`. The map module drives the existing location spawner
+  through `location:add` and waits for the batch's `location:added` events before emitting
+  `map:generated`.
+- Extended locations to v0.4: fixed definitions bypass the random rolls, `kind` is stored
+  and normalized, landmark names stay unique across repeated maps, and `location:added`
+  carries the fixed kind and batch id. Landmarks use `biomeKey: "landmark"` so biome events
+  do not fire on them. The graph links landmarks like any other location.
+- Added `test/map.test.cjs` and registered it in `npm test`; updated the save-test module
+  list to include `map`.
+- Added 30 named NPC personality archetypes (`characters` v0.4) in `characters/data.js`.
+  Each archetype owns five traits and an eight-axis behavior profile (0-100). Generated NPCs
+  now store `personality: { id, name }`, their trait copy and `behavior`; the spawn line and
+  NPC card show the personality, and hovering the traits shows the behavior values.
+- Legacy NPC saves are migrated deterministically by personality id or nearest trait
+  overlap, with missing behavior axes filled from the archetype then `50`. Behavior is
+  data-only: no dialogue, event, travel or combat rule reads it yet.
+- Extended `test/characters.test.cjs` to validate the 30 archetypes, trait uniqueness and
+  opposite rules, behavior ranges, generation and legacy migration.
+- Added real save files (`save/gameSave.js` v0.1): format v1 stores the world seed, baseline
+  engine options and a change list; export/import uses a real JSON download/upload. Legacy
+  full-state saves are migrated by rebuilding the baseline and diffing. Unsafe paths and newer
+  formats are refused.
+- Refactored `index.html` to a shared `buildEngine(opts)` factory used by both the live page and
+  save baselines. Quick **Save / Load** still uses `localStorage` slot `save1`.
+- Added `test/save.test.cjs` and wired it into `npm test`; all ten test files pass.
+- Added `save/README.md` and updated `ENGINE_SPEC.md` to v1.2, plus `MODULES.md`, `HANDOFF.md`,
+  `README.md`, `DESIGN.md`, `IDEAS.md` and `status.html`.
+- Corrected the design/status drift on NPC tiers: `characters` v0.3 has `temp` and `named`
+  buckets, not the full three-tier `ephemeral -> notable -> saved` model.
+- Added the travel graph (`locations` v0.3, `actions` v0.3, `travel` v0.2). Locations own
+  bidirectional `connections[]` with a distance; new locations link to the current area
+  plus a random neighbour. Travel only offers direct routes, and the route distance sets
+  the journey time (`distance * 15` minutes) instead of the action's fallback. The UI gates
+  **Visit** the same way. Actions accept and announce `travelDistance`, and travel stores
+  and echoes `distance`.
+- Legacy saves and hand-edited imports without `connections` are repaired deterministically
+  (no RNG) so old state still travels.
+- Extended the tests: route invariants and legacy repair in `locations.test.cjs`, the route
+  time/distance override in `actions.test.cjs`, and distance persistence in
+  `travel.test.cjs`. All nine test files pass; a browser smoke test completed a 3-league
+  (45-minute) journey with route-gated Visit buttons and no console errors.
 - Added `DESIGN.md` (vision, pillars, decisions, roadmap) and `IDEAS.md` (running idea
   list) to the repository, and wired them into the reading order, architecture rules,
   `README.md`, `MODULES.md` and the status page's Docs node. `DESIGN.md` records timed
@@ -333,36 +537,63 @@ UI Fight on an NPC
 
 ## Known limitations and quirks
 
+- The map spawner is a placeholder: fixed landmarks are ordinary locations with a
+  synthetic `Landmark` biome, no interior, no unique actions and no layout rules. It
+  appends on repeat generation rather than replacing the map.
 - Area actions resolve costs, one weighted outcome, time and travel, but have no
-  requirements or skill checks yet. Travel can reach any charted location; a journey
-  spends its action time in 5-minute checks.
+  requirements or skill checks yet. Travel follows direct routes in the location graph;
+  a journey spends its route time in 5-minute checks.
 - Normal action time is applied by stepping whole ticks. Travel temporarily switches to
   5-minute ticks, then restores the previous tick size.
-- Travel interruptions are stat-effect scenes: they cannot start combat or offer choices,
-  and they do not depend on route distance, weather or hostility.
+- Travel interruptions are stat-effect scenes: they cannot start combat or offer choices.
+  The per-check chance depends on the destination biome, not on route distance or weather;
+  longer routes simply roll more checks.
+- The travel graph is an abstract link graph with distances, not a coordinate map. New
+  locations link to the current area plus a random neighbour, so the graph can grow as a
+  chain and the layout is not geographic.
 - Base stats are stored, and location events/actions can change them. Combat uses Personal
   Combat and armor, but there is no progression, training or opposed-roll system yet.
 - Combat is one-on-one and player-first. There is no flee, positioning, initiative, hit
   chance, damage variance or enemy AI; the enemy always attacks.
-- Equipment is main-character-only with one body slot. NPCs still fight at armor 0.
-  Armor is mirrored to the main character present when the item is equipped; the UI
-  requires a saved character before **Find armor**.
-- NPC personality traits are generated but do not weight behaviour yet.
+- Equipment is main-character-only and targets the ten body parts. NPCs still fight at
+  armor 0. Armor is mirrored to the main character present when the item is equipped; the
+  UI requires a saved character before **Find armor**.
+- NPC personality archetypes, traits and behavior profiles are generated and displayed, but
+  no AI reads them yet. Combat has no enemy AI, dialogue is not implemented, and NPC events
+  do not use personality.
+- Every character has a ten-part body with per-part `status`, but no injury, combat,
+  healing or equipment rule reads or changes the status yet. Equipment uses the part keys;
+  the statuses are structure and UI only.
 - Biome events have no cooldowns, once-only flags, weather filters or requirements.
   Every enabled event is an independent roll on each visit.
-- `location:changed` still only clears Temporary Spawn; there is no travel graph,
-  coordinates or location connections. The travel module runs the in-between journey and
-  the UI calls `locations.visit` on arrival, moving `currentId` to any known location.
+- `location:changed` still only clears Temporary Spawn. The location graph now has
+  connections and distances, but no coordinates; the travel module runs the in-between
+  journey and the UI calls `locations.visit` on arrival, moving `currentId` along a direct
+  route.
 - The real OS folder pickers are untested in a browser. The disk tests use an in-memory
   File System Access API mock. Chrome/Edge is required.
-- `mainChar/` is a write mirror, not an import source. `localStorage` or the in-game load
-  button remains the way back into a session.
+- The content editor covers biome events, travel, armor, actions and character
+  names/traits/ages only. It cannot edit `map/data.js`, `locations/data.js`,
+  `characters/statsData.js`, `characters/bodyData.js`, `combat/data.js`, `behaviorAxes`
+  or `personalities`, and it
+  cannot create a new biome without a matching `BIOMES` change in `editor/schemas.js`.
+- The editor saves strict JSON. Opening a file with older JavaScript syntax works, but
+  saving rewrites the object and drops comments inside it (the header comment is kept).
+- The editor's folder picker was tested with a mocked File System Access API; the real OS
+  picker has not been exercised. Without a folder, downloads cannot keep directories, so
+  saved files are renamed to flattened paths and must be moved back by hand.
+- `mainChar/` is a write mirror, not an import source. The quick save or an imported save file
+  is the way back into a session.
+- Save files are snapshot diffs, not replay logs. They cannot merge two divergent saves, and
+  because most world content is created by play they are often close to full-state size.
+- Quick save uses `localStorage` slot `save1`, which some contexts block. **Export/Import save
+  file** is the fallback and uses a real JSON download/upload.
 - On Windows, `Locations/` and `locations/` are the same case-insensitive directory.
   The mirror therefore writes seed folders inside the module folder on Windows. This is
   a known platform quirk; do not add a broad `Locations/` ignore rule without checking
   case-sensitivity.
-- The test page stores saves in `localStorage` slot `save1`, which some contexts block.
-  `status.html` reads only that slot or a manually loaded state JSON file.
+- `status.html` reads only the quick-save slot or a manually loaded state JSON file. It does
+  not expand a save file's `changes`; import the file in the game first.
 - Folder connections (`mainChar/`, `Locations/`) are runtime handles and are not in the
   save, so the status tree cannot report whether they are connected.
 - The local test server may not be running in a new session. Start it with
@@ -370,43 +601,65 @@ UI Fight on an NPC
 
 ## Suggested next steps
 
-1. Expand equipment: NPC loadouts, more slots (head/hands/weapon), item quality and
-   inventory limits; keep the armor-to-stat bridge event-based.
-2. Use stats in action and event checks (success/chance based on skill and difficulty)
+1. Make hostility matter: scale travel/rest risk and event or encounter chance with the
+   location's hostility band, then add a hostile event that hands off to combat.
+2. Give travel interruptions choices (press on, turn back, fight) through new request/event
+   pairs; keep travel resolution modular.
+3. Use stats in action and event checks (success/chance based on skill and difficulty)
    and add requirements such as minimum stamina or a needed item.
-3. Add a travel graph/connections between locations with route distance, route-specific
-   encounters and per-route travel times, instead of letting Travel reach any charted
-   location.
-4. Add travel interruption choices (press on, turn back, fight) by handing off to other
-   modules through new request/event pairs; keep travel resolution modular.
+4. Expand equipment: NPC loadouts, more slots (head/hands/weapon), item quality and
+   inventory limits; keep the armor-to-stat bridge event-based.
 5. Add per-biome action overrides and test them in the UI.
 6. Add event conditions (weather, time, once/cooldown) to the biome event schema.
 7. Expand combat: enemy AI, flee, multiple opponents, hit chance/damage variance, or
    initiative, depending on the desired feel.
 8. Decide how stats progress through training, actions and equipment.
-9. Manually verify both real folder pickers in Chrome/Edge.
+9. Consider IndexedDB autosave and named save slots on top of the file export/import.
+10. Manually verify both real folder pickers in Chrome/Edge.
 
 ## Quick prompt for a new AI
 
 ```text
 Continue the project at https://github.com/animefordaysXD/TestGame.
-Read HANDOFF.md first, then README.md, DESIGN.md and ENGINE_SPEC.md. Follow the
-architecture rules in HANDOFF.md. Run the tests with npm test (Windows: npm.cmd test).
+
+Read HANDOFF.md first, then README.md, DESIGN.md, ENGINE_SPEC.md and MODULES.md (the
+per-module handbook). IDEAS.md is the running idea list. Follow the architecture rules and
+git workflow in HANDOFF.md. Run the tests with npm test (Windows: npm.cmd test) and start
+the page with npm run serve (Windows: npm.cmd run serve).
 
 DESIGN.md is the product source of truth: check requests against its pillars and decisions,
-and do not build Proposed items as if they were decided. Record new ideas in IDEAS.md in
-the same turn.
+do not build Proposed items as if they were decided, and record new ideas in IDEAS.md in the
+same turn. Update DESIGN.md when a decision is made.
 
-Do not edit engine.js (core v0.2). Keep every module's state slice JSON-safe and make
-modules communicate only through events. UI events must be followed by engine.flush();
-follow-up events use depth + 1. init() reruns on reset, so subscribe/register only once.
-Use engine.rng or the tick rng, never Math.random. Put content in data files. Update the
-event catalog and module registry in ENGINE_SPEC.md for every module or event change,
-and update MODULES.md (role, code map, events, adjustment table, update log) whenever a
-module changes.
+Do not edit engine.js (core v0.2). Keep every module's state slice JSON-safe and make modules
+communicate only through events. UI events must be followed by engine.flush(); follow-up
+events use depth + 1. init() reruns on reset, so subscribe/register only once. Use engine.rng
+or the tick rng, never Math.random. Put content in data files. For every module or event
+change, update ENGINE_SPEC.md, MODULES.md (including its update log), HANDOFF.md, README.md
+and the hand-maintained branches in status.html. Commit only when asked; do not push without
+explicit approval.
 
-Current state: locations, biome events, main-character and NPC base stats, equipment and
-armor, personality traits, five area actions with costs/outcomes/time, timed travel with
-5-minute event checks and pause/resume, and basic player-first combat (Attack/Defend) are
-working. Start by asking what feature to build next; do not add unrequested scope.
+Current build: core v0.2; characters v0.5; mainCharacter v0.6; equipment v0.2; locations v0.4;
+map v0.1; actions v0.3; travel v0.2; combat v0.1; save helper v0.1. Working: a procedural map
+spawner with a configurable random count and fixed tavern/castle/shack landmarks; a travel graph
+of connected locations with distances and route-based times; procedural locations; biome events
+(only tundra has a live event); shared stats and ten-part bodies; 30 named NPC personality
+archetypes with traits and behavior profiles (data-only, no AI reads them yet); body-part
+equipment with summed armor feeding Defend; five area actions with time, costs and weighted outcomes; route-based
+timed travel with 5-minute checks, event pause/resume and arrival through locations; basic
+player-first combat; real JSON save files (seed + baseline + changes) with legacy migration and
+unsafe-path guards, alongside quick localStorage saves; a read-only status tree; and a form-based
+content editor (`editor.html`) that is a tool, not a module. Twelve Node test files are wired
+into npm test.
+
+Known gaps: the map spawner is a placeholder (landmarks are ordinary locations with no interiors
+or layout rules); actions and events have no requirements or skill checks; travel events are
+stat-only scenes with no choices or combat handoff; hostility is display-only; the graph has no
+coordinates or map view; most biomes have no live event; NPCs cannot equip; combat has no flee,
+enemy AI, hit chance or variance; personality and behavior do not drive behaviour yet; body
+part status is structural only and no rule injures, heals or equips it; the
+three-tier NPC model is only approximated by temp/named buckets.
+
+Suggested next step: make hostility matter (risk bands, travel/rest danger, a hostile event that
+hands off to combat). Ask what to build next; do not add unrequested scope.
 ```

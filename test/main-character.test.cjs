@@ -5,8 +5,33 @@ const assert = require("node:assert/strict");
 global.window = global;
 require("../engine.js");
 require("../characters/statsData.js");
+require("../characters/bodyData.js");
+require("../characters/body.js");
 require("../characters/mainCharacterData.js");
 require("../characters/mainCharacter.js");
+
+const BODY_PARTS = CharacterBodyData.parts;
+assert.deepEqual(BODY_PARTS.map((part) => part.key), [
+  "head", "torso", "leftLeg", "rightLeg", "leftArm", "rightArm",
+  "leftHand", "rightHand", "leftFoot", "rightFoot"
+], "the shared body layout has every expected part");
+
+function assertBody(body, label, statuses = {}) {
+  assert.ok(body && body.parts && typeof body.parts === "object", `${label} has a body`);
+  assert.equal(Object.keys(body.parts).length, BODY_PARTS.length, `${label} has every body part`);
+  for (const def of BODY_PARTS) {
+    const part = body.parts[def.key];
+    assert.ok(part, `${label} has ${def.key}`);
+    assert.equal(part.key, def.key, `${label} ${def.key} key`);
+    assert.equal(part.label, def.label, `${label} ${def.key} label`);
+    assert.equal(part.kind, def.kind, `${label} ${def.key} kind`);
+    assert.equal(part.side, def.side, `${label} ${def.key} side`);
+    assert.equal(part.parent, def.parent, `${label} ${def.key} parent`);
+    assert.equal(part.vital, !!def.vital, `${label} ${def.key} vital flag`);
+    assert.equal(part.status, statuses[def.key] || CharacterBodyData.defaultStatus,
+      `${label} ${def.key} status`);
+  }
+}
 
 const PNG = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl2nGQAAAAASUVORK5CYII=";
 
@@ -107,6 +132,7 @@ async function listNames(dir) {
     moneyManagement: 10, intrigue: 10, intelligence: 10
   });
   assert.equal(first.stamina, undefined, "stamina lives in the stats block");
+  assertBody(first.body, "main character");
   assert.equal(savedEvents.length, 1);
   assert.equal(savedEvents[0].depth, 2, "save uses the supplied event depth");
   assert.equal(savedEvents[0].data.name, "Aria Vale");
@@ -132,11 +158,13 @@ async function listNames(dir) {
   assert.throws(() => mainCharacter.save({ name: "Aria", gender: "female", age: 121 }), /Age must be/);
   assert.throws(() => mainCharacter.save({ name: "x".repeat(41), gender: "female", age: 27 }), /Name must be/);
 
+  engine.state.modules.mainCharacter.character.body.parts.head.status = "scarred";
   const custom = mainCharacter.save({ name: "Aria Vale", gender: "female", age: 27, image: PNG });
   engine.flush();
   assert.equal(custom.image, PNG);
   assert.equal(custom.imageSource, "upload");
   assert.equal(custom.stats.stamina, 90, "profile saves preserve stamina");
+  assertBody(custom.body, "updated main character", { head: "scarred" });
   assert.equal(custom.createdAtTick, first.createdAtTick, "updates keep createdAtTick");
   assert.equal(custom.createdAt, first.createdAt, "updates keep createdAt");
 
@@ -157,6 +185,7 @@ async function listNames(dir) {
   assert.equal(engine2.state.modules.mainCharacter.character.name, "Aria V.");
   assert.equal(engine2.state.modules.mainCharacter.character.image, PNG);
   assert.equal(engine2.state.modules.mainCharacter.character.stats.stamina, 90);
+  assertBody(engine2.state.modules.mainCharacter.character.body, "loaded main character", { head: "scarred" });
 
   const beforeUnknown = statEvents.length;
   engine.fire({ type: "location:event", data: { effects: [{ stat: "luck", delta: -20 }] } });
@@ -239,6 +268,7 @@ async function listNames(dir) {
   assert.equal(json.stats.armor, 0);
   assert.equal(json.stamina, undefined, "no duplicate top-level stamina in main.json");
   assert.equal(json.stats.war, 10);
+  assertBody(json.body, "main.json");
   assert.deepEqual(await listNames(folder), ["main.json", "profile.png"]);
 
   // Switching extension removes the old profile image.
@@ -268,6 +298,7 @@ async function listNames(dir) {
   const legacySave = JSON.parse(engine3.serialize());
   const legacyCharacter = legacySave.modules.mainCharacter.character;
   delete legacyCharacter.stats;
+  delete legacyCharacter.body;
   legacyCharacter.stamina = 42;
   legacyCharacter.staminaMax = 80;
 
@@ -282,6 +313,17 @@ async function listNames(dir) {
   assert.equal(migrated.stats.hp, 100, "other stats get their defaults");
   assert.equal(migrated.stats.armor, 0, "armor starts empty");
   assert.equal(migrated.stats.intelligence, 10);
+  assertBody(migrated.body, "legacy main character");
+
+  // A partial saved body keeps known statuses and gains every missing part.
+  const partialSave = JSON.parse(engine3.serialize());
+  partialSave.modules.mainCharacter.character.body = { parts: { leftFoot: { status: "lost" } } };
+  const engine6 = new Engine({ seed: 9 });
+  const main6 = createMainCharacterModule();
+  engine6.register(main6);
+  engine6.load(partialSave);
+  assertBody(engine6.state.modules.mainCharacter.character.body,
+    "partial-body main character", { leftFoot: "lost" });
 
   console.log("main character test passed");
 })().catch((error) => {

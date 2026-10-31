@@ -1,4 +1,4 @@
-/* Travel module v0.1 — time-based journeys with 5-minute event checks.
+/* Travel module v0.2 — time-based journeys with 5-minute event checks.
    Owns the `travel` slice. The UI starts a journey after an action resolves with
    `travelTo`, then advances it in `minutesPerCheck` chunks. This module checks for an
    interruption after every chunk and pauses when one triggers. It never moves the
@@ -6,8 +6,9 @@
    locations module stays the only mover.
 
    The world clock is advanced by the UI. Travel runs on 5-minute ticks while a journey
-   is being driven, then the UI restores the previous tick size. Content lives in
-   travel/data.js. See ENGINE_SPEC.md and MODULES.md. */
+   is being driven, then the UI restores the previous tick size. Route distance is an
+   echo of the travel graph for the panel/status; duration still comes from the caller.
+   Content lives in travel/data.js. See ENGINE_SPEC.md and MODULES.md. */
 (function (global) {
   "use strict";
   const D = global.TravelData;
@@ -80,6 +81,8 @@
       if (typeof s.destinationId !== "string") s.destinationId = null;
       if (typeof s.destinationName !== "string") s.destinationName = "";
       if (typeof s.destinationBiomeKey !== "string") s.destinationBiomeKey = "";
+      if (!Number.isFinite(Number(s.distance)) || Number(s.distance) < 0) s.distance = 0;
+      s.distance = Math.round(Number(s.distance) || 0);
       if (!Number.isFinite(Number(s.elapsedMinutes))) s.elapsedMinutes = 0;
       if (!Number.isFinite(Number(s.durationMinutes))) s.durationMinutes = 0;
       if (!Number.isFinite(Number(s.checks))) s.checks = 0;
@@ -116,6 +119,7 @@
         destinationName: s.destinationName,
         originId: s.originId,
         originName: s.originName,
+        distance: s.distance,
         elapsedMinutes: s.elapsedMinutes,
         durationMinutes: s.durationMinutes,
         eventCount: s.eventCount,
@@ -140,6 +144,7 @@
           active: false, paused: false,
           originId: null, originName: "",
           destinationId: null, destinationName: "", destinationBiomeKey: "",
+          distance: 0,
           elapsedMinutes: 0, durationMinutes: 0, minutesPerCheck: MINUTES_PER_CHECK,
           checks: 0, eventCount: 0,
           pausedAtMinutes: null,
@@ -161,6 +166,7 @@
           active: false, paused: false,
           originId: null, originName: "",
           destinationId: null, destinationName: "", destinationBiomeKey: "",
+          distance: 0,
           elapsedMinutes: 0, durationMinutes: 0, minutesPerCheck: MINUTES_PER_CHECK,
           checks: 0, eventCount: 0,
           pausedAtMinutes: null,
@@ -191,6 +197,7 @@
         s.destinationId = destinationId;
         s.destinationName = typeof data.destinationName === "string" ? data.destinationName : "";
         s.destinationBiomeKey = typeof data.destinationBiomeKey === "string" ? data.destinationBiomeKey : "";
+        s.distance = Math.max(0, Math.round(Number(data.distance) || 0));
         s.elapsedMinutes = 0;
         s.durationMinutes = duration;
         s.minutesPerCheck = MINUTES_PER_CHECK;
@@ -209,6 +216,7 @@
             destinationBiomeKey: s.destinationBiomeKey,
             originId: s.originId,
             originName: s.originName,
+            distance: s.distance,
             durationMinutes: s.durationMinutes,
             minutesPerCheck: s.minutesPerCheck
           }

@@ -7,6 +7,8 @@ const assert = require("node:assert/strict");
 global.window = global;
 require("../engine.js");
 require("../characters/statsData.js");
+require("../characters/bodyData.js");
+require("../characters/body.js");
 require("../characters/mainCharacterData.js");
 require("../characters/mainCharacter.js");
 require("../locations/data.js");

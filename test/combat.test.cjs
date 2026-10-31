@@ -7,6 +7,8 @@ const path = require("node:path");
 global.window = global;
 require("../engine.js");
 require("../characters/statsData.js");
+require("../characters/bodyData.js");
+require("../characters/body.js");
 require("../characters/data.js");
 require("../characters/characters.js");
 require("../characters/mainCharacterData.js");

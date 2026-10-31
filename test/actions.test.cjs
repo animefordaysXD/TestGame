@@ -8,6 +8,8 @@ const assert = require("node:assert/strict");
 global.window = global;
 require("../engine.js");
 require("../characters/statsData.js");
+require("../characters/bodyData.js");
+require("../characters/body.js");
 require("../characters/mainCharacterData.js");
 require("../characters/mainCharacter.js");
 require("../equipment/data.js");
@@ -178,6 +180,18 @@ const TEST_ACTIONS = [
     id: "loc_0001", name: "Frozen Test", biome: "Tundra", biomeKey: "tundra",
     weather: "Snow", hostility: 60
   });
+
+  // A route supplied by the UI owns the journey time and is recorded for the panel/status.
+  const staminaBeforeRoute = character.stats.stamina;
+  act(engine, "action:choose", {
+    actionId: "test_travel", destinationId: "loc_0002", distance: 3, durationMinutes: 45
+  });
+  const routedTravel = resolvedEvents.at(-1).data;
+  assert.equal(routedTravel.travelTo, "loc_0002");
+  assert.equal(routedTravel.travelDistance, 3, "the route distance is announced");
+  assert.equal(routedTravel.timeMinutes, 45, "route minutes override the action fallback");
+  assert.equal(character.stats.stamina, staminaBeforeRoute - 5, "the travel cost still applies");
+
   act(engine, "action:choose", { actionId: "test_gear" });
   const gear = Object.values(engine.state.modules.equipment.items)[0];
   assert.ok(gear, "the equipment module added the awarded item");

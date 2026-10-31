@@ -10,9 +10,10 @@
 > - `IDEAS.md` - running idea list; decisions graduate to `DESIGN.md`.
 > - `MODULES.md` (this file) - practical per-module map and adjustment guide.
 
-**Last updated:** 2026-10-27
-**Build:** core v0.2, characters v0.3, mainCharacter v0.5, equipment v0.1,
-locations v0.2, actions v0.2, travel v0.1, combat v0.1, status viewer (not a module).
+**Last updated:** 2026-10-31
+**Build:** core v0.2, characters v0.5, mainCharacter v0.6, equipment v0.2,
+locations v0.4, map v0.1, actions v0.3, travel v0.2, combat v0.1, save helper v0.1,
+status viewer and content editor (both tools, not modules).
 
 ---
 
@@ -43,6 +44,13 @@ Newest first. Keep entries short; details live in the module sections.
 
 | Date | Change | Files |
 |---|---|---|
+| 2026-10-31 | Equipment v0.2: armor now targets the ten body-part keys from `characters/bodyData.js` through `parts: []`. Items can cover several parts, several items can be worn at once, and overlapping parts replace conflicting items whole. Total armor sums worn items (clamped to `maxArmor`); `equippedByPart` replaces `equippedId`, with v0.1 save migration. Added head, arm, leg, hand and foot armour plus a body coverage view in the game and status tree. The editor gains a body-part multi-select, body-data reference and part checks. | `equipment/*`, `index.html`, `editor/*`, `test/equipment.test.cjs`, `test/editor.test.cjs`, docs, `status.html` |
+| 2026-10-31 | Bodies: every NPC and the main character now own the same ten-part humanoid body (`head`, `torso`, paired legs/arms/hands/feet) from `characters/bodyData.js`, built/normalised by `characters/body.js`. Parts store `key`, `label`, `kind`, `side`, `parent`, `vital` and `status` (`"intact"` by default). Characters v0.5 and mainCharacter v0.6 add `body` to generation, save/load, migration and their UI; old saves gain missing parts and keep saved statuses. Status-only for now: no injury, combat or healing rule reads it; equipment uses the part keys. | `characters/bodyData.js`, `characters/body.js`, `characters/characters.js`, `characters/mainCharacter.js`, `index.html`, tests, docs, `status.html` |
+| 2026-10-31 | Added the content editor (`editor.html` + `editor/core.js` + `editor/schemas.js`), a tool with no state and no events. It edits biome events, travel, armor, actions and character names/traits/ages; saves are strict JSON with headers preserved, and unknown fields/read-only slices such as `behaviorAxes` and `personalities` survive. Added `test/editor.test.cjs` and fixed the literal "null" help text and duplicate outcome ids found while testing. | `editor.html`, `editor/*`, `characters/data.js`, `travel/data.js`, `equipment/data.js`, `actions/data.js`, `test/editor.test.cjs`, `test/serve.cjs`, `package.json`, docs, `status.html` |
+| 2026-10-29 | Map v0.1: a separate map spawner requests a configurable batch from locations through `location:add`, always adding the fixed tavern, castle and shack landmarks from `map/data.js`. Locations v0.4 accepts fixed definitions, stores `kind`, and reports the batch so `map:generated` fires after the last `location:added`. | `map/*`, `locations/*`, `index.html`, `test/map.test.cjs`, `test/save.test.cjs`, `package.json`, docs, `status.html` |
+| 2026-10-29 | Characters v0.4: 30 named personality archetypes each carry five traits and an eight-axis behavior profile (`aggression`, `caution`, `sociability`, `honesty`, `generosity`, `loyalty`, `curiosity`, `ambition`, 0-100). Generated NPCs store `personality: { id, name }`, their trait copy and `behavior`; legacy saves without these fields are migrated by personality id or nearest trait overlap. Behavior is data-only until a future AI module reads it. | `characters/data.js`, `characters/characters.js`, `index.html`, `test/characters.test.cjs`, docs, `status.html` |
+| 2026-10-29 | Save files v0.1: `GameSave` captures the world seed, baseline options and a change list, exports/imports JSON, migrates legacy full-state saves and rejects unsafe paths. The page gains **Export save file** / **Import save file**; quick save stays in `localStorage`. `index.html` now builds live and baseline worlds through one `buildEngine()` factory. | `save/*`, `index.html`, `test/save.test.cjs`, `package.json`, docs, `status.html` |
+| 2026-10-27 | Travel graph: locations own bidirectional routes with distance; Travel only offers connected destinations and route distance sets journey time; actions accept route minutes and announce `travelDistance`; travel echoes the route distance. Legacy saves/imports are repaired without RNG. | `locations/*`, `actions/*`, `travel/*`, `index.html`, tests, docs, `status.html` |
 | 2026-10-27 | Added the product docs to the repo: `DESIGN.md` (vision, decisions, travel/time model, roadmap) and `IDEAS.md`; wired them into the reading order and status Docs node. | `DESIGN.md`, `IDEAS.md`, `README.md`, `HANDOFF.md`, `MODULES.md`, `status.html` |
 | 2026-10-25 | Travel v0.1: journeys spend time in 5-minute checks, roll a travel event each check, pause on an event, and resume on Continue. The UI drives the clock and calls `locations.visit` only on completion. | `travel/*`, `index.html`, `actions/data.js`, `characters/mainCharacter.js`, `test/travel.test.cjs`, docs, `status.html`, `package.json` |
 | 2026-10-24 | Created the module handbook and added it to the doc rules. | `MODULES.md`, `README.md`, `HANDOFF.md`, `ENGINE_SPEC.md`, `status.html` |
@@ -60,16 +68,21 @@ Newest first. Keep entries short; details live in the module sections.
 | Module | Version | Owns slice | Listens to | Emits | UI panel | Test |
 |---|---|---|---|---|---|---|
 | core (engine) | 0.2 | `time`, `eventLog`, `version`, `seed`, `rngState` | - | bus + tick events | clock/log | covered indirectly |
-| characters | 0.3 | `nextId`, `named{}`, `temp{}` | `character:spawn/save/clearTemp`, `location:changed`, `combat:damage` | `character:spawned/saved/tempCleared` | NPC cards | `characters.test.cjs` |
-| mainCharacter | 0.5 | `character` | `location:event`, `action:resolved`, `travel:event`, `equipment:equipped/unequipped`, `combat:damage` | `mainCharacter:saved/statChanged/armorChanged` | Main character | `main-character.test.cjs` |
-| equipment | 0.1 | `nextId`, `items{}`, `equippedId` | `equipment:add/equip/unequip`, `action:resolved` | `equipment:added/equipped/unequipped` | Equipment | `equipment.test.cjs` |
-| locations | 0.2 | `seed`, `createdAt`, `nextId`, `locations{}`, `currentId` | `location:add` | `location:added/visited/event` | Locations + biome events | `locations.test.cjs`, `locations-disk.test.cjs`, `biome-events.test.cjs` |
-| actions | 0.2 | `locationId`, `locationName`, `biomeKey`, `actions[]`, `lastAction` | `location:visited`, `action:choose` | `actions:loaded`, `action:chosen/resolved/blocked` | Actions | `actions.test.cjs` |
-| travel | 0.1 | `active`, `paused`, route, `elapsedMinutes`, `durationMinutes`, `checks`, `eventCount`, `lastEvent`, `lastCompleted` | `travel:start/advance/continue/cancel` | `travel:started/progress/event/resumed/completed/cancelled` | Travel | `travel.test.cjs` |
+| save helper | 0.1 | none (not a module) | none | none | Export/Import save file | `save.test.cjs` |
+| characters | 0.5 | `nextId`, `named{}`, `temp{}` | `character:spawn/save/clearTemp`, `location:changed`, `combat:damage` | `character:spawned/saved/tempCleared` | NPC cards + body line | `characters.test.cjs` |
+| mainCharacter | 0.6 | `character` | `location:event`, `action:resolved`, `travel:event`, `equipment:equipped/unequipped`, `combat:damage` | `mainCharacter:saved/statChanged/armorChanged` | Main character + body grid | `main-character.test.cjs` |
+| equipment | 0.2 | `nextId`, `items{}`, `equippedByPart{}` | `equipment:add/equip/unequip`, `action:resolved` | `equipment:added/equipped/unequipped` | Equipment | `equipment.test.cjs` |
+| locations | 0.4 | `seed`, `createdAt`, `nextId`, `locations{}` (with `connections[]`), `currentId` | `location:add` | `location:added/visited/event` | Locations + biome events | `locations.test.cjs`, `locations-disk.test.cjs`, `biome-events.test.cjs` |
+| map | 0.1 | `seed`, `size`, `total`, `lastGeneratedTick`, `lastGeneratedAt`, `landmarks{}` | `map:generate`, `location:added` | `map:generated` | Locations panel (map status) | `map.test.cjs` |
+| actions | 0.3 | `locationId`, `locationName`, `biomeKey`, `actions[]`, `lastAction` | `location:visited`, `action:choose` | `actions:loaded`, `action:chosen/resolved/blocked` | Actions | `actions.test.cjs` |
+| travel | 0.2 | `active`, `paused`, `distance`, route, `elapsedMinutes`, `durationMinutes`, `checks`, `eventCount`, `lastEvent`, `lastCompleted` | `travel:start/advance/continue/cancel` | `travel:started/progress/event/resumed/completed/cancelled` | Travel | `travel.test.cjs` |
 | combat | 0.1 | `active`, `round`, `turn`, snapshots, `log[]` | `combat:start/action` | `combat:started/damage/defended/ended` | Combat | `combat.test.cjs` |
 
-Registration order in `index.html`: characters -> mainCharacter -> equipment ->
-locations -> actions -> travel -> combat. Keep dependencies registered earlier.
+Registration order in `index.html`: `bodyData.js` -> `body.js` -> characters -> mainCharacter ->
+equipment -> locations -> map -> actions -> travel -> combat. Keep dependencies registered
+earlier. The body data/helper must load before the character modules.
+The live page and the save baseline both use `buildEngine(opts)`, which registers the same
+modules and applies the save's seed/start date/tick size.
 
 ---
 
@@ -95,7 +108,7 @@ What it does:
   world. Modules use `engine.rng` (or the tick `rng`), never `Math.random`.
 
 If you need a new shared engine capability, stop and discuss it first: changing core
-invalidates `ENGINE_SPEC.md` v1.0 and every test's assumptions.
+invalidates `ENGINE_SPEC.md` v1.4 and every test's assumptions.
 
 ---
 
@@ -131,21 +144,60 @@ Change all of them together.
 
 ---
 
-## Characters (`characters/characters.js` v0.3)
+## Shared character body (`characters/bodyData.js` + `characters/body.js`)
+
+Every character, NPC or main, owns the same ten-part humanoid body. The layout is content;
+the builder/normaliser is shared code used by both character modules.
+
+- `characters/bodyData.js` defines `CharacterBodyData.parts` in display order: `head`,
+  `torso`, `leftLeg`, `rightLeg`, `leftArm`, `rightArm`, `leftHand`, `rightHand`,
+  `leftFoot`, `rightFoot`. Each entry has `key`, `label`, `kind`, `side`, `parent` and
+  `vital`. `defaultStatus` is `"intact"`.
+- `characters/body.js` exposes `CharacterBody.create()`, `CharacterBody.normalise(body)` and
+  the definitions. It owns no state, emits no events and never touches the DOM.
+- Shape: `body: { parts: { <key>: { key, label, kind, side, parent, vital, status } } }`.
+  `head` and `torso` are vital, `torso` is the root, arms/legs attach to `torso`, hands to
+  their arm and feet to their leg.
+- `status` is a free string and starts at `"intact"`. No injury, combat or healing rule
+  reads it yet; equipment targets the part keys, not the status.
+- `normalise()` rebuilds missing parts, keeps saved statuses and preserves unknown fields on
+  known parts. Unknown extra part entries are kept too. Old saves therefore gain a complete
+  body without losing anything.
+
+**Adjust it:** edit `bodyData.js` for labels/order/sides/parents/vital flags. Adding or
+renaming a part key is a save migration concern; `normalise()` fills new parts but old
+statuses are stored under the old key. Change the status vocabulary in `bodyData.js` first,
+then add the rule that reads it.
+
+---
+
+## Characters (`characters/characters.js` v0.5)
 
 ### Role
 
-Generates NPCs with shared stats and five personality traits. Keeps them in
-Temporary Spawn until saved as a Named NPC. Applies combat damage to the named NPC.
-Has no tick generator; spawning is UI-driven.
+Generates NPCs with a named personality archetype, five personality traits, an
+eight-axis behavior profile, shared stats and a ten-part humanoid body. Keeps them in
+Temporary Spawn until saved as a Named NPC. Applies combat damage to the named NPC. Has no
+tick generator; spawning is UI-driven.
+
+Personality and behavior are **data only** for now. No dialogue, NPC event, travel or
+combat rule reads `character.behavior`; it exists so a future AI module can act on it
+without changing generation or save shape.
 
 ### Files and state
 
-- `characters/data.js` - names, surnames, age range, 30 traits, opposite pairs.
+- `characters/data.js` - names, surnames, age range, 30 traits, opposite pairs,
+  30 personality archetypes and the `behaviorAxes` definitions.
 - `characters/statsData.js` - shared stat definitions.
-- `characters/characters.js` - generation, storage, combat damage, disk mirror.
+- `characters/bodyData.js` - shared ten-part body layout.
+- `characters/body.js` - shared body builder/normaliser.
+- `characters/characters.js` - generation, personality/behavior/body normalization, storage,
+  combat damage, disk mirror.
 - Slice: `{ nextId, named: { id: character }, temp: { id: character } }`.
-- Character: `{ id, gender, name, age, traits[5], stats, createdAtTick, createdAt }`.
+- Character: `{ id, gender, name, age, personality, traits[5], behavior, stats, body,
+  createdAtTick, createdAt }`.
+- `personality` is `{ id, name }`. `behavior` holds one integer 0-100 per axis in
+  `CharacterData.behaviorAxes`. `body` is the shared ten-part shape described above.
 
 ### Code map
 
@@ -153,8 +205,13 @@ Has no tick generator; spawning is UI-driven.
 |---|---|
 | `rollStat(rng, def)` | Rolls one stat from `npcRange`; `npcBell` averages three rolls |
 | `makeStats(rng)` | Builds a full stat block; resources get `<key>Max` |
+| `personalityById(id)` | Looks up one archetype by id, or `null` |
+| `closestPersonality(traits)` | Picks the archetype with the most trait overlap (legacy saves only) |
+| `makeBehavior(profile, saved)` | Clamps saved axes; fills missing axes from the archetype, then 50 |
+| `normalisePersonality(character)` | Restores `personality`, `traits` and `behavior`; used by generation and `onLoad` |
 | `normaliseStats(character)` | Fills/clamps missing stats for old saves |
-| `ATTRIBUTES` | Ordered generation recipe: gender, name, age, traits, stats |
+| `normaliseBody(character)` | Restores the ten-part body; keeps saved statuses, fills missing parts |
+| `ATTRIBUTES` | Ordered generation recipe: gender, name, age, personality, traits, behavior, stats, body |
 | `generate(rng)` | Runs `ATTRIBUTES` in order; later entries see earlier fields |
 | `spawn(depth)` | Creates `npc_0001`, puts it in `temp`, optionally writes disk |
 | `save(id, depth)` | Moves temp -> named, rewrites the disk mirror |
@@ -167,7 +224,7 @@ Has no tick generator; spawning is UI-driven.
 - Listens: `character:spawn`, `character:save`, `character:clearTemp`,
   `location:changed` (all UI/future modules), `combat:damage` (applies HP).
 - Emits: `character:spawned`, `character:saved`, `character:tempCleared` at
-  `depth + 1`.
+  `depth + 1`. `character:spawned` text includes the personality name.
 - Damage is not re-announced as a stat event; `combat:damage` is the record.
 
 ### Adjust it
@@ -175,39 +232,52 @@ Has no tick generator; spawning is UI-driven.
 | If you want to... | Change |
 |---|---|
 | Add names, surnames, traits or opposite pairs | `characters/data.js` |
+| Add, retune or rename a personality | `characters/data.js` `personalities` |
+| Add or remove a behavior axis | `characters/data.js` `behaviorAxes`, then give every personality a value |
 | Change NPC age range | `characters/data.js` `ageRange` |
 | Change NPC stat ranges or bell curve | `characters/statsData.js` `npcRange` / `npcBell` |
-| Change how many traits an NPC gets | `characters.js` `chosen.length < 5` in `ATTRIBUTES` |
+| Add or retune body parts, sides, parents or vital flags | `characters/bodyData.js` (shared by NPCs and the main character) |
+| Change the default body-part status | `characters/bodyData.js` `defaultStatus` |
 | Add a generated NPC field | Push `{ key, generate }` into `ATTRIBUTES`; it sees `{ rng, char, engine }` |
 | Change spawn/save behavior | `spawn()` / `save()` |
 | Change where NPC mirrors are written | `FOLDERS`, and the `"characters"` folder name in `connectFolder()` |
-| Make traits affect behavior | Add a module that reads `traits` through events; do not edit generation |
+| Make personality/behavior affect behavior | Add a module that reads `personality`/`behavior` through events; do not edit generation |
 
 ### Gotchas
 
 - `init()` reruns on reset; the module subscribes only once via `bound`.
+- Personality traits are copied from the archetype, not rolled independently, so the
+  five traits and the behavior profile stay coherent. Generation uses one personality
+  pick per NPC.
+- Legacy NPCs without `personality` get the nearest archetype by trait overlap; if they
+  also lack traits, the archetype traits are used. Missing behavior axes fill from the
+  archetype, then `50`. Migration is deterministic and does not use RNG.
 - NPCs roll armor from `[0, 0]`, so it starts at 0. NPCs cannot equip yet.
 - Old saves without stats are filled deterministically from `start` values.
+- Old saves without a body get all ten parts on load; a partial body keeps its saved
+  statuses and unknown fields, and gains the missing parts. Body generation is
+  deterministic and uses no RNG.
 - Disk writes are fire-and-forget; tests use an in-memory picker mock.
 
 ---
 
-## Main character (`characters/mainCharacter.js` v0.5)
+## Main character (`characters/mainCharacter.js` v0.6)
 
 ### Role
 
-Owns the one player character: identity, portrait, shared stats, event/action/travel
-effects, combat HP and the armor mirror. It never reads the equipment, actions,
-travel or combat slices; everything arrives through events. The UI calls `save()`
+Owns the one player character: identity, portrait, shared stats, ten-part body,
+event/action/travel effects, combat HP and the armor mirror. It never reads the equipment,
+actions, travel or combat slices; everything arrives through events. The UI calls `save()`
 directly and then `engine.flush()`.
 
 ### Files and state
 
 - `characters/mainCharacterData.js` - genders, age range, name limit, image settings,
   mirror file names.
-- `characters/mainCharacter.js` - validation, stats, effects, armor bridge, mirror.
+- `characters/bodyData.js`, `characters/body.js` - shared body layout and normaliser.
+- `characters/mainCharacter.js` - validation, stats, body, effects, armor bridge, mirror.
 - Slice: `{ character: null }` or one object with
-  `{ id, name, gender, age, image, imageSource, stats, createdAtTick, createdAt, updatedAtTick, updatedAt }`.
+  `{ id, name, gender, age, image, imageSource, stats, body, createdAtTick, createdAt, updatedAtTick, updatedAt }`.
 - `image` is a data URL; `imageSource` is `"upload"` or `"default"`.
 
 ### Code map
@@ -216,9 +286,10 @@ directly and then `engine.flush()`.
 |---|---|
 | `normaliseStats(source, legacy)` | Builds/clamps the full stat block; migrates old top-level stamina |
 | `defaultStats()` | `normaliseStats(null)` - start values |
+| `normaliseCharacter()` | Runs stats + body normalisation on init/load |
 | `defaultAvatar(name)` | Generates an SVG initials portrait as a data URL |
 | `prepareImage(file)` | Browser-only center-crop, resize, WebP/PNG compression |
-| `save(data, depth)` | Validates, preserves stats and the previous custom image, stores, emits `mainCharacter:saved` |
+| `save(data, depth)` | Validates, preserves stats/body and the previous custom image, stores, emits `mainCharacter:saved` |
 | `applyEffects(depth, effects, eventId)` | Shared clamp-and-apply loop for `{ stat, delta }`; emits one `statChanged` per real change |
 | `applyEventEffects` / `applyActionEffects` | Thin wrappers that pass the location event id / action id |
 | `applyTravelEffects` | Thin wrapper that applies a `travel:event` interruption with its event id |
@@ -244,6 +315,7 @@ directly and then `engine.flush()`.
 |---|---|
 | Genders, age range, name length | `mainCharacterData.js` |
 | Starting stats | `characters/statsData.js` `start` |
+| Body parts, labels or status defaults | `characters/bodyData.js` (shared with NPCs) |
 | Image size, quality or upload cap | `mainCharacterData.js` `imageSize`, `imageQuality`, `maxUploadBytes` |
 | Default avatar colors or initials | `defaultAvatar()` (logic) |
 | Which effects are applied | `applyEffects()`; it skips unknown and `equipment` stats |
@@ -251,11 +323,14 @@ directly and then `engine.flush()`.
 | Armor text (`/100`) | `applyEquipment()` plus the same text in `index.html` and `status.html` |
 | Mirror file names | `mainCharacterData.js` `folder`, `jsonFile`, `imageBase` |
 | Keep stats when editing the profile | Already handled in `save()`; do not rebuild stats there |
+| Keep body-part statuses when editing the profile | Already handled in `save()` via `B.normalise(existing.body)` |
 
 ### Gotchas
 
 - The image is deliberately left out of `mainCharacter:saved` to keep logs and saves small.
-- Profile edits keep the current stats and a previously uploaded image.
+- Profile edits keep the current stats, body and a previously uploaded image.
+- Body normalisation rebuilds missing parts on load/save, so every saved main character has
+  the full ten-part body. Part `status` is stored but no rule changes it yet.
 - Effects never change armor; only equipment does.
 - If no character exists, all effect/armor handlers return without writing state.
   An item equipped before the character is saved will not update `stats.armor` later.
@@ -264,62 +339,70 @@ directly and then `engine.flush()`.
 
 ---
 
-## Equipment (`equipment/equipment.js` v0.1)
+## Equipment (`equipment/equipment.js` v0.2)
 
 ### Role
 
-Owns the main character's armor inventory and the one body slot. Announces equip
-changes; the character module mirrors armor into its own stat. It never reads or
-writes another module's slice.
+Owns the main character's armor inventory and the ten body-part assignments. Announces
+equip changes; the character module mirrors the summed armor into its own stat. It never
+reads or writes another module's slice.
 
 ### Files and state
 
-- `equipment/data.js` - six armor items (`key`, `name`, `slot`, `armor`, `weight`,
-  `description`), `slots: ["body"]`, `maxArmor`, `autoEquip`.
-- Slice: `{ nextId, items: { id: item }, equippedId }`.
-- Item: `{ id: "eq_0001", key, name, slot, armor, equipped, acquiredAtTick, acquiredAt }`.
+- `equipment/data.js` - twelve armor items (`key`, `name`, `parts`, `armor`, `weight`,
+  `description`), `maxArmor`, `autoEquip`. `parts` uses the keys from
+  `characters/bodyData.js`.
+- Slice: `{ nextId, items: { id: item }, equippedByPart: { part: id } }`.
+- Item: `{ id: "eq_0001", key, name, parts, armor, equipped, acquiredAtTick, acquiredAt }`.
 
 ### Code map
 
 | Symbol | What it does |
 |---|---|
-| `CATALOG` | Map of catalogue `key` -> definition; unknown keys are rejected |
+| `CATALOG` | Map of catalogue `key` -> definition; unknown keys are rejected and each definition needs at least one known part |
+| `cleanParts(value)` | De-duplicates and filters part keys to `characters/bodyData.js` |
 | `weightedPick(rng, items)` | Random Find armor, weighted by `weight` (default 1) |
-| `cleanItem(raw)` | Validates an item during load; drops unknown keys |
-| `normalize()` | Repairs `nextId`, drops invalid items, enforces one equipped id |
-| `totalArmor()` / `armorFor(id)` | Equipped armor, or 0 for non-main characters |
-| `add(depth, data)` | Adds an item; random when no `key`; auto-equips if nothing is worn |
-| `equip(itemId, depth)` | Swaps the body item and emits `equipment:equipped` |
-| `unequip(depth)` | Clears the slot and emits `equipment:unequipped` with `totalArmor: 0` |
+| `cleanItem(raw)` | Validates an item during load; migrates legacy `slot` items through the catalogue |
+| `normalize()` | Repairs `nextId`, drops invalid items, rebuilds `equippedByPart`, migrates `equippedId` |
+| `totalArmor()` / `armorFor(id)` | Sum of distinct worn items (clamped), or 0 for non-main characters |
+| `coverage()` | Body-ordered `{ part, label, itemId }` rows for the UI |
+| `add(depth, data)` | Adds an item; random when no `key`; auto-equips when every part is free |
+| `equip(itemId, depth)` | Claims every part, removes overlapping items whole, emits `equipment:equipped` |
+| `unequip(itemId, depth)` | Removes one item, or every item when no id is given |
 
 ### Events
 
 - Listens: `equipment:add` (`{ key? }`), `equipment:equip` (`{ itemId }`),
-  `equipment:unequip`, and `action:resolved` (adds the item named by
+  `equipment:unequip` (`{ itemId? }`), and `action:resolved` (adds the item named by
   `equipmentKey` with `source: actionId`).
-- Emits at `depth + 1`: `equipment:added`, `equipment:equipped`
-  (includes `totalArmor` and `previousItemId`), `equipment:unequipped`.
+- Emits at `depth + 1`: `equipment:added`, `equipment:equipped` (includes `parts`,
+  `totalArmor` and `replacedItemIds`), `equipment:unequipped` (includes `itemIds` and the
+  removed `items`).
 
 ### Adjust it
 
 | If you want to... | Change |
 |---|---|
 | Add or retune armor | `equipment/data.js` `items` (then use its `key` in `actions/data.js` if it should drop) |
+| Change what an item covers | Its `parts` list, using `characters/bodyData.js` keys |
 | Change drop odds from Find armor | Item `weight` |
 | Change the equip cap | `maxArmor` and `statsData.js` `armor.max` |
 | Stop auto-equipping | `autoEquip: false` |
-| Add another slot | `slots`, the slice (`equippedId` becomes per-slot), `equip()`/`normalize()`, the UI panel and the armor bridge |
+| Add a body part | Add it to `characters/bodyData.js`; equipment and the editor pick it up |
 | Let NPCs equip | Extend the slice with per-character loadouts; add new events and a characters-side bridge |
 | Change the random source | Keep `engine.rng`; never use `Math.random` |
 
 ### Gotchas
 
-- Only one body item can be worn; `equippedId` is the single source of truth.
+- `equippedByPart` is the source of truth; `item.equipped` is a convenience flag.
+- Items are atomic. Equipping bracers that overlap a gambeson's arms removes the whole
+  gambeson, not just its arm coverage.
 - Inventory is unlimited and items do not stack.
-- `add()` only auto-equips when the slot is empty; it never replaces worn armor.
+- `add()` auto-equips only when every part it covers is free; it never replaces worn armor.
 - Unknown `equipmentKey` values are ignored silently (no item, no error).
 - Load drops items whose `key` disappeared from the catalogue; do not rename keys
   without migrating saves.
+- A v0.1 save's `equippedId` is migrated to `equippedByPart`; `slot` is no longer stored.
 - `armorFor()` only returns armor for `"main"`; NPCs stay at 0.
 
 ---
@@ -388,24 +471,30 @@ Damage is announced; the character modules apply it to the real characters.
 
 ---
 
-## Locations (`locations/locations.js` v0.2)
+## Locations (`locations/locations.js` v0.4)
 
 ### Role
 
-Generates charted locations and rolls their biome events on a visit. All randomness
-uses `engine.rng`. Generation is button-driven; there is no tick generator and no
-travel graph. The actions module loads actions from `location:visited`, the travel
-module runs the journey, and the UI calls `visit()` for both the Visit button and a
-completed journey.
+Generates charted locations, links them into a travel graph, and rolls their biome events
+on a visit. All randomness uses `engine.rng`. Generation is request-driven (`location:add`
+from the UI or the map module); there is no tick generator. The actions module loads
+actions from `location:visited`, the travel module runs the journey, and the UI calls
+`visit()` for both the Visit button and a completed journey. The graph is an abstract link
+graph (no coordinates), so it does not decide how a future map is drawn.
 
 ### Files and state
 
 - `locations/data.js` - biomes, weather, nouns, weights, hostility ranges, name
-  prefixes/suffixes/patterns, hostility bands.
+  prefixes/suffixes/patterns, hostility bands, `travelGraph` tuning.
 - `locations/events/<biomeKey>/events.json` - per-biome event content.
-- `locations/locations.js` - generation, visits, event cache, disk mirror.
+- `locations/locations.js` - generation, fixed landmarks, routes, visits, event cache,
+  disk mirror.
 - Slice: `{ seed, createdAt, nextId, locations: { id: loc }, currentId }`.
-- Location: `{ id, name, biome, biomeKey, weather, hostility, seed, createdAtTick, createdAt }`.
+- Location: `{ id, name, biome, biomeKey, kind, weather, hostility, connections[], seed, createdAtTick, createdAt }`.
+- Connection: `{ id, distance }`; the route is stored on both endpoints with the same
+  distance.
+- `kind` is `""` for random locations or a landmark id (`tavern`, `castle`, `shack`) for a
+  fixed definition. Landmarks use `biomeKey: "landmark"`.
 
 ### Code map
 
@@ -414,12 +503,19 @@ completed journey.
 | `weatherList(biome)` | Weather options with a `["Clear"]` fallback |
 | `weightedPick(rng, items)` | Weighted biome choice |
 | `makeName(rng, biome, usedNames)` | Builds a unique name from patterns |
+| `uniqueName(base, usedNames)` | Keeps fixed landmark names unique across repeated maps |
 | `hostilityFor(rng, biome)` | Integer roll inside the biome range |
+| `normalizeFixed(raw)` | Validates a fixed landmark definition from `location:add` |
+| `normalizeDistance` / `travelMinutes` / `rollDistance` | Route distance clamps, distance -> minutes, random distance |
+| `cleanConnections(raw)` | Validates loaded routes and de-duplicates ids |
 | `ATTRIBUTES` | Ordered generation: biome, name, weather, hostility |
-| `normalizeLocation` / `normalizeEvent` | Validate loaded JSON/disk content |
+| `normalizeLocation` / `normalizeEvent` | Validate loaded JSON/disk content; keeps `kind` |
 | `generate(rng, usedNames, usedCombos)` | Builds a candidate, avoiding repeated biome+weather until exhausted |
-| `add(depth, count)` / `spawn(depth)` | Chart 1-100 locations and emit `location:added` |
+| `add(depth, count, fixed, batch)` / `spawn(depth, fixed, batch)` | Chart fixed landmarks and 0-100 random locations, link each, emit `location:added` |
 | `labelFor(hostility)` | Band label from `hostilityBands` |
+| `connectionsFor(id)` | UI-ready routes sorted by distance then name |
+| `routeBetween(fromId, toId)` | One route (`distance`, `minutes`) or `null` |
+| `addRoute` / `connectNew` / `normalizeGraph` | Internal: mutual edges, link a new location, repair a loaded/imported graph |
 | `loadEvents(force)` | Fetch + cache every biome file; records errors |
 | `eventStatus()` / `eventsFor(key)` | Load summary / normalized list |
 | `checkEvents(loc, depth)` | Independent roll per enabled event; emits `location:event` |
@@ -428,11 +524,13 @@ completed journey.
 
 ### Events
 
-- Listens: `location:add` (`{ count? }`).
-- Emits: `location:added` (`{ id }`), `location:visited`
+- Listens: `location:add` (`{ count?, fixed?, batch? }`).
+- Emits: `location:added` (`{ id, kind?, batch? }`), `location:visited`
   (`{ id, name, biome, biomeKey, weather, hostility }`), `location:event`
   (`{ locationId, locationName, biomeKey, eventId, name, chancePercent, roll, effects }`).
 - Biome events roll only on a visit, not every tick.
+- Route changes are part of `location:added`/`location:visited` state; there is no separate
+  route event.
 
 ### Adjust it
 
@@ -442,7 +540,12 @@ completed journey.
 | Change biome frequency | Biome `weight` |
 | Change hostility ranges or labels | `hostility` arrays / `hostilityBands` |
 | Change naming | `namePrefixes`, `nameSuffixes`, `namePatterns` |
+| Change route distance, duration or link count | `locations/data.js` `travelGraph` (`distanceRange`, `minutesPerDistance`, `links`, `legacyDistance`) |
+| Change which location a new one links to | `connectNew()` (currently current area + random neighbours) |
+| Change route validation or repair | `normalizeGraph()` and `addRoute()` |
 | Add a generated location field | Push `{ key, generate }` into `ATTRIBUTES`; also update `normalizeLocation()` and the disk seed import |
+| Change a fixed landmark's name, biome or hostility | `map/data.js` `landmarks` (content), not this module |
+| Add support for another fixed-location field | `normalizeFixed()` and `normalizeLocation()` here |
 | Change an event's chance or text | The biome `events.json` (`chancePercent` 0-100 or `chance` 0-1) |
 | Disable an event | `enabled: false` in its JSON |
 | Change event effects | `effects: [{ stat, delta }]` using `statsData.js` keys; armor is ignored |
@@ -459,25 +562,93 @@ completed journey.
 - Duplicate event ids in one file keep the first; load errors are reported in
   `eventStatus()`.
 - Events are cached; a reset does not re-fetch unless forced.
-- `add()` clamps the count to 1-100.
-- Name generation retries 40 times, then appends a number to keep names unique.
+- `add()` clamps random counts to 0-100; fixed landmarks are always added. A request with
+  both `fixed` and `count` adds every fixed entry first, then the random count.
+- Fixed landmarks bypass the biome/weather uniqueness roll but still receive routes and
+  `location:added`. Their synthetic `biomeKey: "landmark"` has no event file, so visits
+  cannot trigger biome events on them.
+- Name generation retries 40 times, then appends a number to keep names unique. Fixed
+  landmark names get a ` (2)` suffix if the same map is generated twice.
 - The location mirror writes under `Locations/<seed>/`; on Windows `Locations/` and
   `locations/` are the same folder (case-insensitive). Do not add a broad ignore rule.
-- `currentId` means "last visited", not a travel graph. Travel can reach any location;
-  the travel module owns the in-between journey and the UI calls `visit()` on arrival.
+- `currentId` means "last visited". The UI's **Visit** button only allows a direct route
+  from it (or any location when none is current), but `visit()` itself stays permissive
+  for arrival handoffs and tests.
 - `location:changed` only clears Temporary Spawn; it does not move the party or
   change `currentId`.
+- Legacy saves and hand-edited imports without `connections` are repaired on load. The
+  repair links isolated locations deterministically and does not use the RNG.
 
 ---
 
-## Actions (`actions/actions.js` v0.2)
+## Map (`map/map.js` v0.1)
+
+### Role
+
+The map-level spawner. It owns map metadata and asks the locations module to chart a
+batch: a configurable number of random locations plus the fixed tavern, castle and shack
+from `map/data.js`. It never reads or writes the locations slice; the request and results
+travel as events. This is a placeholder for a future layout/atlas system.
+
+### Files and state
+
+- `map/data.js` - `defaultLocationCount` (20), `minLocationCount` (0),
+  `maxLocationCount` (100), and the fixed `landmarks` list (`kind`, `name`, `biome`,
+  `biomeKey`, `weather`, `hostility`).
+- `map/map.js` - validation, the batch request, landmark id capture.
+- Slice:
+  `{ seed, size, total, lastGeneratedTick, lastGeneratedAt, landmarks: { kind: id } }`.
+- `size` is the random-location count; `total` includes the fixed landmarks.
+
+### Code map
+
+| Symbol | What it does |
+|---|---|
+| `validLandmarks()` | Filters `MapData.landmarks` to entries with a `kind` and `name` |
+| `generate(depth, data)` | Clamps the count, fires one `location:add` batch, stores map metadata |
+| `onLocationAdded(e)` | Records `kind -> id` and emits `map:generated` after the last batch event |
+| `status()` | Copy of the slice for the UI |
+
+### Events
+
+- Listens: `map:generate` (`{ count? }`), `location:added`.
+- Emits: `map:generated` (`{ batch, count, total, landmarks }`) at `depth + 1` after the
+  batch is complete.
+- The module does not emit location events itself and has no tick generator.
+
+### Adjust it
+
+| If you want to... | Change |
+|---|---|
+| Change the default map size | `map/data.js` `defaultLocationCount` |
+| Change the allowed range | `map/data.js` `minLocationCount` / `maxLocationCount` |
+| Add, remove or retune a fixed landmark | `map/data.js` `landmarks` (`kind` must stay unique per map) |
+| Change batch bookkeeping or events | `map/map.js` `generate()` / `onLocationAdded()` |
+| Change how locations are built | `locations/`; this module only requests them |
+
+### Gotchas
+
+- `depends: ["locations"]`; register locations first. The dependency is event-based, not a
+  direct call.
+- `map:generated` waits for every `location:added` carrying the batch id. Keep the batch id
+  on `location:add`/`location:added` if you change the spawner.
+- Generating a second map appends to the existing map. Fixed names are made unique by the
+  locations module; `landmarks` is refreshed to the newest batch.
+- A batch with no locations emits `map:generated` immediately.
+- Reset clears the slice and any in-flight batch. Load adds an empty map slice to old saves.
+
+---
+
+## Actions (`actions/actions.js` v0.3)
 
 ### Role
 
 Loads five area actions for the visited biome. On a choice it announces one weighted
 outcome plus costs and time. It applies nothing itself: the character module applies
 effects, equipment adds rewards, the UI advances the clock, and the travel module runs
-a journey when the resolved action carries `travelTo`.
+a journey when the resolved action carries `travelTo`. For a Travel action the UI also
+sends the route's `distance` and `durationMinutes`, so the graph decides the journey
+time instead of the action's fallback `timeMinutes`.
 
 ### Files and state
 
@@ -500,16 +671,17 @@ a journey when the resolved action carries `travelTo`.
 | `actionsFor(biomeKey)` | Uses the biome override only when it yields five actions |
 | `weightedPick(rng, outcomes)` | Picks one outcome by weight |
 | `loadFor(depth, data)` | Replaces the area's actions, clears `lastAction`, emits `actions:loaded` |
-| `choose(actionId, destinationId, depth)` | Emits chosen, validates travel, merges costs + outcome, stores `lastAction`, emits resolved/blocked |
+| `choose(actionId, destinationId, depth, request)` | Emits chosen, validates travel, merges costs + outcome; a valid route request overrides time and stores `travelDistance`, then emits resolved/blocked |
 
 ### Events
 
 - Listens: `location:visited` (load the area) and `action:choose`
-  (`{ actionId, destinationId? }`).
+  (`{ actionId, destinationId?, distance?, durationMinutes? }`).
 - Emits: `actions:loaded`, `action:chosen`, `action:resolved`, `action:blocked` at
   `depth + 1`.
 - `action:resolved` data: `{ actionId, name, outcomeId, outcomeName, text, effects,
-  timeMinutes, equipmentKey, travelTo, locationId, locationName, atTick, at }`.
+  timeMinutes, equipmentKey, travelTo, travelDistance, locationId, locationName, atTick,
+  at }`.
 
 ### Adjust it
 
@@ -523,7 +695,7 @@ a journey when the resolved action carries `travelTo`.
 | Give an item on every use | Not supported yet; add an outcome with no effects and an `equipmentKey`, or add a new event |
 | Make a new travel action | `requiresDestination: true`, `outcomes: []`, `travelText` |
 | Change how time is applied | `index.html` `chooseAction()` for normal actions; `driveTravel()` for journeys |
-| Change a journey's duration | The Travel action's `timeMinutes`; travel rounds it up to whole 5-minute checks |
+| Change a journey's duration | `locations/data.js` `travelGraph` (`distanceRange`, `minutesPerDistance`); the Travel action's `timeMinutes` is only a fallback when no route data arrives |
 | Add requirements/skill checks | New logic in `choose()` plus a new event; document it |
 
 ### Gotchas
@@ -534,27 +706,30 @@ a journey when the resolved action carries `travelTo`.
 - `action:chosen` is emitted before the destination check, so a blocked travel still
   logs the choice, then `action:blocked`; no costs or time are applied.
 - Travel actions have no outcomes, so `outcomeId` is null and `travelTo` is the chosen
-  location id.
+  location id. The UI sends the route's `distance`/`durationMinutes`; both are optional,
+  so tests and other callers can still use the action's fallback time.
 - Effects are the merged costs + outcome effects; the module never edits stats.
 - Saves keep the loaded `actions[]`. Editing `actions/data.js` does not change a save
   until the next visit reloads the area.
 - The UI steps `ceil(timeMinutes / tickMinutes)` ticks only for non-travel actions.
-  Travel hands `timeMinutes` to the travel module and calls `locations.visit(travelTo)`
-  only after the journey completes.
+  Travel hands the route's `durationMinutes` to the travel module and calls
+  `locations.visit(travelTo)` only after the journey completes.
 - `lastAction` clears on the next visit; it is not a history log.
 
 ---
 
-## Travel (`travel/travel.js` v0.1)
+## Travel (`travel/travel.js` v0.2)
 
 ### Role
 
 Runs a journey from the current location to a destination after a Travel action
-resolves. It owns the in-between state: elapsed minutes, checks, pauses and the last
-interruption. Travel spends time in 5-minute checks; after every check it rolls for a
-travel event. An event pauses the journey until the player presses **Continue travel**.
-The module never advances the clock and never moves the party: the UI steps the clock
-and calls `locations.visit(destinationId)` after `travel:completed`.
+resolves. It owns the in-between state: route distance, elapsed minutes, checks, pauses
+and the last interruption. Travel spends time in 5-minute checks; after every check it
+rolls for a travel event. An event pauses the journey until the player presses
+**Continue travel**. The module never advances the clock and never moves the party: the
+UI steps the clock and calls `locations.visit(destinationId)` after `travel:completed`.
+Duration is supplied by the caller (normally the route's computed minutes); this module
+only rounds it up to whole checks and echoes `distance` for the panel/status.
 
 ### Files and state
 
@@ -563,7 +738,7 @@ and calls `locations.visit(destinationId)` after `travel:completed`.
 - `travel/travel.js` - journey lifecycle, checks, pause/resume, duration rounding.
 - Slice:
   `{ active, paused, originId, originName, destinationId, destinationName,
-  destinationBiomeKey, elapsedMinutes, durationMinutes, minutesPerCheck, checks,
+  destinationBiomeKey, distance, elapsedMinutes, durationMinutes, minutesPerCheck, checks,
   eventCount, pausedAtMinutes, lastEvent, lastCompleted }`.
 - Event: `{ id, name, text, weight, enabled, effects: [{ stat, delta }] }`; disabled
   entries are skipped at load.
@@ -571,7 +746,7 @@ and calls `locations.visit(destinationId)` after `travel:completed`.
   `{ eventId, name, text, effects, roll, elapsedMinutes, durationMinutes,
   destinationId, destinationName, atTick, at }`.
 - `lastCompleted` stores the arrival summary:
-  `{ destinationId, destinationName, originId, originName, elapsedMinutes,
+  `{ destinationId, destinationName, originId, originName, distance, elapsedMinutes,
   durationMinutes, eventCount, atTick, at }`.
 
 ### Code map
@@ -583,7 +758,7 @@ and calls `locations.visit(destinationId)` after `travel:completed`.
 | `weightedPick(rng, events)` | Picks one event by relative weight |
 | `chanceFor(biomeKey)` | Per-check chance from the biome override, else `chancePercent` |
 | `normalize()` | Repairs a loaded slice and clears invalid active journeys |
-| `start(data, depth)` | Stores the route and duration; rounds duration up to whole checks; emits `travel:started` |
+| `start(data, depth)` | Stores the route (`distance`, duration) and duration rounded up to whole checks; emits `travel:started` |
 | `advance(depth, data)` | Adds one check, rolls for an event, pauses or emits progress/completion |
 | `complete(depth)` | Clears `active`, writes `lastCompleted`, emits `travel:completed` |
 | `resume(depth)` | Clears `paused` and emits `travel:resumed`; the next advance continues/completes |
@@ -591,11 +766,12 @@ and calls `locations.visit(destinationId)` after `travel:completed`.
 
 ### Events
 
-- Listens: `travel:start` (`{ destinationId, destinationName, durationMinutes,
+- Listens: `travel:start` (`{ destinationId, destinationName, durationMinutes, distance?,
   originId?, originName?, destinationBiomeKey? }`), `travel:advance`
   (`{ minutes? }`), `travel:continue`, `travel:cancel`.
 - Emits at `depth + 1`: `travel:started`, `travel:progress`, `travel:event`,
-  `travel:resumed`, `travel:completed`, `travel:cancelled`.
+  `travel:resumed`, `travel:completed`, `travel:cancelled`. `travel:started` and
+  `travel:completed` echo the route `distance`.
 - `travel:event` carries `effects`; `mainCharacter` listens and applies them, emitting
   `mainCharacter:statChanged` one depth deeper.
 - The UI emits `travel:advance` once per 5-minute step; the module does not schedule
@@ -610,7 +786,8 @@ and calls `locations.visit(destinationId)` after `travel:completed`.
 | Add/retune a travel event | `travel/data.js` `events` (`weight`, `text`, `effects`) |
 | Disable an event without deleting it | `enabled: false` |
 | Change event effects | `effects: [{ stat, delta }]` using `statsData.js` keys; armor is ignored |
-| Change journey duration | The Travel action's `timeMinutes` in `actions/data.js` |
+| Change journey duration | The route distance in `locations/data.js` `travelGraph`; the UI derives minutes and passes them through `action:resolved` |
+| Change distance-to-time conversion | `locations/data.js` `travelGraph.minutesPerDistance` |
 | Change pause/resume wording or UX | `travel/travel.js` event text plus the Travel panel in `index.html` |
 | Add event choices (fight/continue/turn back) | Add a request event and options; keep resolution in modules, not the UI |
 | Let travel move the party | It already asks the UI to call `locations.visit` on completion; do not call locations from this module |
@@ -621,9 +798,12 @@ and calls `locations.visit(destinationId)` after `travel:completed`.
 - Travel events are a separate catalogue from biome events. Biome events still roll
   once when the destination is visited at the end of the journey.
 - Positive events pause travel too, because every event is a scene the player sees.
-- Duration is rounded up to a whole number of checks: 27 minutes becomes 30, in three
-  5-minute checks. The action still announced 27 minutes, so keep travel times
+- Duration is rounded up to a whole number of checks. Route times come from
+  `distance * 15` minutes, so they are already multiples of 5; a hand-entered duration
+  such as 27 minutes becomes 30, while the action still announced 27. Keep caller times
   multiples of 5 in content.
+- `distance` is informational: event chance depends on the destination biome, not on
+  route length. Longer routes get more checks, so they still see more total risk.
 - An event on the final check pauses the journey; after Continue, the next
   `travel:advance` completes without adding a phantom check. The UI checks
   `elapsed >= duration` and does not step another tick before that advance.
@@ -641,17 +821,70 @@ and calls `locations.visit(destinationId)` after `travel:completed`.
 
 ---
 
+## Save helper (`save/gameSave.js` v0.1)
+
+### Role
+
+Exports and imports a game as a JSON file: world seed + baseline engine options + the changes
+needed to rebuild the live state. It is **not a module**: no slice, no events, no tick work. It
+sits on top of `engine.serialize()` and `engine.load()` and never edits core. The page and the
+Node tests supply the same `buildEngine(opts)` factory for the baseline.
+
+### Format and API
+
+- Format v1: `{ format: "text-rpg-save", formatVersion: 1, savedAt, label, seed, baseline:
+  { startDate, tickMinutes }, changes[] }`.
+- Changes are `{ op: "set", path, value }` or `{ op: "delete", path }`; paths are arrays.
+- Objects diff key by key; arrays (including `eventLog`) are replaced whole.
+- `capture(engine, buildEngine)` -> save object.
+- `read(textOrObject, { buildEngine })` -> validated/migrated save object.
+- `restore(input, engine, { buildEngine })` -> rebuilds the baseline, applies changes, calls
+  `engine.load()`, returns the save object.
+- `changesBetween`, `applyChanges`, `validate`, `stringify`, `fileName` are exposed for tests/UI.
+- `MIGRATIONS = { 0: legacyToV1 }`; v0 is a raw legacy engine state. A newer `formatVersion` is
+  refused.
+- `test/save.test.cjs` covers all of the above.
+
+### Adjust it
+
+| If you want to... | Change |
+|---|---|
+| Add a module | Register it in `buildEngine()` in `index.html`; otherwise the save baseline is incomplete |
+| Change the file name | `fileName()` |
+| Change the change limit | `MAX_CHANGES` (default 20,000) |
+| Add a format version | Bump `FORMAT_VERSION`, add `MIGRATIONS[<old>]`, update `save/README.md` and `ENGINE_SPEC.md` |
+| Change what is exported | `capture()`; keep `restore()` symmetric |
+| Inspect a file by hand | Keep the pretty JSON from `stringify()` |
+
+### Gotchas
+
+- The live engine's seed is ignored on import; the file's seed and baseline win.
+- `buildEngine(opts)` must return a **new** engine with every module registered and `opts`
+  applied; reusing the live engine would corrupt the diff.
+- Save paths must start at a top-level state key and cannot contain `__proto__`, `prototype` or
+  `constructor`.
+- Quick Save/Load still uses `localStorage` slot `save1`; save files are a separate path.
+  `status.html` reads the quick-save slot.
+- In-memory event-log entries can hold `data: undefined`; JSON drops that property, so restored
+  state matches the JSON form of the live state.
+- Today a save is often close to full-state size because most content is created by play.
+
+---
+
 ## UI wiring (`index.html`)
 
 The page is not a module. It registers modules, renders panels and fires requests.
 
 | Area | Key symbols | Notes |
 |---|---|---|
-| Module registration | `createCharactersModule`, `createMainCharacterModule`, `createEquipmentModule`, `createLocationsModule`, `createActionsModule`, `createTravelModule`, `createCombatModule` | Registration order matters; add new modules before their dependents |
+| Module registration | `buildEngine(opts)` | One factory for the live world and the save baseline; registers modules in dependency order and applies `seed`/`startDate`/`tickMinutes` |
 | Request helper | `act(type, data)` | `engine.fire(...)` then `engine.flush()`; use it for simple buttons |
-| Action flow | `chooseAction(action, destinationId)` | Fires, flushes, then steps time for a normal action or hands `travelTo` to `beginTravel()` |
-| Travel flow | `beginTravel(last)` / `driveTravel()` / `arriveTravel(completed)` | Starts a journey, steps the clock one 5-minute tick per check, restores the tick size, and visits the destination only on completion |
-| Travel panel | `renderTravel()` / `#travelContinue` / `#travelCancel` | Shows route, elapsed minutes, checks and the paused event; Continue clears the pause and resumes |
+| Save files | `#saveFile`, `#loadFile`, `#saveFileInput` | **Export** calls `GameSave.capture(engine, buildEngine)` and downloads JSON; **Import** reads the file and calls `GameSave.restore(text, engine, { buildEngine })`. Quick Save/Load still uses `localStorage` |
+| Action flow | `chooseAction(action, destinationId, route)` | Fires `action:choose` with the route `distance`/`minutes`, flushes, then steps time for a normal action or hands `travelTo` to `beginTravel()` |
+| Travel destinations | `renderActions()` | Travel's dropdown is built from `locationsModule.connectionsFor(locationId)`; each option shows name, biome, distance and minutes, and the Choose button is disabled when there are no routes |
+| Route gating | `visitLocation(id)` / `renderLocations()` | **Visit** and the Visit button require a direct route from `currentId`; the tooltip names the blocker. `locations.visit()` itself stays permissive |
+| Travel flow | `beginTravel(last)` / `driveTravel()` / `arriveTravel(completed)` | Starts a journey with the route distance and time, steps the clock one 5-minute tick per check, restores the tick size, and visits the destination only on completion |
+| Travel panel | `renderTravel()` / `#travelContinue` / `#travelCancel` | Shows origin/destination, route distance, elapsed minutes, checks and the paused event; Continue clears the pause and resumes |
 | Main character | `#mcSave` handler | Calls `mainCharModule.save(...)` directly, then `engine.flush()` |
 | Combat | `combatSnapshot(c)` / `startCombat(c)` | Snapshots include `stats.armor`; the module never reads slices |
 | Renderers | `renderChars`, `renderMainCharacter`, `renderMainStats`, `renderEquipment`, `renderActions`, `renderTravel`, `renderCombat`, `renderLocations` | Re-run on their module events and on reset/load; the clock renderer runs on tick end |
@@ -669,9 +902,42 @@ registers modules. Keep it in sync:
 - Content nodes (catalogue counts, actions, travel events, biome events).
 - The test list and its count.
 - The **Docs** node.
+- The **Save files** node under **World** (quick-save slot vs export/import).
 
 Adding or changing an event means updating both the `Request events` / `Module events`
 groups and the group count shown on the parent node.
+
+## Content editor (`editor.html`, tool)
+
+The content editor is a static page, not a module. It has no engine slice, subscribes to
+nothing and emits nothing; `buildEngine()` never registers it.
+
+| Area | Key symbols | Notes |
+|---|---|---|
+| Page | `editor.html` | Forms, list tools, previews, validation display, folder picker, save/download |
+| Parser/serializer | `editor/core.js` | Reads the `window.<Global> = {...};` wrapper and plain JSON, preserves the header, writes deterministic compact JSON |
+| Content model | `editor/schemas.js` | `FILES`, `REFS`, `SECTIONS` describe each editable file and field; validators, previews and `outcomeIds` live here |
+| Tests | `test/editor.test.cjs` | Formatter stability, byte-identical round-trips, schema checks, previews and outcome-id uniqueness |
+
+Editable files: `travel/data.js`, `equipment/data.js`, `actions/data.js`,
+`characters/data.js`, and `locations/events/<biome>/events.json` for all 10 biomes.
+Read-only references: `characters/statsData.js`, `combat/data.js`, `locations/data.js`.
+
+Rules that keep saves loss-free:
+
+- The object inside the wrapper is strict JSON. Unknown fields are kept, and sections only
+  edit declared fields, so `characters/data.js` keeps `behaviorAxes` and `personalities`
+  even though the form does not show them.
+- The header comment is preserved word for word. Older JavaScript-syntax files open with a
+  `lossy` warning; saving rewrites them as strict JSON and drops comments inside the object.
+- Every change is validated before saving; errors block the save.
+- Action outcome ids are unique across the whole actions file. Duplicating an action and
+  adding an outcome both allocate fresh ids.
+- `BIOMES` in `editor/schemas.js` mirrors `locations/data.js`; adding a biome requires
+  updating both.
+
+To add a content type, extend `FILES`/`SECTIONS` in `editor/schemas.js` (and a check or
+preview if useful); `editor.html` needs no changes. See `editor/README.md`.
 
 ## Adding a module
 
@@ -683,7 +949,8 @@ groups and the group count shown on the parent node.
 4. In `onLoad(engine)`: re-acquire the slice and normalize; do not subscribe again.
 5. Announce results with `engine.fire(...)` at `depth + 1`; never call another module.
 6. Add the script tags to `index.html` and `status.html` as needed.
-7. Register it in `index.html` after its dependencies.
+7. Register it in `buildEngine()` in `index.html` after its dependencies. The same factory is
+   used for save baselines, so a missing registration breaks imports.
 8. Add a Node test with a fake engine/state; follow the existing `test/*.test.cjs`
    pattern (no DOM).
 9. Update `ENGINE_SPEC.md` (registry + event catalog), this file, `HANDOFF.md`,
@@ -703,14 +970,14 @@ Visit
 
 ```text
 Choose action
-  action:choose
-    -> action:chosen, action:resolved (effects, time, equipmentKey?, travelTo?)
+  action:choose { actionId, destinationId?, distance?, durationMinutes? }
+    -> action:chosen, action:resolved (effects, time, equipmentKey?, travelTo?, travelDistance?)
        -> mainCharacter applies effects
        -> equipment adds a rewarded item (equipment:added/equipped)
           -> mainCharacter mirrors armor (mainCharacter:armorChanged)
   -> UI flush
      -> normal action: step whole ticks
-     -> travelTo: travel:start -> travel:started
+     -> travelTo: travel:start { distance, durationMinutes } -> travel:started
         -> UI steps a 5-minute tick, then travel:advance
            -> travel:progress (quiet check; loop continues)
            -> travel:event (pause)
@@ -718,6 +985,27 @@ Choose action
            -> travel:completed
               -> UI restores tick size and calls locations.visit(destinationId)
                  -> the Visit flow above
+```
+
+```text
+Generate map
+  map:generate { count }
+    -> map.generate() stores metadata and fires one location:add
+       { count, fixed: MapData.landmarks, batch }
+       -> locations.add() charts each fixed landmark then the random count
+          -> location:added { id, kind?, batch? } per location
+             -> map records landmark ids
+             -> after the last batch event: map:generated
+```
+
+```text
+Travel graph
+  location:add
+    -> locations.connectNew()
+       -> mutual connections { id, distance } on the new location and its neighbours
+          -> location:added (the UI re-renders and offers only direct routes)
+  -> choose Travel -> action:resolve carries distance + minutes
+     -> travel:start echoes distance in travel:started
 ```
 
 ```text
@@ -738,23 +1026,48 @@ Fight
   -> UI engine.flush()
 ```
 
+```text
+Export save file
+  GameSave.capture(engine, buildEngine)
+    -> engine.serialize() (live JSON)
+    -> buildEngine({ seed, startDate, tickMinutes }) (fresh baseline)
+    -> changesBetween(fresh.state, live) -> v1 changes
+  -> download text-rpg-save-<label>.json
+
+Import save file
+  GameSave.restore(fileText, engine, { buildEngine })
+    -> read/parse -> validate -> migrate v0 if needed
+    -> buildEngine(file seed/baseline) -> applyChanges(fresh.state, changes)
+    -> engine.load(fresh.state) -> module onLoad() normalization
+```
+
 ## Quick "where do I change..." table
 
 | Goal | File |
 |---|---|
 | Vision, pillars, decisions, roadmap | `DESIGN.md` |
 | New idea or unapproved preference | `IDEAS.md` |
+| Edit biome/travel/armor/action/character content in a form | `editor.html` (tool, not a module) |
+| Add a content type, field, check or preview to the editor | `editor/schemas.js` |
+| Editor file parsing, headers or JSON formatting | `editor/core.js` |
 | Add/tune a stat | `characters/statsData.js` |
 | More NPC names or traits | `characters/data.js` |
+| Personality archetypes or behavior tuning | `characters/data.js` `personalities` / `behaviorAxes` |
 | Character creation rules or portrait limits | `characters/mainCharacterData.js` |
 | Armor stats, drop weights, auto-equip | `equipment/data.js` |
 | Attack/defend formulas, combat log size | `combat/data.js` |
+| Map default size, fixed landmarks | `map/data.js` |
 | Biomes, weather, naming, hostility bands | `locations/data.js` |
 | Biome event text/chance/effects | `locations/events/<biome>/events.json` |
 | Area actions, costs, outcomes, travel | `actions/data.js` |
+| Route distance, league-to-minute rate, link count | `locations/data.js` `travelGraph` |
+| Which locations are connected | `locations.js` `connectNew()` / `normalizeGraph()` |
 | Travel event text/chance/effects, check length | `travel/data.js` |
-| Journey duration | Travel action `timeMinutes` in `actions/data.js` |
+| Journey duration | route `distance` in `locations/data.js`; the Travel action `timeMinutes` is a fallback |
+| Save-file format, limits, migrations | `save/gameSave.js` + `save/README.md` |
+| Live/baseline module registration for saves | `buildEngine()` in `index.html` |
 | Travel pause/resume UI | `index.html` Travel panel + `driveTravel()` |
+| Travel destination dropdown, Visit gating | `index.html` `renderActions()` / `renderLocations()` |
 | Draw order, new fields in generation | The module's `ATTRIBUTES` array |
 | Event names or depth handling | The emitting module, then `ENGINE_SPEC.md` + `status.html` |
 | Panel markup or button wiring | `index.html` |

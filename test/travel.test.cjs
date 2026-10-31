@@ -7,6 +7,8 @@ const path = require("node:path");
 global.window = global;
 require("../engine.js");
 require("../characters/statsData.js");
+require("../characters/bodyData.js");
+require("../characters/body.js");
 require("../characters/mainCharacterData.js");
 require("../characters/mainCharacter.js");
 require("../travel/data.js");
@@ -50,10 +52,10 @@ function watch(engine) {
   engine.on("event:mainCharacter:statChanged", (e) => events.stat.push(e));
 }
 
-const journey = (destinationId = "loc_0002", durationMinutes = 30) => ({
+const journey = (destinationId = "loc_0002", durationMinutes = 30, distance = 2) => ({
   originId: "loc_0001", originName: "Start",
   destinationId, destinationName: "Finish", destinationBiomeKey: "forest",
-  durationMinutes
+  distance, durationMinutes
 });
 
 const { engine, main, travel, character } = makeWorld(6001);
@@ -71,8 +73,10 @@ assert.equal(slice().active, true);
 assert.equal(slice().durationMinutes, 10, "7 minutes becomes two 5-minute checks");
 assert.equal(slice().elapsedMinutes, 0);
 assert.equal(slice().destinationId, "loc_0002");
+assert.equal(slice().distance, 2, "the route distance is stored for the panel");
 assert.equal(events.started.length, 1);
 assert.equal(events.started[0].depth, 1, "travel:started is a follow-up to the request");
+assert.equal(events.started[0].data.distance, 2);
 
 // A second start while travelling is ignored.
 act(engine, "travel:start", journey("loc_0003", 30));
@@ -109,6 +113,7 @@ assert.equal(slice().elapsedMinutes, 30);
 assert.equal(events.completed.length, 1);
 assert.equal(events.completed[0].data.elapsedMinutes, 30);
 assert.equal(events.completed[0].data.destinationName, "Finish");
+assert.equal(events.completed[0].data.distance, 2, "the completion summary keeps the route distance");
 assert.equal(slice().lastCompleted.destinationId, "loc_0002");
 assert.ok(slice().lastCompleted.atTick >= 0);
 
@@ -200,6 +205,7 @@ const loadedSlice = loadedEngine.state.modules.travel;
 assert.equal(loadedSlice.active, true);
 assert.equal(loadedSlice.paused, true);
 assert.equal(loadedSlice.destinationId, "loc_0006");
+assert.equal(loadedSlice.distance, 2, "load keeps the route distance");
 assert.equal(loadedSlice.elapsedMinutes, 5);
 assert.equal(loadedSlice.lastEvent.eventId, savedEventId);
 assert.doesNotThrow(() => JSON.parse(JSON.stringify(loadedSlice)));

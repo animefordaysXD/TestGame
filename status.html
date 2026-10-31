@@ -111,7 +111,7 @@
 
 <div class="toolbar">
   <button id="reload" title="Re-read localStorage save1">Reload save</button>
-  <label class="file" title="Open a previously saved state JSON file">Load state JSON
+  <label class="file" title="Open a previously saved engine-state JSON (not a v1 seed + changes save file)">Load state JSON
     <input type="file" id="file" accept="application/json,.json">
   </label>
   <button id="expand">Expand all</button>
@@ -154,9 +154,11 @@
 
 <script src="characters/statsData.js"></script>
 <script src="characters/data.js"></script>
+<script src="characters/bodyData.js"></script>
 <script src="characters/mainCharacterData.js"></script>
 <script src="equipment/data.js"></script>
 <script src="locations/data.js"></script>
+<script src="map/data.js"></script>
 <script src="actions/data.js"></script>
 <script src="travel/data.js"></script>
 <script src="combat/data.js"></script>
@@ -171,9 +173,11 @@
   const LOC = window.LocationData || { biomes: [] };
   const ACT = window.LocationActionsData || { default: [], biomes: {} };
   const TRD = window.TravelData || { events: [], minutesPerCheck: 5, chancePercent: 0 };
-  const EQD = window.EquipmentData || { items: [], slots: [] };
+  const EQD = window.EquipmentData || { items: [] };
   const CBD = window.CombatData || { actions: [], attack: {}, defend: {} };
-  const CD = window.CharacterData || { traits: [], opposites: [] };
+  const CD = window.CharacterData || { traits: [], opposites: [], personalities: [], behaviorAxes: [] };
+  const BD = window.CharacterBodyData || { parts: [], defaultStatus: "intact" };
+  const MD = window.MapData || { landmarks: [], defaultLocationCount: 20, minLocationCount: 0, maxLocationCount: 100 };
 
   const $ = (id) => document.getElementById(id);
   const svg = $("tree");
@@ -208,12 +212,14 @@
           startedAtTick: null, startedAt: "", endedAtTick: null, endedAt: "", log: []
         },
         locations: { seed: 0, createdAt: "", nextId: 1, locations: {}, currentId: null },
+        map: { seed: 0, size: 0, total: 0, lastGeneratedTick: null, lastGeneratedAt: "", landmarks: {} },
         actions: { locationId: null, locationName: "", biomeKey: "", actions: [], lastAction: null },
-        equipment: { nextId: 1, items: {}, equippedId: null },
+        equipment: { nextId: 1, items: {}, equippedByPart: {} },
         travel: {
           active: false, paused: false,
           originId: null, originName: "",
           destinationId: null, destinationName: "", destinationBiomeKey: "",
+          distance: 0,
           elapsedMinutes: 0, durationMinutes: 0, minutesPerCheck: 5,
           checks: 0, eventCount: 0,
           pausedAtMinutes: null,
@@ -277,6 +283,28 @@
     ).join(" · ");
   }
 
+  const bodyDefs = () => (Array.isArray(BD.parts) ? BD.parts : []);
+  const bodyParts = (body) => body && body.parts && typeof body.parts === "object" ? body.parts : {};
+  const bodyStatus = (part) => part && typeof part.status === "string" && part.status.trim()
+    ? part.status.trim()
+    : (BD.defaultStatus || "intact");
+
+  function bodyLine(body) {
+    const parts = bodyParts(body);
+    const intact = bodyDefs().filter((def) => bodyStatus(parts[def.key]) === "intact").length;
+    return `${Object.keys(parts).length}/${bodyDefs().length} parts · ${intact} intact`;
+  }
+
+  function bodyNodes(body) {
+    const parts = bodyParts(body);
+    return bodyDefs().map((def) => {
+      const part = parts[def.key];
+      return node(def.label,
+        `${bodyStatus(part)} · ${def.side}${def.parent ? ` · on ${def.parent}` : " · root"}${def.vital ? " · vital" : ""}`,
+        part ? "state" : "warn");
+    });
+  }
+
   async function loadEventStats(force = false) {
     if (events && !force) return events;
     const keys = biomes.map((b) => b.key);
@@ -321,29 +349,37 @@
     const world = node("World", clockText(time), "world", [
       node("Time", `${clockText(time)} · tick ${time.tick} · ${time.tickMinutes} min/tick`, "state"),
       node("Seed", `world ${state.seed} · rng ${state.rngState} · save v${state.version}`, "state"),
-      node("Event log", `${log.length} recent event${log.length === 1 ? "" : "s"} kept (cap 500)`, "state")
+      node("Event log", `${log.length} recent event${log.length === 1 ? "" : "s"} kept (cap 500)`, "state"),
+      node("Quick save", "localStorage slot save1 · whole engine state · this page reads it", "state"),
+      node("Save file", "format v1 · seed + baseline + changes · Export/Import · legacy v0 migration", "state")
     ], "live");
 
     /* Characters ---------------------------------------------------------- */
     const charState = modules.characters || {};
     const named = Object.values(charState.named || {});
     const temp = Object.values(charState.temp || {});
+    const axisLine = (behavior) => (CD.behaviorAxes || [])
+      .map((axis) => `${axis.label} ${Number.isFinite(Number(behavior && behavior[axis.key])) ? Math.round(Number(behavior[axis.key])) : "—"}`)
+      .join(" · ");
     const npcNode = (c) => node(
       c.name || c.id || "NPC",
-      `${c.gender || "?"} · age ${c.age ?? "?"} · ${(c.traits || []).slice(0, 4).join(", ")}${(c.traits || []).length > 4 ? "…" : ""}`,
+      `${c.gender || "?"} · age ${c.age ?? "?"} · ${c.personality ? c.personality.name : "no personality"} · ${(c.traits || []).slice(0, 4).join(", ")}${(c.traits || []).length > 4 ? "…" : ""}`,
       "state",
       [
+        node("Personality", c.personality ? `${c.personality.name} (${c.personality.id})` : "not set", "state"),
+        node("Behavior", axisLine(c.behavior), "state"),
         node("Resources", statLine(c.stats, "resource"), "state"),
         node("Skills", statLine(c.stats, "skill"), "state"),
-        node("Equipment", statLine(c.stats, "equipment"), "state")
+        node("Equipment", statLine(c.stats, "equipment"), "state"),
+        group("Body", bodyLine(c.body), bodyNodes(c.body), "state")
       ]
     );
     const namedNode = group(`Named NPC (${named.length})`, named.length ? "" : "none saved", named.map(npcNode), "state");
     const tempNode = group(`Temporary Spawn (${temp.length})`, temp.length ? "cleared by location:changed" : "none", temp.map(npcNode), "state");
-    const chars = node("characters", `v0.3 · next id ${charState.nextId ?? "—"}`, "module", [
+    const chars = node("characters", `v0.5 · next id ${charState.nextId ?? "—"}`, "module", [
       namedNode,
       tempNode,
-      node("Rules", `${(CD.traits || []).length} traits · ${(CD.opposites || []).length} opposite pairs · 5 per NPC · ${ST.stats.length} stats (9 base + armor)`, "content")
+      node("Rules", `${(CD.traits || []).length} traits · ${(CD.opposites || []).length} opposite pairs · ${(CD.personalities || []).length} personalities · ${(CD.behaviorAxes || []).length} behavior axes (0-100, data-only) · 5 traits per NPC · ${ST.stats.length} stats (9 base + armor)`, "content")
     ], "built");
 
     /* Main character ------------------------------------------------------ */
@@ -358,6 +394,7 @@
       mcChildren.push(group("Stats", statLine(mcStats), mcRows.map(({ def, value, max }) =>
         node(def.label, value === null ? "not set" : `${value}/${max}`, "state")
       ), "state"));
+      mcChildren.push(group("Body", bodyLine(mc.body), bodyNodes(mc.body), "state"));
       mcChildren.push(node("Portrait", mc.imageSource === "upload"
         ? `upload · ${MC.imageSize || 256}px · stored as a data URL`
         : "generated initials SVG avatar", "state"));
@@ -369,24 +406,32 @@
     const mcSummary = mc && hpRow && staRow
       ? `HP ${hpRow.value ?? "—"}/${hpRow.max} · Stamina ${staRow.value ?? "—"}/${staRow.max}`
       : "not created";
-    const mainCharacter = node("mainCharacter", `v0.5 · ${mcSummary}`, "module", mcChildren, mc ? "built" : "empty");
+    const mainCharacter = node("mainCharacter", `v0.6 · ${mcSummary}`, "module", mcChildren, mc ? "built" : "empty");
 
     /* Equipment ----------------------------------------------------------- */
     const equipState = modules.equipment || {};
     const gearItems = Object.values(equipState.items || {}).sort((a, b) => String(a.id).localeCompare(String(b.id)));
-    const equippedGear = equipState.equippedId ? (equipState.items || {})[equipState.equippedId] : null;
-    const gearArmor = equippedGear ? equippedGear.armor : 0;
-    const equipmentBranch = node("equipment", `v0.1 · ${gearItems.length} item(s) · armor ${gearArmor}/100`, "module", [
-      node("Equipped", equippedGear
-        ? `${equippedGear.name} · armor ${equippedGear.armor} · Defend blocks ${equippedGear.armor * 2}`
-        : "nothing equipped", equippedGear ? "state" : "warn"),
+    const gearByPart = equipState.equippedByPart || {};
+    const partName = (key) => (bodyDefs().find((def) => def.key === key) || {}).label || key;
+    const gearWorn = gearItems.filter((item) => (Array.isArray(item.parts) ? item.parts : []).some((part) => gearByPart[part] === item.id));
+    const gearArmor = Math.min(Number(EQD.maxArmor) || 100, gearWorn.reduce((sum, item) => sum + (Number(item.armor) || 0), 0));
+    const coveredParts = bodyDefs().filter((def) => gearByPart[def.key]);
+    const equipmentBranch = node("equipment", `v0.2 · ${gearItems.length} item(s) · armor ${gearArmor}/100 · ${coveredParts.length}/${bodyDefs().length} parts`, "module", [
+      node("Worn", gearWorn.length
+        ? `${gearWorn.length} item(s) · armor ${gearArmor} · Defend blocks ${gearArmor * 2}`
+        : "nothing equipped", gearWorn.length ? "state" : "warn"),
+      group(`Body coverage (${coveredParts.length}/${bodyDefs().length})`, coveredParts.length ? "one worn item per part" : "no parts covered",
+        coveredParts.map((def) => {
+          const item = (equipState.items || {})[gearByPart[def.key]] || {};
+          return node(def.label, `${item.name || "?"} · armor ${item.armor ?? 0}`, "state", [], "equipped");
+        }), "state"),
       group(`Items (${gearItems.length})`, gearItems.length ? "main character only" : "find or scavenge armor",
         gearItems.map((item) => node(
           item.name || item.id,
-          `${item.id} · ${item.slot || "body"} · armor ${item.armor} · ${item.equipped ? "equipped" : "in inventory"}`,
+          `${item.id} · ${(Array.isArray(item.parts) ? item.parts : []).map(partName).join(", ") || "no parts"} · armor ${item.armor} · ${item.equipped ? "equipped" : "in inventory"}`,
           "state", [], item.equipped ? "equipped" : ""
         )), "state"),
-      node("Rules", "one body slot · equipment:equipped mirrors totalArmor into main stats · NPCs cannot equip yet", "content")
+      node("Rules", "ten body parts · overlapping items replace each other · totalArmor is the sum of worn armor · equipment:equipped mirrors totalArmor into main stats · NPCs cannot equip yet", "content")
     ], gearItems.length ? "built" : "empty");
 
     /* Combat -------------------------------------------------------------- */
@@ -415,19 +460,41 @@
     const locState = modules.locations || {};
     const locations = Object.values(locState.locations || {}).sort((a, b) => String(a.id).localeCompare(String(b.id)));
     const currentId = locState.currentId || null;
-    const locItems = locations.map((loc) => node(
-      loc.name || loc.id,
-      `${loc.id} · ${loc.biome || "?"} · ${loc.weather || "?"} · hostility ${loc.hostility ?? "?"} (${bandFor(loc.hostility) || "?"})${loc.id === currentId ? " · current" : ""}`,
-      "state",
-      [],
-      loc.id === currentId ? "current" : ""
-    ));
-    const locationsNode = group(`Locations (${locations.length})`, locations.length ? "unique names · biome/weather pairs vary" : "none generated", locItems, "state");
-    const locationsBranch = node("locations", `v0.2 · map seed ${locState.seed ?? "—"} · ${locations.length} generated`, "module", [
+    const locItems = locations.map((loc) => {
+      const routes = Array.isArray(loc.connections) ? loc.connections : [];
+      return node(
+        loc.name || loc.id,
+        `${loc.id} · ${loc.kind ? loc.kind + " · " : ""}${loc.biome || "?"} · ${loc.weather || "?"} · hostility ${loc.hostility ?? "?"} (${bandFor(loc.hostility) || "?"}) · ${routes.length} route${routes.length === 1 ? "" : "s"}${loc.id === currentId ? " · current" : ""}`,
+        "state",
+        [],
+        loc.id === currentId ? "current" : ""
+      );
+    });
+    const routeEdges = locations.reduce((sum, loc) => sum + (Array.isArray(loc.connections) ? loc.connections.length : 0), 0) / 2;
+    const routeDistances = locations.flatMap((loc) => (Array.isArray(loc.connections) ? loc.connections.map((route) => Number(route.distance) || 0) : []));
+    const avgDistance = routeDistances.length
+      ? Math.round((routeDistances.reduce((sum, distance) => sum + distance, 0) / routeDistances.length) * 10) / 10
+      : 0;
+    const locationsNode = group(`Locations (${locations.length})`, locations.length ? "unique names · biome/weather pairs vary · linked by routes" : "none generated", locItems, "state");
+    const locationsBranch = node("locations", `v0.4 · map seed ${locState.seed ?? "—"} · ${locations.length} generated · ${routeEdges} route${routeEdges === 1 ? "" : "s"}`, "module", [
       node("Map", `seed ${locState.seed ?? "—"} · created ${locState.createdAt || "—"} · next ${locState.nextId ?? "—"}`, "state"),
+      node("Travel graph", `${routeEdges} route${routeEdges === 1 ? "" : "s"} · avg distance ${avgDistance} · ${(LOC.travelGraph && LOC.travelGraph.minutesPerDistance) || 15} min per league · links ${(LOC.travelGraph && LOC.travelGraph.links || []).join("–")}`, "state"),
       locationsNode,
       node("Biome events on visit", "each enabled event rolls independently; base-stat effects apply", "state")
     ], "built");
+
+    /* Map spawner --------------------------------------------------------- */
+    const mapState = modules.map || {};
+    const mapLandmarks = mapState.landmarks || {};
+    const mapLandmarkItems = Object.entries(mapLandmarks).map(([kind, id]) => {
+      const loc = locations.find((entry) => entry.id === id);
+      return node(kind, `${id}${loc ? " · " + loc.name : ""}`, loc ? "state" : "warn");
+    });
+    const mapBranch = node("map", `v0.1 · ${mapState.size ? `${mapState.size} random + ${mapLandmarkItems.length} fixed` : "not generated"}`, "module", [
+      node("Last batch", mapState.lastGeneratedAt ? `${mapState.size} random · ${mapState.total} total · ${mapState.lastGeneratedAt}` : "no map generated yet", mapState.lastGeneratedAt ? "state" : "warn"),
+      group(`Fixed landmarks (${mapLandmarkItems.length})`, "tavern, castle and shack are guaranteed on every map", mapLandmarkItems, "state"),
+      node("Rules", `${(MD.landmarks || []).length} fixed landmark definition(s) · default ${MD.defaultLocationCount ?? 20} random · range ${MD.minLocationCount ?? 0}–${MD.maxLocationCount ?? 100}`, "content")
+    ], mapState.lastGeneratedAt ? "built" : "empty");
 
     /* Actions ------------------------------------------------------------- */
     const actionState = modules.actions || {};
@@ -444,13 +511,13 @@
       );
     });
     const lastLine = lastAction
-      ? `${lastAction.name} → ${lastAction.outcomeName || "travel"} · ${lastAction.timeMinutes || 0} min${lastAction.travelTo ? ` · to ${lastAction.travelTo}` : ""}`
+      ? `${lastAction.name} → ${lastAction.outcomeName || "travel"} · ${lastAction.timeMinutes || 0} min${lastAction.travelDistance ? ` · ${lastAction.travelDistance} league${lastAction.travelDistance === 1 ? "" : "s"}` : ""}${lastAction.travelTo ? ` · to ${lastAction.travelTo}` : ""}`
       : "no choice yet";
-    const actionsBranch = node("actions", `v0.2 · ${actions.length} loaded · ${lastAction ? "resolved" : "no choice yet"}`, "module", [
+    const actionsBranch = node("actions", `v0.3 · ${actions.length} loaded · ${lastAction ? "resolved" : "no choice yet"}`, "module", [
       node("Area", `${actionState.locationName || "none"}${actionState.biomeKey ? " · " + actionState.biomeKey : ""}${actionState.locationId ? " · " + actionState.locationId : ""}`, "state"),
       group(`Actions (${actions.length})`, actions.length ? "loaded from the last visited area" : "visit a location to load five", actionItems, "state"),
       node("Last resolution", lastLine, lastAction ? "state" : "warn", [], lastAction ? "resolved" : "pending"),
-      node("Resolution", "action:resolved → mainCharacter effects · equipment item · UI time and travel", "content")
+      node("Resolution", "action:resolved → mainCharacter effects · equipment item · route time and travelTo", "content")
     ], actions.length ? "built" : "empty");
 
     /* Travel -------------------------------------------------------------- */
@@ -463,11 +530,11 @@
       : travelDone
         ? `arrived · ${travelDone.destinationName} · ${travelDone.elapsedMinutes} min`
         : "no journey";
-    const travelBranch = node("travel", `v0.1 · ${travelSummary}`, "module", [
+    const travelBranch = node("travel", `v0.2 · ${travelSummary}`, "module", [
       node("Route", travelActive
-        ? `${travelState.originName || "here"} → ${travelState.destinationName || "somewhere"} · ${travelState.destinationBiomeKey || "?"}`
+        ? `${travelState.originName || "here"} → ${travelState.destinationName || "somewhere"} · ${travelState.destinationBiomeKey || "?"}${travelState.distance ? ` · ${travelState.distance} league${travelState.distance === 1 ? "" : "s"}` : ""}`
         : travelDone
-          ? `${travelDone.originName || "?"} → ${travelDone.destinationName || "?"}`
+          ? `${travelDone.originName || "?"} → ${travelDone.destinationName || "?"}${travelDone.distance ? ` · ${travelDone.distance} league${travelDone.distance === 1 ? "" : "s"}` : ""}`
           : "none", travelActive || travelDone ? "state" : "warn"),
       node("Progress", travelActive
         ? `${travelState.elapsedMinutes}/${travelState.durationMinutes} min · ${travelState.checks} check(s) · ${travelState.eventCount} event(s)${travelState.paused ? ` · paused at ${travelState.pausedAtMinutes} min` : ""}`
@@ -478,9 +545,9 @@
       node("Rules", "UI advances 5-minute ticks · travel:event pauses · Continue resumes · completion calls locations.visit", "content")
     ], travelActive || travelDone ? "built" : "empty");
 
-    const modulesBranch = node("Modules", "7 registered · event-driven · one slice each", "state", [
-      chars, mainCharacter, equipmentBranch, combatBranch, locationsBranch, actionsBranch, travelBranch
-    ], "7");
+    const modulesBranch = node("Modules", "8 registered · event-driven · one slice each", "state", [
+      chars, mainCharacter, equipmentBranch, combatBranch, locationsBranch, mapBranch, actionsBranch, travelBranch
+    ], "8");
 
     /* Content ------------------------------------------------------------- */
     const biomeNodes = biomes.map((biome) => {
@@ -495,16 +562,19 @@
       ? `${events.enabled} active / ${events.total} defined across ${biomes.length} biomes${events.errors ? ` · ${events.errors} load error(s)` : ""}`
       : "loading event files…";
     const contentBranch = node("Content data", "plain data files — no generation logic", "content", [
-      node("characters/data.js", `${givenNames} given names · ${(CD.surnames || []).length} surnames · ${(CD.traits || []).length} traits · ages ${(CD.ageRange || []).join("–")}`, "content"),
+      node("characters/data.js", `${givenNames} given names · ${(CD.surnames || []).length} surnames · ${(CD.traits || []).length} traits · ${(CD.opposites || []).length} opposite pairs · ${(CD.personalities || []).length} personalities · ${(CD.behaviorAxes || []).length} behavior axes · ages ${(CD.ageRange || []).join("–")}`, "content"),
+      node("characters/bodyData.js", `${bodyDefs().length} body parts · ${bodyDefs().filter((part) => part.vital).length} vital · default status ${BD.defaultStatus || "intact"} · equipment targets part keys`, "content"),
+      node("map/data.js", `${(MD.landmarks || []).length} fixed landmarks · default ${MD.defaultLocationCount ?? 20} random · range ${MD.minLocationCount ?? 0}–${MD.maxLocationCount ?? 100}`, "content"),
       node("characters/statsData.js", `${ST.stats.length} stats · ${ST.stats.filter((d) => d.kind === "resource").length} resources · ${ST.stats.filter((d) => d.kind === "skill").length} skills · ${ST.stats.filter((d) => d.kind === "equipment").length} equipment`, "content"),
       node("mainCharacterData.js", `portrait ${MC.imageSize ?? 256}px · upload ≤ ${Math.round((MC.maxUploadBytes || 0) / 1048576)} MB · ${(MC.genders || []).length} genders`, "content"),
-      node("locations/data.js", `${biomes.length} biomes · ${weatherTotal} weather entries · ${(LOC.namePrefixes || []).length} prefixes · ${(LOC.nameSuffixes || []).length} suffixes · ${(LOC.namePatterns || []).length} name patterns`, "content"),
+      node("locations/data.js", `${biomes.length} biomes · ${weatherTotal} weather entries · ${(LOC.namePrefixes || []).length} prefixes · ${(LOC.nameSuffixes || []).length} suffixes · ${(LOC.namePatterns || []).length} name patterns · ${(LOC.travelGraph && LOC.travelGraph.minutesPerDistance) || 15} min per league`, "content"),
       node("actions/data.js", `${defaultActions.length} default actions · ${overrides.length} biome override(s) · ${defaultActions.reduce((sum, action) => sum + ((action.outcomes || []).length), 0)} outcomes`, "content"),
       node("travel/data.js", `${(TRD.events || []).length} travel events · ${TRD.chancePercent ?? 0}% per check · every ${TRD.minutesPerCheck ?? 5} min · ${Object.keys(TRD.chanceByBiome || {}).length} biome override(s)`, "content"),
-      node("equipment/data.js", `${(EQD.items || []).length} armor items · ${(EQD.slots || []).length} slot(s) · max armor ${EQD.maxArmor ?? 100} · auto-equip ${EQD.autoEquip === false ? "off" : "on"}`, "content"),
+      node("equipment/data.js", `${(EQD.items || []).length} armor items · ${bodyDefs().length} body parts · max armor ${EQD.maxArmor ?? 100} · auto-equip ${EQD.autoEquip === false ? "off" : "on"}`, "content"),
       node("combat/data.js", `${(CBD.actions || []).length} actions · attack ${(CBD.attack && CBD.attack.stat) || "personalCombat"} × ${(CBD.attack && CBD.attack.multiplier) || 1} · defend armor × ${(CBD.defend && CBD.defend.armorMultiplier) || 2}`, "content"),
+      node("editor/schemas.js", "content-editor model · 5 editable types · strict JSON round-trip · no state or events", "content"),
       group(`Biome events (${biomes.length} files)`, eventsSummary, biomeNodes, "content"),
-      node("Docs", "DESIGN.md · IDEAS.md · ENGINE_SPEC.md v1.0 · MODULES.md · HANDOFF.md · README.md · actions/README.md · equipment/README.md · travel/README.md · combat/README.md · locations/README.md · locations/events/README.md · characters/mainChar/README.md", "content")
+      node("Docs", "DESIGN.md · IDEAS.md · ENGINE_SPEC.md v1.5 · MODULES.md · HANDOFF.md · README.md · save/README.md · editor/README.md · actions/README.md · equipment/README.md · travel/README.md · combat/README.md · locations/README.md · map/README.md · locations/events/README.md · characters/mainChar/README.md", "content")
     ], "data");
 
     /* Events -------------------------------------------------------------- */
@@ -513,16 +583,17 @@
         node("character:spawn", "UI → characters.spawn()", "event"),
         node("character:save", "UI → characters.save() · data { id }", "event"),
         node("character:clearTemp", "UI → characters.clearTemp()", "event"),
-        node("location:add", "UI → locations.add() · data { count? }", "event"),
+        node("location:add", "UI/map → locations.add() · data { count?, fixed?, batch? }", "event"),
+        node("map:generate", "UI → map.generate() · data { count? }", "event"),
         node("location:changed", "UI → characters clears Temporary Spawn", "event"),
-        node("action:choose", "UI → actions.choose() · data { actionId, destinationId? }", "event"),
-        node("travel:start", "UI → travel.start() · destination and duration snapshot", "event"),
+        node("action:choose", "UI → actions.choose() · data { actionId, destinationId?, distance?, durationMinutes? }", "event"),
+        node("travel:start", "UI → travel.start() · destination, distance and duration snapshot", "event"),
         node("travel:advance", "UI → travel.advance() · one 5-minute check", "event"),
         node("travel:continue", "UI → travel.resume() · clears the event pause", "event"),
         node("travel:cancel", "UI → travel.cancel() · abandons the journey", "event"),
         node("equipment:add", "UI → equipment.add() · data { key? }", "event"),
         node("equipment:equip", "UI → equipment.equip() · data { itemId }", "event"),
-        node("equipment:unequip", "UI → equipment.unequip() · no data", "event"),
+        node("equipment:unequip", "UI → equipment.unequip() · data { itemId? } (omit to clear all)", "event"),
         node("combat:start", "UI → combat.start() · data { player, enemy } snapshots", "event"),
         node("combat:action", "UI → combat.action() · data { action: attack|defend }", "event")
       ], "event"),
@@ -530,14 +601,15 @@
         node("character:spawned", "characters · { id }", "event"),
         node("character:saved", "characters · { id }", "event"),
         node("character:tempCleared", "characters · { ids }", "event"),
-        node("location:added", "locations · { id }", "event"),
+        node("location:added", "locations · { id, kind?, batch? }", "event"),
+        node("map:generated", "map · { batch, count, total, landmarks }", "event"),
         node("location:visited", "locations · { id, name, biome, biomeKey, weather, hostility }", "event"),
         node("location:event", "locations · event data + effects", "event"),
         node("actions:loaded", "actions · five actions for the area", "event"),
         node("action:chosen", "actions · { actionId, name, locationId, locationName }", "event"),
-        node("action:resolved", "actions · costs, effects, time, equipmentKey, travelTo", "event"),
+        node("action:resolved", "actions · costs, effects, route time/distance, equipmentKey, travelTo", "event"),
         node("action:blocked", "actions · { actionId, name, reason }", "event"),
-        node("travel:started", "travel · destination, duration, 5-minute checks", "event"),
+        node("travel:started", "travel · destination, distance, duration, 5-minute checks", "event"),
         node("travel:progress", "travel · elapsed/duration after a quiet check", "event"),
         node("travel:event", "travel · interruption + effects; journey pauses", "event"),
         node("travel:resumed", "travel · remaining minutes after Continue", "event"),
@@ -546,29 +618,32 @@
         node("mainCharacter:saved", "mainCharacter · identity only (no image)", "event"),
         node("mainCharacter:statChanged", "mainCharacter · any non-equipment stat: stat, delta, value, max", "event"),
         node("mainCharacter:armorChanged", "mainCharacter · armor mirrored from equipment", "event"),
-        node("equipment:added", "equipment · { itemId, key, name, armor, equipped, source }", "event"),
-        node("equipment:equipped", "equipment · { itemId, name, armor, totalArmor, previousItemId }", "event"),
-        node("equipment:unequipped", "equipment · { itemId, name, armor, totalArmor: 0 }", "event"),
+        node("equipment:added", "equipment · { itemId, key, name, parts, armor, equipped, source }", "event"),
+        node("equipment:equipped", "equipment · { itemId, name, parts, armor, totalArmor, replacedItemIds }", "event"),
+        node("equipment:unequipped", "equipment · { itemId, itemIds, parts, armor, totalArmor }", "event"),
         node("combat:started", "combat · player/enemy ids and names", "event"),
         node("combat:damage", "combat · source, target, amount, hpBefore/After, armor", "event"),
         node("combat:defended", "combat · player brace, armor and reduction", "event"),
         node("combat:ended", "combat · winner, loser, rounds", "event")
       ], "event")
-    ], "41");
+    ], "43");
 
     /* Docs & tests -------------------------------------------------------- */
     const testsBranch = node("Tests", "Node only · npm test", "test", [
-      node("locations.test.cjs", "generation · uniqueness · reset · save/load", "test"),
+      node("locations.test.cjs", "generation · routes/graph · uniqueness · reset · save/load", "test"),
       node("locations-disk.test.cjs", "Locations folder mirror (in-memory mock)", "test"),
-      node("characters.test.cjs", "NPC stats · generation · save/clear · legacy load", "test"),
+      node("map.test.cjs", "fixed landmarks · batch size · map:generated · save/load · reset", "test"),
+      node("characters.test.cjs", "personalities · traits/opposites · behavior · stats · generation · legacy load", "test"),
       node("main-character.test.cjs", "validation · image · base stats · effects · mirror", "test"),
       node("biome-events.test.cjs", "JSON loading · visit rolls · stat effects · reset", "test"),
-      node("actions.test.cjs", "five actions · outcomes · costs · travel · equipment · reset", "test"),
-      node("equipment.test.cjs", "inventory · auto-equip · armor · combat · reset · save/load", "test"),
-      node("travel.test.cjs", "5-minute checks · pause/resume · effects · cancel · reset · save/load", "test"),
+      node("actions.test.cjs", "five actions · outcomes · costs · route time · travel · equipment", "test"),
+      node("equipment.test.cjs", "body-part inventory · auto-equip · overlap swap · summed armor · combat · reset · save/load migration", "test"),
+      node("travel.test.cjs", "5-minute checks · route distance · pause/resume · cancel · save/load", "test"),
       node("combat.test.cjs", "player-first turns · attack · defend/armor · death · reset · save/load", "test"),
+      node("save.test.cjs", "capture · exact restore · v0 migration · unsafe paths · format guard", "test"),
+      node("editor.test.cjs", "formatter · byte-identical round-trip · schema checks · outcome ids", "test"),
       node("serve.cjs", "static server on 127.0.0.1:8765", "test")
-    ], "10");
+    ], "12");
 
     const rootSub = live.state
       ? `${live.source} · ${clockText(time)} · tick ${time.tick}`
@@ -745,7 +820,9 @@
     const combat = state.modules.combat || {};
     const gear = state.modules.equipment || {};
     const travel = state.modules.travel || {};
-    const equippedGear = gear.equippedId ? (gear.items || {})[gear.equippedId] : null;
+    const routeCount = locs.reduce((sum, loc) => sum + (Array.isArray(loc.connections) ? loc.connections.length : 0), 0) / 2;
+    const gearWorn = Object.values(gear.items || {}).filter((item) => (Array.isArray(item.parts) ? item.parts : []).some((part) => (gear.equippedByPart || {})[part] === item.id));
+    const gearArmor = Math.min(Number(EQD.maxArmor) || 100, gearWorn.reduce((sum, item) => sum + (Number(item.armor) || 0), 0));
     const mcRows = statRows(mc && mc.stats);
     const hp = mcRows.find((row) => row.def.key === "hp");
     const sta = mcRows.find((row) => row.def.key === "stamina");
@@ -753,10 +830,11 @@
       `${clockText(time)} · tick ${time.tick}`,
       `${time.tickMinutes} min/tick`,
       mc && hp && sta ? `HP ${hp.value ?? "—"}/${hp.max} · Stamina ${sta.value ?? "—"}/${sta.max}` : "No main character",
-      `Armor ${equippedGear ? equippedGear.armor : 0}/100`,
+      `Armor ${gearArmor}/100`,
       combat.active ? `Combat: round ${combat.round}` : combat.winnerName ? `Combat: ${combat.winnerName} won` : "No combat",
-      travel.active ? `Travel: ${travel.elapsedMinutes}/${travel.durationMinutes} min${travel.paused ? " paused" : ""}` : travel.lastCompleted ? `Travel: arrived at ${travel.lastCompleted.destinationName}` : "No journey",
+      travel.active ? `Travel: ${travel.elapsedMinutes}/${travel.durationMinutes} min${travel.distance ? ` · ${travel.distance} leagues` : ""}${travel.paused ? " paused" : ""}` : travel.lastCompleted ? `Travel: arrived at ${travel.lastCompleted.destinationName}${travel.lastCompleted.distance ? ` · ${travel.lastCompleted.distance} leagues` : ""}` : "No journey",
       `${locs.length} location${locs.length === 1 ? "" : "s"}`,
+      `${routeCount} route${routeCount === 1 ? "" : "s"}`,
       `${acts.length} action${acts.length === 1 ? "" : "s"}`,
       `${named.length} named · ${temp.length} temporary`,
       events ? `${events.enabled} biome event${events.enabled === 1 ? "" : "s"} active` : "Biome events…",

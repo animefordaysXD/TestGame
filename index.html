@@ -15,6 +15,7 @@
   .bar { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:12px; }
   button, select { font:inherit; padding:6px 12px; background:transparent; color:var(--fg); border:1px solid var(--line); border-radius:4px; cursor:pointer; }
   button.primary { background:var(--accent); color:var(--bg); border-color:var(--accent); }
+  .bar input[type="number"] { width:64px; padding:6px 8px; background:transparent; color:var(--fg); border:1px solid var(--line); border-radius:4px; font:inherit; }
   button:focus-visible, select:focus-visible, input:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
   label { color:var(--mute); }
   #log { list-style:none; margin:16px 0 0; padding:0; border-top:1px solid var(--line); max-height:50vh; overflow-y:auto; }
@@ -41,6 +42,7 @@
   .stat-label { color:var(--mute); font-weight:400; }
   .stat-value { font-variant-numeric:tabular-nums; }
   .chars small.stats-line { font-family:"Segoe UI", system-ui, sans-serif; font-size:.72rem; font-variant-numeric:tabular-nums; margin-top:2px; }
+  .chars small.body-line { font-family:"Segoe UI", system-ui, sans-serif; font-size:.72rem; margin-top:2px; }
   .combat { border:1px solid var(--line); border-radius:6px; padding:12px; margin-bottom:12px; }
   .combatants { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
   .combatant { display:flex; justify-content:space-between; gap:8px; padding:6px 8px; border:1px solid var(--line); border-radius:4px; font:600 .82rem/1.4 "Segoe UI", system-ui, sans-serif; font-variant-numeric:tabular-nums; }
@@ -74,9 +76,14 @@
     </label>
   </div>
   <div class="bar">
-    <button id="save">Save</button><button id="load">Load</button><button id="new">New world</button>
+    <button id="save">Quick save</button><button id="load">Quick load</button><button id="new">New world</button>
     <label><input type="checkbox" id="demo"> Test generator</label>
   </div>
+  <div class="bar">
+    <button id="saveFile">Export save file</button><button id="loadFile">Import save file</button>
+    <input type="file" id="saveFileInput" accept="application/json,.json" hidden aria-label="Load a text RPG save file">
+  </div>
+  <p class="meta" id="saveStatus">Save files store the world seed plus the changes since a fresh world.</p>
 
   <h2>Main character</h2>
   <div class="creator">
@@ -106,15 +113,21 @@
     <div class="stat-grid" id="mcStats"></div>
     <p class="meta">Set when the character is first saved. Profile edits keep the current values.</p>
   </div>
+  <div class="stats">
+    <h3>Body</h3>
+    <div class="stat-grid" id="mcBody"></div>
+    <p class="meta">Head, torso, arms, hands, legs and feet. All parts start intact; no injury system uses them yet.</p>
+  </div>
   <p class="meta">Saves in the game; with the folder connected, also writes <code>characters/mainChar/main.json</code> and a profile image.</p>
 
   <h2>Equipment <span class="seed" id="equipArmor"></span></h2>
   <div class="bar">
     <button class="primary" id="equipFind">Find armor</button>
+    <button id="equipClear">Unequip all</button>
   </div>
   <p class="meta" id="equipStatus">No armor equipped. Defend reduces incoming damage by armor × 2.</p>
   <ul class="chars" id="equipment"></ul>
-  <p class="meta">Armor is written into the main character's Armor stat. Only the main character can wear equipment in this version.</p>
+  <p class="meta">Each item covers body parts. Worn items must not share a part; equipping one replaces the items it overlaps. Armor is the sum of all worn items and is written into the main character's Armor stat. Only the main character can wear equipment in this version.</p>
 
   <h2>Characters</h2>
   <div class="bar">
@@ -142,12 +155,18 @@
 
   <h2>Locations <span class="seed" id="locSeed"></span></h2>
   <div class="bar">
-    <button class="primary" id="addLocation">Add location</button>
+    <button class="primary" id="generateMap">Generate map</button>
+    <label for="mapSize">random locations</label>
+    <input type="number" id="mapSize" min="0" max="100" step="1" value="20">
+    <button id="addLocation">Add location</button>
     <button id="addFiveLocations">Add 5 locations</button>
     <button id="locDisk">Connect Locations folder</button>
     <button id="reloadBiomeEvents">Reload biome events</button>
   </div>
+  <p class="meta" id="mapStatus">Map: not generated.</p>
+  <p class="meta">A generated map always includes the fixed tavern, castle and shack landmarks. Generate map uses a fresh batch; Add location stays a manual single spawn.</p>
   <p class="meta">JSON goes to <code>Locations/&lt;map seed&gt;/loc_0001.json</code> when the folder is connected.</p>
+  <p class="meta">Each charted location links to 1–2 others. A route's distance sets the journey time; the Travel action only offers linked destinations.</p>
   <p class="meta">Biome events live in <code>locations/events/&lt;biome&gt;/events.json</code>. Each enabled event rolls its own chance on a visit.</p>
   <p class="meta" id="locEventStatus">Biome events: loading…</p>
   <ul class="chars" id="locations"></ul>
@@ -156,7 +175,7 @@
   <h2>Actions <span class="seed" id="actionArea"></span></h2>
   <p class="meta" id="actionStatus">Visit a location to load five actions.</p>
   <ul class="chars" id="actions"></ul>
-  <p class="meta">Costs and outcomes are applied to the main character. Time costs advance the clock. Travel runs in 5-minute steps and can pause on an event; the locations module still performs arrival.</p>
+  <p class="meta">Costs and outcomes are applied to the main character. Time costs advance the clock. Travel offers only connected locations and runs in 5-minute steps; it can pause on an event, and the locations module still performs arrival.</p>
 
   <h2>Travel <span class="seed" id="travelRoute"></span></h2>
   <p class="meta" id="travelStatus">Choose Travel in the Actions panel to begin a journey.</p>
@@ -165,7 +184,7 @@
     <button id="travelCancel" disabled>Cancel journey</button>
   </div>
   <p class="meta" id="travelEvent" hidden></p>
-  <p class="meta">Travel advances the clock in 5-minute steps. A travel event pauses the journey until you continue.</p>
+  <p class="meta">Travel advances the clock in 5-minute steps. A route's distance sets its duration (15 min per league). A travel event pauses the journey until you continue.</p>
 
   <h2>Event log</h2>
   <ul id="log"></ul>
@@ -175,6 +194,8 @@
 <script src="engine.js"></script>
 <script src="characters/statsData.js"></script>
 <script src="characters/data.js"></script>
+<script src="characters/bodyData.js"></script>
+<script src="characters/body.js"></script>
 <script src="characters/characters.js"></script>
 <script src="characters/mainCharacterData.js"></script>
 <script src="characters/mainCharacter.js"></script>
@@ -182,15 +203,42 @@
 <script src="equipment/equipment.js"></script>
 <script src="locations/data.js"></script>
 <script src="locations/locations.js"></script>
+<script src="map/data.js"></script>
+<script src="map/map.js"></script>
 <script src="actions/data.js"></script>
 <script src="actions/actions.js"></script>
 <script src="travel/data.js"></script>
 <script src="travel/travel.js"></script>
 <script src="combat/data.js"></script>
 <script src="combat/combat.js"></script>
+<script src="save/gameSave.js"></script>
 <script>
-  const engine = new Engine({ startDate: "1000-01-01T06:00:00Z", tickMinutes: 10 });
   const $ = (id) => document.getElementById(id);
+
+  // A fresh world with every module registered. The save helper uses the same factory to
+  // rebuild the baseline before applying a save file's changes.
+  function buildEngine(opts = {}) {
+    const e = new Engine({ startDate: "1000-01-01T06:00:00Z", tickMinutes: 10, ...opts });
+    e.register(createCharactersModule());
+    e.register(createMainCharacterModule());
+    e.register(createEquipmentModule());
+    e.register(createLocationsModule());
+    e.register(createMapModule());
+    e.register(createActionsModule());
+    e.register(createTravelModule());
+    e.register(createCombatModule());
+    // Add more modules here, e.g. e.register(createMarriageModule());
+    return e;
+  }
+
+  const engine = buildEngine();
+  const chars = engine.modules.get("characters");
+  const mainCharModule = engine.modules.get("mainCharacter");
+  const equipmentModule = engine.modules.get("equipment");
+  const locationsModule = engine.modules.get("locations");
+  const mapModule = engine.modules.get("map");
+  const travelModule = engine.modules.get("travel");
+  const combatModule = engine.modules.get("combat");
 
   const statDefs = CharacterStatsData.stats;
   function statDisplay(stats) {
@@ -208,28 +256,31 @@
   function statsTitle(stats) {
     return statDisplay(stats).map(({ def, value, max }) => `${def.label} ${value === null ? "—" : value}/${max}`).join(" · ");
   }
-
-  const chars = createCharactersModule();
-  engine.register(chars);
-
-  const mainCharModule = createMainCharacterModule();
-  engine.register(mainCharModule);
-
-  const equipmentModule = createEquipmentModule();
-  engine.register(equipmentModule);
-
-  const locationsModule = createLocationsModule();
-  engine.register(locationsModule);
-
-  engine.register(createActionsModule());
-
-  const travelModule = createTravelModule();
-  engine.register(travelModule);
-
-  const combatModule = createCombatModule();
-  engine.register(combatModule);
-
-  // Add more modules here, e.g. engine.register(createMarriageModule());
+  function behaviorLine(behavior) {
+    return (CharacterData.behaviorAxes || [])
+      .map((def) => `${def.label} ${behavior && Number.isFinite(Number(behavior[def.key])) ? Math.round(Number(behavior[def.key])) : "—"}`)
+      .join(" · ");
+  }
+  function bodyDefs() {
+    return (CharacterBodyData && CharacterBodyData.parts) || [];
+  }
+  function bodyParts(body) {
+    return body && body.parts && typeof body.parts === "object" ? body.parts : {};
+  }
+  function bodyStatus(part) {
+    return part && typeof part.status === "string" && part.status.trim()
+      ? part.status.trim()
+      : ((CharacterBodyData && CharacterBodyData.defaultStatus) || "intact");
+  }
+  function bodySummary(body) {
+    const parts = bodyParts(body), defs = bodyDefs();
+    const intact = defs.filter((def) => bodyStatus(parts[def.key]) === "intact").length;
+    return `${Object.keys(parts).length}/${defs.length} parts · ${intact} intact`;
+  }
+  function bodyTitle(body) {
+    const parts = bodyParts(body);
+    return bodyDefs().map((def) => `${def.label}: ${bodyStatus(parts[def.key])}`).join(" · ");
+  }
 
   function render() {
     const n = engine.now;
@@ -255,6 +306,12 @@
     if (!s) return;
     $("locSeed").textContent = `map seed ${s.seed}`;
 
+    const mapS = mapModule.status();
+    const landmarkIds = Object.entries(mapS.landmarks || {});
+    $("mapStatus").textContent = mapS.lastGeneratedAt
+      ? `Map: ${mapS.size} random location${mapS.size === 1 ? "" : "s"} + ${landmarkIds.length} fixed landmark${landmarkIds.length === 1 ? "" : "s"} (${landmarkIds.map(([kind, id]) => `${kind} ${id}`).join(", ")}) · generated ${mapS.lastGeneratedAt}.`
+      : "Map: not generated. Set the random count and press Generate map.";
+
     const current = s.currentId ? s.locations[s.currentId] : null;
     $("locVisitStatus").textContent = current
       ? `Current location: ${current.name}.`
@@ -273,14 +330,19 @@
     for (const loc of list) {
       const li = document.createElement("li"), box = document.createElement("div");
       const title = document.createElement("strong"); title.textContent = loc.name;
+      const routes = Array.isArray(loc.connections) ? loc.connections : [];
       const sm = document.createElement("small");
-      sm.textContent = `${loc.biome} · ${loc.weather} · hostility ${loc.hostility}/100 (${locationsModule.labelFor(loc.hostility)})${loc.id === s.currentId ? " · current" : ""}`;
+      sm.textContent = `${loc.kind ? loc.kind + " · " : ""}${loc.biome} · ${loc.weather} · hostility ${loc.hostility}/100 (${locationsModule.labelFor(loc.hostility)}) · ${routes.length} route${routes.length === 1 ? "" : "s"}${loc.id === s.currentId ? " · current" : ""}`;
       box.append(title, sm);
       li.append(box);
 
+      const reachable = !current || current.id === loc.id || !!locationsModule.routeBetween(current.id, loc.id);
       const visit = document.createElement("button");
       visit.textContent = "Visit";
-      visit.title = "Visit this location and roll its biome events";
+      visit.title = reachable
+        ? "Visit this location and roll its biome events"
+        : `No direct route from ${current.name}; travel there from a connected location.`;
+      visit.disabled = !reachable;
       visit.onclick = () => visitLocation(loc.id);
       li.append(visit);
 
@@ -310,6 +372,13 @@
   let visiting = false;
   async function visitLocation(id) {
     if (visiting) return;
+    const locState = engine.state.modules.locations;
+    const current = locState && locState.currentId ? locState.locations[locState.currentId] : null;
+    const target = locState && locState.locations ? locState.locations[id] : null;
+    if (current && current.id !== id && !locationsModule.routeBetween(current.id, id)) {
+      alert(`No direct route from ${current.name} to ${target ? target.name : id}. Travel along the routes from the Actions panel.`);
+      return;
+    }
     visiting = true;
     try {
       const result = await locationsModule.visit(id);
@@ -363,9 +432,8 @@
       ? "Travel in progress. Use the Travel panel to continue or cancel."
       : `Choose an action in ${s.locationName || "the area"}. Costs and outcomes use the main character's stats.`;
 
-    const locState = engine.state.modules.locations;
-    const otherLocations = Object.values(locState && locState.locations ? locState.locations : {})
-      .filter((loc) => loc.id !== s.locationId);
+    const routeList = s.locationId ? locationsModule.connectionsFor(s.locationId) : [];
+    const routesById = new Map(routeList.map((route) => [route.id, route]));
 
     for (const action of actions) {
       const li = document.createElement("li"), box = document.createElement("div");
@@ -385,17 +453,17 @@
       if (action.requiresDestination) {
         destination = document.createElement("select");
         destination.setAttribute("aria-label", `Destination for ${action.name}`);
-        if (!otherLocations.length) {
+        if (!routeList.length) {
           const option = document.createElement("option");
           option.value = "";
-          option.textContent = "No other location";
+          option.textContent = "No routes from here";
           destination.append(option);
           destination.disabled = true;
         } else {
-          for (const loc of otherLocations) {
+          for (const route of routeList) {
             const option = document.createElement("option");
-            option.value = loc.id;
-            option.textContent = `${loc.name} (${loc.biome})`;
+            option.value = route.id;
+            option.textContent = `${route.name} (${route.biome}) · ${route.distance} league${route.distance === 1 ? "" : "s"} · ${route.minutes} min`;
             destination.append(option);
           }
         }
@@ -405,8 +473,12 @@
       const b = document.createElement("button");
       b.textContent = "Choose";
       b.title = `Choose ${action.name}`;
-      b.disabled = !!(travelActive || (action.requiresDestination && !otherLocations.length));
-      b.onclick = () => chooseAction(action, destination ? destination.value : "");
+      b.disabled = !!(travelActive || (action.requiresDestination && !routeList.length));
+      b.onclick = () => chooseAction(
+        action,
+        destination ? destination.value : "",
+        destination ? routesById.get(destination.value) || null : null
+      );
 
       row.append(b);
       li.append(box, row);
@@ -417,12 +489,20 @@
   let choosingAction = false;
   let drivingTravel = false;
 
-  async function chooseAction(action, destinationId) {
+  async function chooseAction(action, destinationId, route = null) {
     if (choosingAction) return;
     if (engine.state.modules.travel && engine.state.modules.travel.active) return;
     choosingAction = true;
     try {
-      engine.fire({ type: "action:choose", data: { actionId: action.id, destinationId } });
+      engine.fire({
+        type: "action:choose",
+        data: {
+          actionId: action.id,
+          destinationId,
+          distance: route ? route.distance : undefined,
+          durationMinutes: route ? route.minutes : undefined
+        }
+      });
       engine.flush();
 
       const last = engine.state.modules.actions.lastAction;
@@ -462,6 +542,7 @@
       destinationId: destination.id,
       destinationName: destination.name,
       destinationBiomeKey: destination.biomeKey,
+      distance: last.travelDistance || 0,
       durationMinutes: last.timeMinutes
     });
 
@@ -532,16 +613,17 @@
     $("travelContinue").disabled = !active;
     $("travelCancel").disabled = !active;
     $("travelRoute").textContent = active
-      ? `— ${s.originName || "here"} to ${s.destinationName || "somewhere"}`
+      ? `— ${s.originName || "here"} to ${s.destinationName || "somewhere"}${s.distance ? ` · ${s.distance} league${s.distance === 1 ? "" : "s"}` : ""}`
       : "";
 
     const eventBox = $("travelEvent");
     if (active) {
       $("travelStatus").textContent = [
         `${s.elapsedMinutes}/${s.durationMinutes} min`,
+        s.distance ? `${s.distance} league${s.distance === 1 ? "" : "s"}` : "",
         s.paused ? "paused by an event" : "travelling",
         `${s.checks} check${s.checks === 1 ? "" : "s"}`
-      ].join(" · ");
+      ].filter(Boolean).join(" · ");
       if (s.paused && s.lastEvent) {
         eventBox.hidden = false;
         eventBox.textContent = `${s.lastEvent.name}: ${s.lastEvent.text} Continue when ready.`;
@@ -550,7 +632,7 @@
         eventBox.textContent = "";
       }
     } else if (s.lastCompleted) {
-      $("travelStatus").textContent = `Arrived at ${s.lastCompleted.destinationName} after ${s.lastCompleted.elapsedMinutes} minutes.`;
+      $("travelStatus").textContent = `Arrived at ${s.lastCompleted.destinationName} after ${s.lastCompleted.elapsedMinutes} minutes${s.lastCompleted.distance ? ` (${s.lastCompleted.distance} league${s.lastCompleted.distance === 1 ? "" : "s"})` : ""}.`;
       eventBox.hidden = true;
       eventBox.textContent = "";
     } else {
@@ -621,6 +703,30 @@
     }
   }
 
+  function renderMainBody() {
+    const c = engine.state.modules.mainCharacter.character;
+    const parts = bodyParts(c && c.body);
+    const grid = $("mcBody");
+    grid.innerHTML = "";
+    for (const def of bodyDefs()) {
+      const part = parts[def.key];
+      const cell = document.createElement("div");
+      cell.className = "stat";
+      cell.title = `${def.label} · ${def.side}${def.parent ? ` · attached to ${def.parent}` : " · root"}${def.vital ? " · vital" : ""}`;
+
+      const label = document.createElement("span");
+      label.className = "stat-label";
+      label.textContent = def.label;
+
+      const val = document.createElement("span");
+      val.className = "stat-value";
+      val.textContent = part ? bodyStatus(part) : "—";
+
+      cell.append(label, val);
+      grid.append(cell);
+    }
+  }
+
   function renderMainCharacter() {
     const s = engine.state.modules.mainCharacter;
     const c = s && s.character;
@@ -634,6 +740,7 @@
       ? `Saved: ${c.name} · ${c.age} · ${c.gender}${mainCharModule.folderConnected ? " · folder connected" : ""}`
       : "No main character saved yet.";
     renderMainStats();
+    renderMainBody();
   }
 
   $("mcImage").onchange = async (event) => {
@@ -696,16 +803,25 @@
 
   // ----- Equipment panel -----
   function renderEquipment() {
-    const s = engine.state.modules.equipment || { items: {}, equippedId: null };
+    const s = engine.state.modules.equipment || { items: {}, equippedByPart: {} };
     const items = Object.values(s.items || {});
-    const equipped = s.equippedId ? s.items[s.equippedId] : null;
-    const armor = equipped ? equipped.armor : 0;
+    const byPart = s.equippedByPart || {};
+    const bodyParts = (window.CharacterBodyData && Array.isArray(window.CharacterBodyData.parts)) ? window.CharacterBodyData.parts : [];
+    const partLabel = (key) => {
+      const def = bodyParts.find((part) => part.key === key);
+      return def ? def.label : key;
+    };
+    const labels = (parts) => (Array.isArray(parts) ? parts : []).map(partLabel);
+    const worn = items.filter((item) => Array.isArray(item.parts) && item.parts.some((part) => byPart[part] === item.id));
+    const armor = equipmentModule.totalArmor();
+    const covered = bodyParts.filter((part) => byPart[part.key]);
     const hasMain = !!(engine.state.modules.mainCharacter && engine.state.modules.mainCharacter.character);
 
     $("equipFind").disabled = !hasMain;
-    $("equipArmor").textContent = `armor ${armor}/100`;
-    $("equipStatus").textContent = equipped
-      ? `${equipped.name} equipped · armor ${armor}/100 · Defend blocks ${armor * 2} damage.`
+    $("equipClear").disabled = !hasMain || !worn.length;
+    $("equipArmor").textContent = `armor ${armor}/100 · ${covered.length}/${bodyParts.length} parts`;
+    $("equipStatus").textContent = worn.length
+      ? `Wearing ${worn.length} item${worn.length === 1 ? "" : "s"} · armor ${armor}/100 · covered: ${covered.map((part) => part.label).join(", ")} · Defend blocks ${armor * 2} damage.`
       : items.length
         ? "No armor equipped. Equip an item below."
         : "No armor yet. Find armor here, or scavenge while exploring.";
@@ -725,17 +841,19 @@
       const title = document.createElement("strong");
       title.textContent = item.name;
       const sm = document.createElement("small");
-      sm.textContent = `${item.slot} · armor ${item.armor} · ${item.equipped ? "equipped" : "in inventory"}`;
+      sm.textContent = `${labels(item.parts).join(", ") || "no parts"} · armor ${item.armor} · ${item.equipped ? "equipped" : "in inventory"}`;
       box.append(title, sm);
       li.append(box);
 
       const b = document.createElement("button");
       if (item.equipped) {
         b.textContent = "Unequip";
-        b.onclick = () => act("equipment:unequip");
+        b.onclick = () => act("equipment:unequip", { itemId: item.id });
       } else {
+        const conflicts = [...new Set((item.parts || []).map((part) => byPart[part]).filter((id) => id && id !== item.id))]
+          .map((id) => (s.items[id] || {}).name).filter(Boolean);
         b.textContent = "Equip";
-        b.title = `Equip ${item.name} (armor ${item.armor})`;
+        b.title = `Equip ${item.name} (${labels(item.parts).join(", ")}, armor ${item.armor})${conflicts.length ? ` — replaces ${conflicts.join(", ")}` : ""}`;
         b.disabled = !hasMain;
         b.onclick = () => act("equipment:equip", { itemId: item.id });
       }
@@ -751,6 +869,7 @@
     }
     act("equipment:add");
   };
+  $("equipClear").onclick = () => act("equipment:unequip");
 
   for (const name of ["equipment:added", "equipment:equipped", "equipment:unequipped"]) {
     engine.on(`event:${name}`, renderEquipment);
@@ -776,8 +895,63 @@
   $("play").onclick = () => engine.running ? engine.pause() : engine.run(300);
   $("size").onchange = (e) => engine.setTickMinutes(+e.target.value);
   $("new").onclick = () => engine.reset(Date.now());
-  $("save").onclick = () => { try { localStorage.setItem("save1", engine.serialize()); } catch (e) { alert("Saving is unavailable in this browser context."); } };
-  $("load").onclick = () => { try { const s = localStorage.getItem("save1"); s ? engine.load(s) : alert("No save found."); } catch (e) { alert("Loading is unavailable in this browser context."); } };
+
+  $("save").onclick = () => {
+    try {
+      localStorage.setItem("save1", engine.serialize());
+      $("saveStatus").textContent = `Quick save stored in this browser at ${engine.now.text}.`;
+    } catch (error) {
+      alert("Quick saving is unavailable in this browser context.");
+    }
+  };
+
+  $("load").onclick = () => {
+    try {
+      const saved = localStorage.getItem("save1");
+      if (!saved) { alert("No quick save found."); return; }
+      engine.load(saved);
+      $("saveStatus").textContent = `Loaded the browser quick save at ${engine.now.text}.`;
+    } catch (error) {
+      alert("Loading is unavailable in this browser context.");
+    }
+  };
+
+  function downloadSaveFile(save) {
+    const blob = new Blob([GameSave.stringify(save)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = GameSave.fileName(save);
+    document.body.append(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  $("saveFile").onclick = () => {
+    try {
+      const save = GameSave.capture(engine, buildEngine);
+      downloadSaveFile(save);
+      $("saveStatus").textContent = `Exported ${save.label} · ${save.changes.length} change${save.changes.length === 1 ? "" : "s"}.`;
+    } catch (error) {
+      alert("Could not export the save file: " + error.message);
+    }
+  };
+
+  $("loadFile").onclick = () => $("saveFileInput").click();
+  $("saveFileInput").onchange = async (event) => {
+    const file = event.target.files && event.target.files[0];
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const save = GameSave.restore(text, engine, { buildEngine });
+      $("saveStatus").textContent = `Imported ${save.label} from ${file.name} · ${save.changes.length} change${save.changes.length === 1 ? "" : "s"}.`;
+    } catch (error) {
+      alert("Could not import that save file: " + error.message);
+    } finally {
+      event.target.value = "";
+    }
+  };
 
   // Harness-only generator to verify the pipeline. Not part of the core.
   $("demo").onchange = (e) => {
@@ -859,12 +1033,20 @@
       for (const c of list) {
         const li = document.createElement("li"), box = document.createElement("div");
         box.textContent = `${c.name}, ${c.age}, ${c.gender}`;
-        const sm = document.createElement("small"); sm.textContent = c.traits.join(", "); box.append(sm);
+        const sm = document.createElement("small");
+        sm.textContent = `${c.personality ? c.personality.name + " · " : ""}${c.traits.join(", ")}`;
+        sm.title = behaviorLine(c.behavior);
+        box.append(sm);
         const st = document.createElement("small");
         st.className = "stats-line";
         st.textContent = statsLine(c.stats);
         st.title = statsTitle(c.stats);
         box.append(st);
+        const body = document.createElement("small");
+        body.className = "body-line";
+        body.textContent = `Body: ${bodySummary(c.body)}`;
+        body.title = bodyTitle(c.body);
+        box.append(body);
         li.append(box);
 
         const row = document.createElement("div");
@@ -895,6 +1077,9 @@
   renderChars();
 
   // ----- Locations panel -----
+  $("mapSize").value = String(MapData.defaultLocationCount);
+  $("mapSize").max = String(MapData.maxLocationCount);
+  $("generateMap").onclick = () => act("map:generate", { count: Number($("mapSize").value) });
   $("addLocation").onclick = () => act("location:add");
   $("addFiveLocations").onclick = () => act("location:add", { count: 5 });
   $("locDisk").onclick = async () => {

@@ -1,17 +1,27 @@
-/* Characters module v0.3 — NPC generator + Named NPC / Temporary Spawn storage. See ENGINE_SPEC.md.
+/* Characters module v0.5 — NPC generator + Named NPC / Temporary Spawn storage. See ENGINE_SPEC.md.
    Add an attribute: push one { key, generate } entry into ATTRIBUTES. Order matters; each gets the character built so far.
    Base stats are defined once in characters/statsData.js and shared with the mainCharacter module.
+   Every character owns a humanoid body built from characters/bodyData.js.
+   Personalities and behavior axes are data in characters/data.js; no rule reads behavior yet.
    The module also applies combat:damage to the NPC it names. */
 (function (global) {
   "use strict";
   const D = global.CharacterData;
   const SD = global.CharacterStatsData;
+  const B = global.CharacterBody;
   const pick = (rng, arr) => arr[Math.floor(rng.next() * arr.length)];
   const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
 
   if (!SD || !Array.isArray(SD.stats) || !SD.stats.length)
     throw new Error("characters/statsData.js must define CharacterStatsData.stats");
+  if (!B) throw new Error("characters/bodyData.js and characters/body.js must define CharacterBody");
+  if (!Array.isArray(D.personalities) || !D.personalities.length)
+    throw new Error("characters/data.js must define CharacterData.personalities");
+  if (!Array.isArray(D.behaviorAxes) || !D.behaviorAxes.length)
+    throw new Error("characters/data.js must define CharacterData.behaviorAxes");
   const STAT_DEFS = SD.stats;
+  const BEHAVIOR_AXES = D.behaviorAxes;
+  const PERSONALITIES = D.personalities;
 
   // Roll one NPC stat. Bell-curved skills stay near the middle of their range.
   const rollStat = (rng, def) => {
@@ -32,6 +42,43 @@
     return stats;
   };
 
+  const personalityById = (id) => PERSONALITIES.find((profile) => profile.id === id) || null;
+
+  // Nearest archetype by trait overlap. Used only for old saves without a personality id.
+  const closestPersonality = (traits) => {
+    const list = Array.isArray(traits) ? traits : [];
+    let best = PERSONALITIES[0], bestScore = -1;
+    for (const profile of PERSONALITIES) {
+      const score = profile.traits.reduce((total, trait) => total + (list.includes(trait) ? 1 : 0), 0);
+      if (score > bestScore) { best = profile; bestScore = score; }
+    }
+    return best;
+  };
+
+  // Clamp saved values; fill missing axes from the archetype, then from 50.
+  const makeBehavior = (profile, saved = null) => {
+    const behavior = {};
+    for (const def of BEHAVIOR_AXES) {
+      const savedRaw = saved ? saved[def.key] : undefined;
+      const savedNumber = Number(savedRaw);
+      const profileNumber = Number(profile && profile.behavior && profile.behavior[def.key]);
+      const value = savedRaw !== undefined && savedRaw !== null && Number.isFinite(savedNumber)
+        ? savedNumber
+        : Number.isFinite(profileNumber) ? profileNumber : 50;
+      behavior[def.key] = clamp(Math.round(value), 0, 100);
+    }
+    return behavior;
+  };
+
+  const normalisePersonality = (character) => {
+    let profile = personalityById(character.personality && character.personality.id);
+    if (!profile) profile = closestPersonality(character.traits);
+    if (!Array.isArray(character.traits) || !character.traits.length) character.traits = profile.traits.slice();
+    character.personality = { id: profile.id, name: profile.name };
+    character.behavior = makeBehavior(profile, character.behavior);
+    return character;
+  };
+
   // Fill missing/partial stats deterministically for old saves. New NPCs roll in generate().
   const normaliseStats = (character) => {
     const source = character.stats && typeof character.stats === "object" ? character.stats : {};
@@ -48,19 +95,30 @@
     return character;
   };
 
+  // Restore the ten-part body. Saved part statuses survive; missing parts are filled.
+  const normaliseBody = (character) => {
+    character.body = B.normalise(character.body);
+    return character;
+  };
+
   const ATTRIBUTES = [
     { key: "gender", generate: ({ rng }) => pick(rng, ["male", "female"]) },
     { key: "name",   generate: ({ rng, char }) => `${pick(rng, D.firstNames[char.gender])} ${pick(rng, D.surnames)}` },
     { key: "age",    generate: ({ rng }) => { const [a, b] = D.ageRange; return a + Math.floor(((rng.next() + rng.next()) / 2) * (b - a + 1)); } },
-    { key: "traits", generate: ({ rng }) => {
-        const chosen = [], pool = D.traits.slice();
-        while (chosen.length < 5 && pool.length) {
-          const t = pool.splice(Math.floor(rng.next() * pool.length), 1)[0];
-          if (!D.opposites.some(([x, y]) => (t === x && chosen.includes(y)) || (t === y && chosen.includes(x)))) chosen.push(t);
-        }
-        return chosen;
+    { key: "personality", generate: ({ rng }) => {
+        const profile = pick(rng, PERSONALITIES);
+        return { id: profile.id, name: profile.name };
     } },
-    { key: "stats",  generate: ({ rng }) => makeStats(rng) }
+    { key: "traits", generate: ({ char }) => {
+        const profile = personalityById(char.personality.id) || PERSONALITIES[0];
+        return profile.traits.slice();
+    } },
+    { key: "behavior", generate: ({ char }) => {
+        const profile = personalityById(char.personality.id) || PERSONALITIES[0];
+        return makeBehavior(profile);
+    } },
+    { key: "stats",  generate: ({ rng }) => makeStats(rng) },
+    { key: "body",   generate: () => B.create() }
   ];
 
   const FOLDERS = { named: "Named NPC", temp: "Temporary Spawn" };
@@ -70,8 +128,11 @@
     const S = () => engine.state.modules.characters;   // never cache: state is replaced on load
 
     const normaliseAll = () => {
-      for (const character of [...Object.values(S().named), ...Object.values(S().temp)])
+      for (const character of [...Object.values(S().named), ...Object.values(S().temp)]) {
         normaliseStats(character);
+        normalisePersonality(character);
+        normaliseBody(character);
+      }
     };
 
     // Optional mirror to real folders (Chrome/Edge). The game state is always the source of truth.
@@ -106,7 +167,7 @@
         const c = { id: "npc_" + String(s.nextId++).padStart(4, "0"), ...mod.generate(engine.rng), createdAtTick: n.tick, createdAt: n.text };
         s.temp[c.id] = c;
         if (disk) put(disk.temp, c);
-        engine.fire({ type: "character:spawned", text: `${c.name} (${c.age}, ${c.gender}) appears.`, data: { id: c.id } }, depth);
+        engine.fire({ type: "character:spawned", text: `${c.name} (${c.age}, ${c.gender}, ${c.personality.name}) appears.`, data: { id: c.id } }, depth);
         return c;
       },
 

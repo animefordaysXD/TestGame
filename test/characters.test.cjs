@@ -6,11 +6,51 @@ global.window = global;
 require("../engine.js");
 require("../characters/statsData.js");
 require("../characters/data.js");
+require("../characters/bodyData.js");
+require("../characters/body.js");
 require("../characters/characters.js");
 
 const STAT_DEFS = CharacterStatsData.stats;
 assert.equal(STAT_DEFS.length, 10, "nine base stats plus armor are defined");
 assert.equal(new Set(STAT_DEFS.map((def) => def.key)).size, 10, "stat keys are unique");
+
+const BODY_PARTS = CharacterBodyData.parts;
+assert.deepEqual(BODY_PARTS.map((part) => part.key), [
+  "head", "torso", "leftLeg", "rightLeg", "leftArm", "rightArm",
+  "leftHand", "rightHand", "leftFoot", "rightFoot"
+], "the body is divided into head, torso, paired legs, arms, hands and feet");
+assert.equal(new Set(BODY_PARTS.map((part) => part.key)).size, BODY_PARTS.length, "body part keys are unique");
+for (const part of BODY_PARTS) {
+  assert.ok(part.label, `${part.key} has a label`);
+  assert.ok(["head", "torso", "leg", "arm", "hand", "foot"].includes(part.kind), `${part.key} has a known kind`);
+  assert.ok(["center", "left", "right"].includes(part.side), `${part.key} has a known side`);
+  assert.ok(part.parent === null || BODY_PARTS.some((other) => other.key === part.parent),
+    `${part.key} parent is a body part or null`);
+}
+
+const PERSONALITIES = CharacterData.personalities;
+const AXES = CharacterData.behaviorAxes;
+assert.equal(PERSONALITIES.length, 30, "30 NPC personality archetypes are defined");
+assert.equal(new Set(PERSONALITIES.map((profile) => profile.id)).size, 30, "personality ids are unique");
+assert.equal(new Set(PERSONALITIES.map((profile) => profile.name)).size, 30, "personality names are unique");
+assert.ok(Array.isArray(AXES) && AXES.length > 0, "behavior axes are defined");
+
+for (const profile of PERSONALITIES) {
+  assert.equal(profile.traits.length, 5, `${profile.id} has five traits`);
+  assert.equal(new Set(profile.traits).size, 5, `${profile.id} traits are unique`);
+  for (const trait of profile.traits) {
+    assert.ok(CharacterData.traits.includes(trait), `${profile.id} trait ${trait} is in the trait pool`);
+  }
+  for (const [a, b] of CharacterData.opposites) {
+    assert.ok(!(profile.traits.includes(a) && profile.traits.includes(b)),
+      `${profile.id} does not combine ${a} and ${b}`);
+  }
+  for (const axis of AXES) {
+    const value = profile.behavior[axis.key];
+    assert.ok(Number.isInteger(value) && value >= 0 && value <= 100,
+      `${profile.id} ${axis.key} is an integer 0-100`);
+  }
+}
 
 function assertStats(stats, label) {
   assert.ok(stats && typeof stats === "object", `${label} has a stats block`);
@@ -22,6 +62,23 @@ function assertStats(stats, label) {
       assert.equal(stats[def.key + "Max"], def.max, `${label} ${def.key}Max matches the definition`);
       assert.ok(value <= stats[def.key + "Max"], `${label} ${def.key} does not exceed its max`);
     }
+  }
+}
+
+function assertBody(body, label, statuses = {}) {
+  assert.ok(body && body.parts && typeof body.parts === "object", `${label} has a body`);
+  assert.equal(Object.keys(body.parts).length, BODY_PARTS.length, `${label} has every body part`);
+  for (const def of BODY_PARTS) {
+    const part = body.parts[def.key];
+    assert.ok(part, `${label} has ${def.key}`);
+    assert.equal(part.key, def.key, `${label} ${def.key} key`);
+    assert.equal(part.label, def.label, `${label} ${def.key} label`);
+    assert.equal(part.kind, def.kind, `${label} ${def.key} kind`);
+    assert.equal(part.side, def.side, `${label} ${def.key} side`);
+    assert.equal(part.parent, def.parent, `${label} ${def.key} parent`);
+    assert.equal(part.vital, !!def.vital, `${label} ${def.key} vital flag`);
+    assert.equal(part.status, statuses[def.key] || CharacterBodyData.defaultStatus,
+      `${label} ${def.key} status`);
   }
 }
 
@@ -47,7 +104,17 @@ function makeEngine(seed) {
   assert.equal(spawnedEvents[0].data.id, first.id);
   assert.equal(first.traits.length, 5, "personality traits are still generated");
   assert.equal(new Set(first.traits).size, 5, "traits are unique");
+  const firstProfile = PERSONALITIES.find((profile) => profile.id === first.personality.id);
+  assert.ok(firstProfile, "the NPC stores a known personality id");
+  assert.equal(first.personality.name, firstProfile.name);
+  assert.deepEqual(first.traits, firstProfile.traits, "traits come from the personality archetype");
+  for (const axis of AXES) {
+    assert.ok(Number.isInteger(first.behavior[axis.key]), `NPC behavior has ${axis.key}`);
+    assert.ok(first.behavior[axis.key] >= 0 && first.behavior[axis.key] <= 100,
+      `NPC behavior ${axis.key} is in range`);
+  }
   assertStats(first.stats, "NPC");
+  assertBody(first.body, "NPC");
   assert.equal(first.stats.armor, 0, "armor starts at 0");
   assert.ok(JSON.stringify(first).length > 0, "NPC state is JSON-safe");
 
@@ -56,6 +123,7 @@ function makeEngine(seed) {
   assert.equal(second.id, "npc_0002");
   assert.equal(engine.state.modules.characters.nextId, 3);
   assertStats(second.stats, "second NPC");
+  assertBody(second.body, "second NPC");
 
   // Combat damage is applied to the NPC named by the event.
   const hpBeforeCombat = second.stats.hp;
@@ -96,6 +164,7 @@ function makeEngine(seed) {
   assert.equal(spawnedEvents.length, beforeReset + 1, "spawn subscription is not duplicated");
   assert.equal(afterReset.id, "npc_0001");
   assertStats(afterReset.stats, "NPC after reset");
+  assertBody(afterReset.body, "NPC after reset");
 
   // Legacy NPCs without stats get deterministic defaults on load.
   const legacySave = JSON.parse(engine.serialize());
@@ -103,14 +172,23 @@ function makeEngine(seed) {
   const legacyTemp = legacySave.modules.characters.temp;
   const oldNpc = { ...Object.values(legacyTemp)[0] };
   delete oldNpc.stats;
+  delete oldNpc.personality;
+  delete oldNpc.behavior;
+  delete oldNpc.body;
   legacyNamed.npc_9001 = oldNpc;
-  legacyTemp.npc_9002 = { ...oldNpc, id: "npc_9002", name: "Old Timer" };
+  legacyTemp.npc_9002 = {
+    ...oldNpc, id: "npc_9002", name: "Old Timer",
+    body: { parts: { head: { status: "scarred" } } }
+  };
   delete legacyTemp.npc_9002.stats;
+  delete legacyTemp.npc_9002.personality;
+  delete legacyTemp.npc_9002.behavior;
 
   const loaded = makeEngine(123);
   loaded.engine.load(legacySave);
   const migrated = loaded.engine.state.modules.characters.named.npc_9001;
   assertStats(migrated.stats, "legacy NPC");
+  assertBody(migrated.body, "legacy NPC");
   assert.equal(migrated.stats.hp, 100);
   assert.equal(migrated.stats.stamina, 100);
   assert.equal(migrated.stats.mana, 50);
@@ -118,6 +196,16 @@ function makeEngine(seed) {
   assert.equal(migrated.stats.war, 10);
   assert.equal(migrated.stats.intelligence, 10);
   assert.equal(migrated.traits.length, 5, "legacy personality traits survive");
+  assert.ok(migrated.personality && migrated.personality.id, "legacy NPCs get a personality archetype");
+  assert.ok(PERSONALITIES.some((profile) => profile.id === migrated.personality.id),
+    "the migrated personality id is known");
+  for (const axis of AXES) {
+    assert.ok(Number.isInteger(migrated.behavior[axis.key]), `legacy NPC behavior has ${axis.key}`);
+  }
+
+  const partialBody = loaded.engine.state.modules.characters.temp.npc_9002;
+  assertBody(partialBody.body, "partial-body NPC", { head: "scarred" });
+  assert.equal(partialBody.body.parts.head.status, "scarred", "a saved part status survives migration");
 
   for (const file of ["../characters/characters.js", "../characters/mainCharacter.js", "../characters/statsData.js"]) {
     const text = require("node:fs").readFileSync(require("node:path").join(__dirname, file), "utf8");

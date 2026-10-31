@@ -1,9 +1,10 @@
-/* Actions module v0.2 — five area actions loaded when a location is visited.
+/* Actions module v0.3 — five area actions loaded when a location is visited.
    It listens to location:visited and action:choose; it never calls the locations,
    mainCharacter or equipment modules directly. Resolution emits action:resolved with
    costs, outcome effects, time, an optional equipmentKey and an optional travelTo id;
-   those modules react on the bus. Content lives in actions/data.js.
-   See ENGINE_SPEC.md. */
+   those modules react on the bus. A travel request may carry route distance/minutes from
+   the UI, so a journey's time follows the travel graph instead of the action default.
+   Content lives in actions/data.js. See ENGINE_SPEC.md. */
 (function (global) {
   "use strict";
   const D = global.LocationActionsData;
@@ -110,7 +111,8 @@
         engine.on("event:action:choose", (e) => mod.choose(
           e.data && e.data.actionId,
           e.data && e.data.destinationId,
-          e.depth + 1
+          e.depth + 1,
+          e.data || {}
         ));
       },
 
@@ -147,7 +149,9 @@
       // Resolve one choice. Costs and outcome effects are announced, not applied here:
       // mainCharacter applies them, equipment grants an item, and the UI moves the party
       // for a travelTo action. The UI calls engine.flush() after the request.
-      choose(actionId, destinationId, depth = 0) {
+      // A travel request may include route `distance` and `durationMinutes`; those override
+      // the Travel action's fallback time so the graph owns the journey length.
+      choose(actionId, destinationId, depth = 0, request = {}) {
         const s = S();
         const action = s.actions.find((item) => item.id === actionId);
         if (!action) return null;
@@ -164,6 +168,8 @@
         }, depth);
 
         let travelTo = null;
+        let travelDistance = null;
+        let timeMinutes = action.timeMinutes;
         if (action.requiresDestination) {
           travelTo = typeof destinationId === "string" ? destinationId.trim() : "";
           if (!travelTo) {
@@ -179,6 +185,15 @@
               }
             }, depth);
             return null;
+          }
+
+          const requestedDistance = Math.round(Number(request.distance));
+          if (Number.isFinite(requestedDistance) && requestedDistance > 0) {
+            travelDistance = requestedDistance;
+          }
+          const requestedMinutes = Math.round(Number(request.durationMinutes));
+          if (Number.isFinite(requestedMinutes) && requestedMinutes > 0) {
+            timeMinutes = clamp(requestedMinutes, 1, 1440);
           }
         }
 
@@ -198,9 +213,10 @@
           outcomeName: outcome ? outcome.name : "",
           text,
           effects,
-          timeMinutes: action.timeMinutes,
+          timeMinutes,
           equipmentKey: outcome ? outcome.equipmentKey : "",
           travelTo,
+          travelDistance,
           locationId: s.locationId,
           locationName: s.locationName,
           atTick: engine.now.tick,
@@ -210,7 +226,7 @@
 
         engine.fire({
           type: "action:resolved",
-          text: `${text}${action.timeMinutes ? ` (${action.timeMinutes} min)` : ""}`,
+          text: `${text}${timeMinutes ? ` (${timeMinutes} min)` : ""}`,
           data: resolution
         }, depth);
         return { action, outcome, resolution };

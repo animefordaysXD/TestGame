@@ -1,7 +1,11 @@
-/* Locations module v0.2 — procedural map locations + biome events on visit.
-   Locations are generated only when the UI fires location:add (button-driven for now).
+/* Locations module v0.4 — procedural map locations, routes and biome events.
+   Locations are generated when the UI or map module fires location:add. A request may
+   carry a fixed definition (name/kind/biome/weather/hostility) used for guaranteed map
+   landmarks; normal requests still roll from the content tables.
    Add a generated field: push one { key, generate } entry into ATTRIBUTES. Order matters;
    each entry sees the location built so far. Content belongs in data.js.
+   Each new location is linked to 1-2 existing locations (bidirectional connections with an
+   abstract distance); route time is distance * travelGraph.minutesPerDistance.
    Biome events live in locations/events/<biomeKey>/events.json and are fetched lazily. */
 (function (global) {
   "use strict";
@@ -10,8 +14,21 @@
   if (!D || !Array.isArray(D.biomes) || !D.biomes.length)
     throw new Error("locations/data.js must define LocationData.biomes with at least one biome");
 
-  const pick = (rng, arr) => arr[Math.floor(rng.next() * arr.length)];
   const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
+
+  const GRAPH = D.travelGraph && typeof D.travelGraph === "object" ? D.travelGraph : {};
+  const distanceRange = Array.isArray(GRAPH.distanceRange) ? GRAPH.distanceRange : [1, 4];
+  const DISTANCE_MIN = Math.max(1, Math.min(Number(distanceRange[0]) || 1, Number(distanceRange[1]) || 4));
+  const DISTANCE_MAX = Math.max(DISTANCE_MIN, Number(distanceRange[1]) || 4);
+  const MINUTES_PER_DISTANCE = clamp(Math.round(Number(GRAPH.minutesPerDistance) || 15), 1, 1440);
+  const linkRange = Array.isArray(GRAPH.links) ? GRAPH.links : [1, 2];
+  const LINKS_MIN = Math.max(1, Math.min(Number(linkRange[0]) || 1, Number(linkRange[1]) || 2));
+  const LINKS_MAX = Math.max(LINKS_MIN, Number(linkRange[1]) || 2);
+  const LEGACY_DISTANCE = clamp(
+    Math.round(Number(GRAPH.legacyDistance) || DISTANCE_MIN), DISTANCE_MIN, DISTANCE_MAX
+  );
+
+  const pick = (rng, arr) => arr[Math.floor(rng.next() * arr.length)];
   const comboKey = (biomeName, weather) => `${biomeName}|${weather}`;
 
   function weatherList(biome) {
@@ -59,6 +76,57 @@
     return min + Math.floor(rng.next() * (max - min + 1));
   }
 
+  function uniqueName(base, usedNames) {
+    let name = base, n = 2;
+    while (usedNames.has(name)) name = `${base} (${n++})`;
+    return name;
+  }
+
+  // Fixed definitions come from the map module (guaranteed landmarks). They still go
+  // through spawn(), connections and location:added like any other location.
+  function normalizeFixed(raw) {
+    if (!raw || typeof raw !== "object") return null;
+    const kind = typeof raw.kind === "string" ? raw.kind.trim() : "";
+    const name = typeof raw.name === "string" ? raw.name.trim() : "";
+    if (!kind || !name) return null;
+    const biome = typeof raw.biome === "string" && raw.biome.trim() ? raw.biome.trim() : "Landmark";
+    const biomeKey = typeof raw.biomeKey === "string" && raw.biomeKey.trim() ? raw.biomeKey.trim() : "landmark";
+    const weather = typeof raw.weather === "string" && raw.weather.trim() ? raw.weather.trim() : "Clear";
+    const hostility = clamp(Math.round(Number(raw.hostility)) || 1, 1, 100);
+    return { kind, name, biome, biomeKey, weather, hostility };
+  }
+
+  // Route distance is an abstract whole number. Duration is derived from it, so content
+  // only edits the distance range and the minutes-per-distance ratio.
+  function normalizeDistance(value) {
+    const n = Math.round(Number(value));
+    return clamp(Number.isFinite(n) ? n : DISTANCE_MIN, DISTANCE_MIN, DISTANCE_MAX);
+  }
+
+  function travelMinutes(distance) {
+    const value = Math.max(1, Math.round(Number(distance) || 1));
+    return clamp(value * MINUTES_PER_DISTANCE, 1, 1440);
+  }
+
+  function rollDistance(rng) {
+    return DISTANCE_MIN + Math.floor(rng.next() * (DISTANCE_MAX - DISTANCE_MIN + 1));
+  }
+
+  function cleanConnections(raw) {
+    if (!Array.isArray(raw)) return [];
+    const seen = new Set();
+    const list = [];
+    for (const entry of raw) {
+      const id = typeof entry === "string"
+        ? entry.trim()
+        : (entry && typeof entry.id === "string" ? entry.id.trim() : "");
+      if (!/^loc_\d+$/.test(id) || seen.has(id)) continue;
+      seen.add(id);
+      list.push({ id, distance: normalizeDistance(entry && entry.distance) });
+    }
+    return list;
+  }
+
   const ATTRIBUTES = [
     { key: "biome", generate: ({ rng }) => weightedPick(rng, D.biomes) },
     { key: "name", generate: ({ rng, loc, usedNames }) => makeName(rng, loc.biome, usedNames) },
@@ -87,8 +155,10 @@
       name,
       biome,
       biomeKey: typeof data.biomeKey === "string" && data.biomeKey ? data.biomeKey : (knownBiome ? knownBiome.key : ""),
+      kind: typeof data.kind === "string" ? data.kind.trim() : "",
       weather,
       hostility: clamp(hostility, 1, 100),
+      connections: cleanConnections(data.connections),
       seed: seed >>> 0,
       createdAtTick: Number.isFinite(Number(data.createdAtTick)) ? Number(data.createdAtTick) : 0,
       createdAt: typeof data.createdAt === "string" ? data.createdAt : ""
@@ -135,6 +205,99 @@
     // Never cache the slice object: load() replaces the whole state.
     const S = () => engine.state.modules.locations;
 
+    // Routes are stored on both endpoints so either location can list them. Distances are
+    // symmetric; when a loaded save disagrees, the shorter route wins deterministically.
+    const addRoute = (fromId, toId, distance) => {
+      const s = S();
+      const from = s.locations[fromId], to = s.locations[toId];
+      if (!from || !to || fromId === toId) return null;
+      if (!Array.isArray(from.connections)) from.connections = [];
+      if (!Array.isArray(to.connections)) to.connections = [];
+
+      const forward = from.connections.find((route) => route.id === toId);
+      const backward = to.connections.find((route) => route.id === fromId);
+      const value = Math.min(
+        forward ? normalizeDistance(forward.distance) : normalizeDistance(distance),
+        backward ? normalizeDistance(backward.distance) : normalizeDistance(distance)
+      );
+
+      if (forward) forward.distance = value;
+      else from.connections.push({ id: toId, distance: value });
+      if (backward) backward.distance = value;
+      else to.connections.push({ id: fromId, distance: value });
+      return { fromId, toId, distance: value };
+    };
+
+    // Repair a loaded/imported graph: drop dangling and self routes, make edges mutual,
+    // de-duplicate and link isolated legacy locations into the charted map.
+    const normalizeGraph = () => {
+      const s = S();
+      if (!s.locations || typeof s.locations !== "object") s.locations = {};
+      const locations = Object.values(s.locations);
+      const byId = new Map(locations.map((loc) => [loc.id, loc]));
+
+      for (const loc of locations) {
+        loc.connections = cleanConnections(loc.connections)
+          .filter((route) => route.id !== loc.id && byId.has(route.id));
+      }
+
+      for (const loc of locations) {
+        for (const route of loc.connections) {
+          const other = byId.get(route.id);
+          if (!other) continue;
+          const reverse = other.connections.find((entry) => entry.id === loc.id);
+          if (!reverse) {
+            other.connections.push({ id: loc.id, distance: normalizeDistance(route.distance) });
+          } else {
+            const value = Math.min(normalizeDistance(route.distance), normalizeDistance(reverse.distance));
+            route.distance = value;
+            reverse.distance = value;
+          }
+        }
+      }
+
+      for (const loc of locations) {
+        const seen = new Set();
+        loc.connections = loc.connections.filter((route) => {
+          if (seen.has(route.id)) return false;
+          seen.add(route.id);
+          route.distance = normalizeDistance(route.distance);
+          return true;
+        });
+      }
+
+      if (locations.length > 1) {
+        const anchor = locations[0];
+        for (const loc of locations) {
+          if (loc.connections.length) continue;
+          const target = loc === anchor ? locations[1] : anchor;
+          addRoute(loc.id, target.id, LEGACY_DISTANCE);
+        }
+      }
+      return locations;
+    };
+
+    // A newly charted location links to the current area when there is one, plus enough
+    // random neighbours to reach the configured link count. This keeps the graph connected.
+    const connectNew = (loc) => {
+      const s = S();
+      const others = Object.values(s.locations).filter((other) => other.id !== loc.id);
+      if (!others.length) return [];
+
+      const count = LINKS_MIN + Math.floor(engine.rng.next() * (LINKS_MAX - LINKS_MIN + 1));
+      const targets = [];
+      const current = s.currentId ? s.locations[s.currentId] : null;
+      if (current && current.id !== loc.id) targets.push(current);
+
+      const pool = others.filter((other) => !targets.some((target) => target.id === other.id));
+      while (targets.length < Math.min(count, others.length) && pool.length) {
+        const index = Math.floor(engine.rng.next() * pool.length);
+        targets.push(pool.splice(index, 1)[0]);
+      }
+
+      return targets.map((target) => addRoute(loc.id, target.id, rollDistance(engine.rng)));
+    };
+
     // Disk writes are fire-and-forget from the game loop, but serialized here so files
     // cannot overtake each other. Tests and UI can await whenDiskIdle().
     const queueDisk = (task) => {
@@ -170,13 +333,19 @@
         if (!s.locations || typeof s.locations !== "object") s.locations = {};
         if (!Number.isFinite(s.nextId) || s.nextId < 1) s.nextId = 1;
         if (!s.currentId || !s.locations[s.currentId]) s.currentId = null;
+        normalizeGraph();
 
         if (bound) {   // init runs again on reset: subscribe only once
           if (disk) queueDisk(() => mod.writeSeed());
           return;
         }
         bound = true;
-        engine.on("event:location:add", (e) => mod.add(e.depth + 1, e.data && e.data.count));
+        engine.on("event:location:add", (e) => mod.add(
+          e.depth + 1,
+          e.data && e.data.count,
+          e.data && e.data.fixed,
+          e.data && e.data.batch
+        ));
       },
 
       onLoad(eng) {
@@ -190,6 +359,7 @@
         if (!s.locations || typeof s.locations !== "object") s.locations = {};
         if (!Number.isFinite(s.nextId) || s.nextId < 1) s.nextId = 1;
         if (!s.currentId || !s.locations[s.currentId]) s.currentId = null;
+        normalizeGraph();
         if (disk) queueDisk(() => mod.writeAll());
       },
 
@@ -225,40 +395,77 @@
         return candidate;
       },
 
-      add(depth = 0, count = 1) {
-        const n = Math.max(1, Math.min(100, Math.floor(Number(count) || 1)));
+      add(depth = 0, count = 1, fixed = null, batch = "") {
+        const fixedList = (Array.isArray(fixed) ? fixed : fixed ? [fixed] : [])
+          .map(normalizeFixed).filter(Boolean);
+        const requested = Number(count);
+        const n = count === undefined || count === null
+          ? 1
+          : Number.isFinite(requested) ? clamp(Math.floor(requested), 0, 100) : 1;
+
         const added = [];
-        for (let i = 0; i < n; i++) added.push(mod.spawn(depth));
+        for (const item of fixedList) added.push(mod.spawn(depth, item, batch));
+        for (let i = 0; i < n; i++) added.push(mod.spawn(depth, null, batch));
         return added;
       },
 
-      spawn(depth = 0) {
+      spawn(depth = 0, fixed = null, batch = "") {
         const s = S(), now = engine.now;
         const usedNames = new Set(Object.values(s.locations).map((l) => l.name));
-        const usedCombos = new Set(Object.values(s.locations).map((l) => comboKey(l.biome, l.weather)));
-        const raw = mod.generate(engine.rng, usedNames, usedCombos);
+        const fixedDef = normalizeFixed(fixed);
+        let loc;
 
-        const loc = {
-          id: "loc_" + String(s.nextId++).padStart(4, "0"),
-          name: raw.name,
-          biome: raw.biome.name,
-          biomeKey: raw.biome.key,
-          weather: raw.weather,
-          hostility: raw.hostility,
-          seed: s.seed,
-          createdAtTick: now.tick,
-          createdAt: now.text
-        };
+        if (fixedDef) {
+          loc = {
+            id: "loc_" + String(s.nextId++).padStart(4, "0"),
+            name: uniqueName(fixedDef.name, usedNames),
+            biome: fixedDef.biome,
+            biomeKey: fixedDef.biomeKey,
+            kind: fixedDef.kind,
+            weather: fixedDef.weather,
+            hostility: fixedDef.hostility,
+            connections: [],
+            seed: s.seed,
+            createdAtTick: now.tick,
+            createdAt: now.text
+          };
+        } else {
+          // Landmarks use a synthetic biome/weather pair; keep them out of the random
+          // biome/weather uniqueness pool.
+          const usedCombos = new Set(Object.values(s.locations)
+            .filter((l) => l.biomeKey !== "landmark")
+            .map((l) => comboKey(l.biome, l.weather)));
+          const raw = mod.generate(engine.rng, usedNames, usedCombos);
+          loc = {
+            id: "loc_" + String(s.nextId++).padStart(4, "0"),
+            name: raw.name,
+            biome: raw.biome.name,
+            biomeKey: raw.biome.key,
+            kind: "",
+            weather: raw.weather,
+            hostility: raw.hostility,
+            connections: [],
+            seed: s.seed,
+            createdAtTick: now.tick,
+            createdAt: now.text
+          };
+        }
 
         s.locations[loc.id] = loc;
+        connectNew(loc);
         if (disk) queueDisk(() => mod.writeLocation(loc));
 
         const label = mod.labelFor(loc.hostility);
-        engine.fire({
-          type: "location:added",
-          text: `${loc.name} is charted: ${loc.biome.toLowerCase()}, ${loc.weather.toLowerCase()}, hostility ${loc.hostility}/100 (${label}).`,
-          data: { id: loc.id }
-        }, depth);
+        const routes = loc.connections.length;
+        const routeText = routes ? `, ${routes} route${routes === 1 ? "" : "s"}` : "";
+        const text = loc.kind
+          ? `${loc.name} (${loc.kind}) is charted as a landmark: ${loc.biome.toLowerCase()}, ${loc.weather.toLowerCase()}, hostility ${loc.hostility}/100 (${label})${routeText}.`
+          : `${loc.name} is charted: ${loc.biome.toLowerCase()}, ${loc.weather.toLowerCase()}, hostility ${loc.hostility}/100 (${label})${routeText}.`;
+        const data = { id: loc.id };
+        if (loc.kind) data.kind = loc.kind;
+        if (batch) data.batch = batch;
+
+        engine.fire({ type: "location:added", text, data }, depth);
         return loc;
       },
 
@@ -268,6 +475,40 @@
           if (value <= band.max) return band.label;
         return `${value}/100`;
       },
+
+      // Routes from one location, enriched for the UI. Sorted by distance, then name.
+      connectionsFor(id) {
+        const s = S();
+        const loc = s.locations[id];
+        if (!loc) return [];
+        return (loc.connections || []).map((route) => {
+          const target = s.locations[route.id];
+          if (!target) return null;
+          const distance = normalizeDistance(route.distance);
+          return {
+            id: target.id,
+            name: target.name,
+            biome: target.biome,
+            biomeKey: target.biomeKey,
+            kind: target.kind || "",
+            weather: target.weather,
+            hostility: target.hostility,
+            distance,
+            minutes: travelMinutes(distance)
+          };
+        }).filter(Boolean).sort((a, b) => a.distance - b.distance || a.name.localeCompare(b.name));
+      },
+
+      routeBetween(fromId, toId) {
+        const from = S().locations[fromId];
+        if (!from || fromId === toId) return null;
+        const route = (from.connections || []).find((entry) => entry.id === toId);
+        if (!route) return null;
+        const distance = normalizeDistance(route.distance);
+        return { fromId, toId, distance, minutes: travelMinutes(distance) };
+      },
+
+      travelMinutes,
 
       toJSON(id) {
         const loc = S().locations[id];
@@ -443,6 +684,7 @@
             console.warn(`[locations] skipped ${name}:`, e.message);
           }
         }
+        normalizeGraph();
         return imported;
       },
 

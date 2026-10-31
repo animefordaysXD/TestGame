@@ -1,16 +1,18 @@
-/* Main character module v0.5 — one player character with a profile picture and base stats.
-   The UI calls save()/prepareImage()/connectFolder() directly; other modules read the
-   state slice or listen for mainCharacter:saved / mainCharacter:statChanged.
+/* Main character module v0.6 — one player character with a profile picture, base stats
+   and a humanoid body. The UI calls save()/prepareImage()/connectFolder() directly; other
+   modules read the state slice or listen for mainCharacter:saved / mainCharacter:statChanged.
    Location, action, travel and combat effects are applied here through the event bus. See ENGINE_SPEC.md. */
 (function (global) {
   "use strict";
   const D = global.MainCharacterData;
   const SD = global.CharacterStatsData;
+  const B = global.CharacterBody;
 
   if (!D || !Array.isArray(D.genders) || !D.genders.length)
     throw new Error("characters/mainCharacterData.js must define MainCharacterData.genders");
   if (!SD || !Array.isArray(SD.stats) || !SD.stats.length)
     throw new Error("characters/statsData.js must define CharacterStatsData.stats");
+  if (!B) throw new Error("characters/bodyData.js and characters/body.js must define CharacterBody");
 
   const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
   const STAT_DEFS = SD.stats;
@@ -115,6 +117,7 @@
       if (!character) return null;
 
       character.stats = normaliseStats(character.stats, character);
+      character.body = B.normalise(character.body);
       delete character.stamina;
       delete character.staminaMax;
       return character;
@@ -213,6 +216,7 @@
         const image = clean.image || previousCustom || defaultAvatar(clean.name);
         const imageSource = (clean.image || previousCustom) ? "upload" : "default";
         const stats = existing ? normaliseStats(existing.stats, existing) : defaultStats();
+        const body = B.normalise(existing ? existing.body : null);
 
         const character = {
           id: "main",
@@ -222,6 +226,7 @@
           image,
           imageSource,
           stats,
+          body,
           createdAtTick: existing ? existing.createdAtTick : now.tick,
           createdAt: existing ? existing.createdAt : now.text,
           updatedAtTick: now.tick,

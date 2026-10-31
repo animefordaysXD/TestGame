@@ -6,6 +6,8 @@ const assert = require("node:assert/strict");
 global.window = global;
 require("../engine.js");
 require("../characters/statsData.js");
+require("../characters/bodyData.js");
+require("../characters/body.js");
 require("../characters/data.js");
 require("../characters/characters.js");
 require("../locations/data.js");
@@ -52,6 +54,48 @@ for (const loc of firstFive) {
   assert.doesNotThrow(() => JSON.parse(JSON.stringify(loc)), "location is JSON-safe");
 }
 
+// Routes: every edge is mutual, distances are in range, and the charted map is connected.
+const [distanceMin, distanceMax] = LocationData.travelGraph.distanceRange;
+for (const loc of firstFive) {
+  assert.ok(Array.isArray(loc.connections), "locations carry a connections array");
+  for (const route of loc.connections) {
+    assert.notEqual(route.id, loc.id, "no self routes");
+    assert.ok(s.locations[route.id], "routes point at charted locations");
+    assert.ok(Number.isInteger(route.distance), "route distance is an integer");
+    assert.ok(route.distance >= distanceMin && route.distance <= distanceMax, "route distance is in range");
+    const reverse = s.locations[route.id].connections.find((entry) => entry.id === loc.id);
+    assert.ok(reverse, `route ${loc.id} -> ${route.id} is mutual`);
+    assert.equal(reverse.distance, route.distance, "mutual routes share one distance");
+  }
+}
+
+const reachable = new Set(["loc_0001"]);
+const queue = ["loc_0001"];
+while (queue.length) {
+  const id = queue.shift();
+  for (const route of s.locations[id].connections) {
+    if (reachable.has(route.id)) continue;
+    reachable.add(route.id);
+    queue.push(route.id);
+  }
+}
+assert.equal(reachable.size, firstFive.length, "all charted locations are reachable");
+
+assert.equal(locations.travelMinutes(3), 3 * LocationData.travelGraph.minutesPerDistance);
+assert.equal(locations.routeBetween("loc_0001", "loc_0001"), null, "no route to self");
+const firstRoute = locations.connectionsFor("loc_0001")[0];
+assert.ok(firstRoute, "the first location has a route");
+assert.equal(firstRoute.minutes, locations.travelMinutes(firstRoute.distance));
+assert.equal(locations.connectionsFor("loc_0001").length, s.locations.loc_0001.connections.length);
+assert.equal(locations.routeBetween("loc_0001", firstRoute.id).distance, firstRoute.distance);
+
+// A newly charted location prefers the current area, so exploring stays coherent.
+s.currentId = "loc_0001";
+act(engine, "location:add");
+const newest = Object.values(s.locations).find((loc) => loc.id === "loc_0006");
+assert.ok(newest, "one more location was charted");
+assert.ok(newest.connections.some((route) => route.id === "loc_0001"), "a new location links to the current area");
+
 const json = locations.toJSON("loc_0001");
 assert.equal(typeof json, "string");
 assert.deepEqual(JSON.parse(json), firstFive[0], "toJSON round-trips");
@@ -74,14 +118,36 @@ for (const biome of LocationData.biomes) {
   assert.ok(biome.hostility[0] >= 1 && biome.hostility[1] <= 100);
 }
 
-// Save/load keeps the generated map and its seed.
+// Save/load keeps the generated map, its routes and its seed.
 const saved = engine.serialize();
 const engine2 = new Engine({ seed: 1 });
 engine2.register(createLocationsModule());
 engine2.load(saved);
 const loaded = engine2.state.modules.locations;
-assert.equal(Object.keys(loaded.locations).length, 5, "load keeps all locations");
+assert.equal(Object.keys(loaded.locations).length, 6, "load keeps all locations");
 assert.equal(loaded.seed, s.seed, "load keeps the map seed");
+assert.equal(
+  loaded.locations.loc_0001.connections.length,
+  s.locations.loc_0001.connections.length,
+  "load keeps the travel graph"
+);
+
+// Old saves have no connections. Loading repairs the graph without touching the RNG.
+const legacyState = JSON.parse(saved);
+for (const loc of Object.values(legacyState.modules.locations.locations)) delete loc.connections;
+const engine3 = new Engine({ seed: 5 });
+engine3.register(createLocationsModule());
+engine3.load(legacyState);
+const legacy = engine3.state.modules.locations;
+assert.equal(Object.keys(legacy.locations).length, 6);
+for (const loc of Object.values(legacy.locations)) {
+  assert.ok(Array.isArray(loc.connections), "legacy locations gain a connections array");
+  assert.ok(loc.connections.length > 0, "legacy locations are linked into the graph");
+  for (const route of loc.connections) {
+    const reverse = legacy.locations[route.id].connections.find((entry) => entry.id === loc.id);
+    assert.ok(reverse, "legacy routes are made mutual");
+  }
+}
 
 // Reset creates a new seed and an empty map, and does not duplicate bus handlers.
 engine.reset(999);

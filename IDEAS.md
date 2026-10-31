@@ -1,6 +1,6 @@
 # Ideas
 
-**Last updated:** 2026-10-27
+**Last updated:** 2026-10-31
 
 A running list of Jo's ideas, kept short so both Jo and an AI session can read it in a minute.
 The **Summary** is the part to read first. Decisions graduate to `DESIGN.md`.
@@ -31,8 +31,13 @@ mercenary, a beast tamer or elven scout, or a highborn noble with court games, a
   dialogue and their own event checker (a cunning commoner may try to rob you).
 - **Saves** are JSON files holding the seed plus the changes.
 - **Open:** inheritance, death rules, how magic works.
-- **Built so far:** engine, stats, NPC tiers, equipment/armor, five area actions, timed travel,
-  combat v0.1, locations, biome events, save files.
+- **Built so far:** engine, stats, ten-part humanoid bodies for every character (status-only),
+  NPCs with 30 personality archetypes (traits plus 0-100 behavior profiles, data-only) and
+  `temp`/`named` buckets (three-tier model planned),
+  equipment/armor, five area actions, timed travel, a travel graph with route distances,
+  combat v0.1, locations, a placeholder map spawner with fixed tavern/castle/shack
+  landmarks, biome events, save files, and a form-based content editor
+  (`editor.html`; tooling, not a module).
 
 ## Vision and scope
 
@@ -62,10 +67,11 @@ mercenary, a beast tamer or elven scout, or a highborn noble with court games, a
 
 ## NPCs and personality
 
-- [Built] Procedural NPCs that disappear when the location changes unless notable, important or saved by the player; three tiers: ephemeral, notable, saved — Jo, 2026-10-25
+- [Decided] Procedural NPCs that disappear when the location changes unless notable, important or saved by the player; three tiers: ephemeral, notable, saved — Jo, 2026-10-25 (planned; current code approximates with `temp`/`named`)
 - [Decided] NPCs have different dialogue depending on their personality — Jo, 2026-10-25
 - [Decided] NPCs can affect the player according to their personality — Jo, 2026-10-25
 - [Decided] A separate NPC event checker, e.g. a cunning commoner trying to steal from you as a random event — Jo, 2026-10-25
+- [Built] 30 named NPC personality archetypes; each carries five traits and an eight-axis behavior profile (aggression, caution, sociability, honesty, generosity, loyalty, curiosity, ambition; 0-100). Generation, saves and the UI store/migrate/display it; no AI reads it yet — build, 2026-10-29
 - [Idea] Dialogue as data: lines tagged by intent and trait, chosen by how many traits match — PM, 2026-10-25
 - [Idea] Resolve NPC events with skill checks (e.g. Intrigue vs Intrigue); hostility scales the odds — PM, 2026-10-25
 - [Idea] Resolve encounters without combat (Diplomacy, Intrigue) so the stat spread matters — PM, 2026-10-25
@@ -73,6 +79,7 @@ mercenary, a beast tamer or elven scout, or a highborn noble with court games, a
 
 ## World and map
 
+- [Built] Placeholder procedural map spawner: a configurable batch of random locations plus a fixed tavern, castle and shack on every map; landmarks are ordinary linked locations with no interiors yet — build, 2026-10-29
 - [Decided] Fixed map with changing details per save, e.g. an elven-held church in one game and a dwarven forge in the same city in another — Jo, 2026-10-25
 - [Decided] The map is AI-generated — Jo, 2026-10-25
 - [Decided] The map is dynamically coloured, like CK3 — Jo, 2026-10-25
@@ -82,7 +89,7 @@ mercenary, a beast tamer or elven scout, or a highborn noble with court games, a
 - [Idea] Content derived from the seed uses a keyed RNG, never the shared stream — PM, 2026-10-25
 - [Idea] Simulation levels of detail: named characters are real, commoners are statistics, distant realms tick coarsely — PM, 2026-10-25
 - [Idea] Several map modes (political, culture, religion, terrain) — PM, 2026-10-25
-- [Open] Provinces as regions, or a node graph with roads? — PM, 2026-10-25
+- [Open] Drawn map: provinces as regions, or show the route graph with roads? — PM, 2026-10-25
 
 ## A changing world
 
@@ -93,7 +100,8 @@ mercenary, a beast tamer or elven scout, or a highborn noble with court games, a
 
 ## Saves and technology
 
-- [Built] Save as a JSON file with the seed and the changes, and load from it — Jo, 2026-10-25
+- [Built] Save as a JSON file with the seed and the changes, and load from it — Jo, 2026-10-25 (v1 seed + baseline + changes; export/import; legacy migration)
+- [Built] A form-based content editor for biome events, travel, body-part armor, actions and character names/traits/ages — build, 2026-10-31 (`editor.html`; strict-JSON round-trip, validation, folder saves or downloads; tooling, not a module)
 - [Idea] IndexedDB autosave plus the file as export and backup — PM, 2026-10-25
 - [Idea] Keep `engine.js` frozen; everything so far fits in modules — PM, 2026-10-25
 
@@ -103,10 +111,12 @@ mercenary, a beast tamer or elven scout, or a highborn noble with court games, a
 - [Idea] Give every action a time cost, a stamina cost and one real outcome — PM, 2026-10-25
 - [Built] Five area actions with time costs, stat costs and weighted outcomes — build, 2026-10-27
 - [Built] Timed travel: a journey runs in 5-minute checks, pauses on an interruption and resumes on Continue — build, 2026-10-27
-- [Idea] Travel graph so Travel becomes a real choice — PM, 2026-10-25
+- [Built] Travel graph so Travel becomes a real choice — locations own bidirectional routes with distances; Travel offers only direct routes and route distance sets journey time — build, 2026-10-27
+- [Idea] Multi-hop route planning: pick a far destination and let the UI chain direct routes, showing each leg — PM, 2026-10-27
 - [Idea] Write events for all 10 biomes (only tundra has one) — PM, 2026-10-25
 - [Idea] Equipment, so armor and Defend matter — PM, 2026-10-25
 - [Built] Body armor with an inventory, equip/unequip and an armor stat that feeds Defend — build, 2026-10-27
+- [Built] Body-part armor targeting: items cover one or more of the ten body parts, several pieces can be worn at once, overlapping items replace each other and total armor is summed — build, 2026-10-31
 - [Idea] A shared skill-check rule: roll plus skill against a difficulty — PM, 2026-10-25
 - [Idea] A slow survival clock (hunger, exposure) so Rest, Hunt and Scavenge are needs — PM, 2026-10-25
 
@@ -126,5 +136,12 @@ mercenary, a beast tamer or elven scout, or a highborn noble with court games, a
 
 ## Log
 
+- 2026-10-31: Equipment v0.2 built: armor items target the ten body parts, multi-part items are supported, several worn items sum their armor, and overlapping items replace each other whole. `equippedByPart` replaces `equippedId` with save migration; the editor uses a body-part multi-select. Summary refreshed.
+- 2026-10-31: Character bodies built for NPCs and the main character. Ten parts (head, torso, left/right legs, arms, hands, feet) share one data layout and normaliser; each part stores a status starting at `"intact"`. No injury, healing or combat rule reads the status yet; equipment targets the part keys. Summary refreshed.
+- 2026-10-31: Content editor added: `editor.html` edits biome events, travel, armor, actions and character names/traits/ages, validates before saving, and writes strict JSON with headers preserved. It is tooling, not a module. Fixed null help text and duplicate outcome ids during testing. Summary refreshed.
+- 2026-10-29: Placeholder procedural map spawner built: `map` requests one `location:add` batch with fixed tavern/castle/shack landmarks and a configurable random count, then reports `map:generated`. Locations gained fixed `kind` support. Summary refreshed.
+- 2026-10-29: NPC personality expanded to 30 named archetypes with five traits and an eight-axis 0-100 behavior profile. NPCs store `personality`, `traits` and `behavior`; legacy saves migrate deterministically. Behavior is data-only for now; future dialogue/events/combat AI should read it. Summary refreshed.
+- 2026-10-29: Save files built: v1 stores the seed, baseline options and changes; the page exports/imports JSON and migrates legacy full-state saves; unsafe paths are rejected. The NPC-tier line was corrected to "planned" because the code only has `temp`/`named`. Summary refreshed.
+- 2026-10-27: Travel graph built: locations own bidirectional routes with distances, Travel offers only direct routes, and route distance sets journey time. Summary refreshed; multi-hop route planning added as a PM idea.
 - 2026-10-27: Design docs brought into the repository; Summary refreshed to list equipment, area actions and timed travel as built.
 - 2026-10-25: File created. Filled with everything from the first design conversation, the NPC tier split and the save-file decision.

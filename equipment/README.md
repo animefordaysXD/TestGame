@@ -1,14 +1,15 @@
 # Equipment
 
-The `equipment` module owns armor items for the main character. It is v0.1 and has one
-body slot; NPCs do not equip yet.
+The `equipment` module owns armor items for the main character. It is v0.2 and targets
+the ten body parts from `characters/bodyData.js`; NPCs do not equip yet.
 
 ## Files
 
-- `equipment/data.js` — the armor catalogue (`key`, `name`, `slot`, `armor`, `weight`),
+- `equipment/data.js` — the armor catalogue (`key`, `name`, `parts`, `armor`, `weight`),
   `maxArmor` and the `autoEquip` flag. Edit this file to add or tune armor.
-- `equipment/equipment.js` — inventory, equip/unequip flow and event emission.
-- `test/equipment.test.cjs` — Node tests, including a real combat/Defend check.
+- `equipment/equipment.js` — inventory, per-part equip/unequip flow and event emission.
+- `test/equipment.test.cjs` — Node tests, including overlap replacement, summed armor,
+  save migration and a real combat/Defend check.
 
 ## State slice
 
@@ -20,19 +21,32 @@ equipment: {
       id: "eq_0001",
       key: "leather_cuirass",
       name: "Leather Cuirass",
-      slot: "body",
+      parts: ["torso"],
       armor: 3,
       equipped: true,
       acquiredAtTick: 0,
       acquiredAt: "1000-01-01 06:00"
     }
   },
-  equippedId: "eq_0001"          // one body item, or null
+  equippedByPart: {              // body part key -> item id
+    torso: "eq_0001"
+  }
 }
 ```
 
-The first item acquired is equipped automatically when nothing is worn (`autoEquip`).
-Only one item can be equipped; equipping another item swaps it.
+Every item targets one or more body parts. An item is worn as one piece, so two worn
+items may not share a part. Equipping an item replaces every item that overlaps one of
+its parts; the replaced items stay in the inventory. Parts with no item are uncovered.
+
+`equipped` is a convenience flag: it is true when at least one part maps to that item.
+`equippedByPart` is the source of truth for what is worn.
+
+## Armor
+
+Total armor is the sum of the armor values of all distinct worn items, clamped to
+`maxArmor`. The first item acquired is equipped automatically when every part it covers
+is free (`autoEquip`); otherwise it stays in the inventory. A later free item can join
+the current loadout.
 
 ## Events
 
@@ -40,13 +54,15 @@ Only one item can be equipped; equipping another item swaps it.
 |---|---|---|
 | `equipment:add` | request (UI, test) | `{ key? }` — omit the key to pick randomly with `engine.rng` |
 | `equipment:equip` | request (UI) | `{ itemId }` |
-| `equipment:unequip` | request (UI) | none |
-| `equipment:added` | module | `{ itemId, key, name, slot, armor, equipped, source }` |
-| `equipment:equipped` | module | `{ itemId, key, name, slot, armor, totalArmor, previousItemId }` |
-| `equipment:unequipped` | module | `{ itemId, key, name, armor, totalArmor: 0 }` |
+| `equipment:unequip` | request (UI) | `{ itemId? }` — omit the id to clear every worn item |
+| `equipment:added` | module | `{ itemId, key, name, parts, armor, equipped, source }` |
+| `equipment:equipped` | module | `{ itemId, key, name, parts, armor, totalArmor, replacedItemIds }` |
+| `equipment:unequipped` | module | `{ itemId, itemIds, items, key, name, parts, armor, totalArmor }` |
 
-The module also listens to `action:resolved`: when an outcome names an `equipmentKey`,
-the item is added (and auto-equipped if free) without the actions module calling it.
+For a multi-item unequip, `itemId` and `key` are null, `name` is `"<n> items"`, and
+`items` lists what was removed. The module also listens to `action:resolved`: when an
+outcome names an `equipmentKey`, the item is added (and auto-equipped when its parts are
+free) without the actions module calling it.
 
 ## Armor bridge
 
@@ -62,16 +78,24 @@ incoming damage = max(0, damage - armor * CombatData.defend.armorMultiplier)
 
 With the default multiplier of 2, 3 armor blocks 6 damage. Keep catalogue values small.
 
+## Save migration
+
+v0.2 still loads a v0.1 save. The old single `equippedId` is removed and its item is
+assigned to every part it covers; legacy items that only have `slot: "body"` take their
+definition's `parts` from `equipment/data.js`. Conflicting flagged items are assigned in
+id order, and the rest stay in the inventory.
+
 ## UI
 
-The **Equipment** panel shows the inventory, the equipped item and the current armor.
-**Find armor** adds a random catalogue item (it needs a saved main character). Each item
-has **Equip** or **Unequip**.
+The **Equipment** panel shows total armor, covered parts, every inventory item's body
+parts and per-item **Equip** / **Unequip** buttons. **Find armor** adds a random catalogue
+item (it needs a saved main character). **Unequip all** clears the loadout.
 
 ## Limitations
 
 - Main character only; NPCs keep armor 0.
-- One body slot; no weapons, jewellery or item durability.
+- Armor only; no weapons, jewellery or item durability.
+- Items are atomic: an overlapping item is removed whole rather than partially.
 - Armor is mirrored into the main character present when the item is equipped. Save the
   main character first (the UI disables **Find armor** until you do).
 - Location events cannot change armor; only equipment does.
