@@ -11,8 +11,8 @@ require("../characters/body.js");
 require("../characters/characters.js");
 
 const STAT_DEFS = CharacterStatsData.stats;
-assert.equal(STAT_DEFS.length, 10, "nine base stats plus armor are defined");
-assert.equal(new Set(STAT_DEFS.map((def) => def.key)).size, 10, "stat keys are unique");
+assert.equal(STAT_DEFS.length, 11, "ten base stats plus armor are defined");
+assert.equal(new Set(STAT_DEFS.map((def) => def.key)).size, 11, "stat keys are unique");
 
 const BODY_PARTS = CharacterBodyData.parts;
 assert.deepEqual(BODY_PARTS.map((part) => part.key), [

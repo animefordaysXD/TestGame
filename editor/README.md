@@ -1,9 +1,9 @@
 # Content editor
 
 `editor.html` is a form-based editor for the game's content: biome events, travel events and
-tuning, armor items, area actions, and NPC names and traits. It replaces hand-editing data
-files and asking an AI to write each entry. It is a tool, not a game module: it owns no state
-and the game does not load it.
+tuning, equipment items (armor and weapons) and rarity tiers, area actions, and NPC names and
+traits. It replaces hand-editing data files and asking an AI to write each entry. It is a tool,
+not a game module: it owns no state and the game does not load it.
 
 ## Using it
 

@@ -16,13 +16,15 @@ require("../characters/mainCharacter.js");
 require("../combat/data.js");
 require("../combat/combat.js");
 
-const snap = (character) => ({
+const snap = (character, weapon = null) => ({
   id: character.id,
   name: character.name,
   hp: character.stats.hp,
   hpMax: character.stats.hpMax,
   personalCombat: character.stats.personalCombat,
-  armor: character.stats.armor
+  strength: character.stats.strength ?? 10,
+  armor: character.stats.armor,
+  weapon
 });
 
 function makeWorld(seed) {
@@ -48,23 +50,25 @@ function makeWorld(seed) {
 
 function prepare(world, options = {}) {
   const {
-    playerHp = 100, playerArmor = 0, playerPc = 10,
-    enemyHp = 100, enemyArmor = 0, enemyPc = 8
+    playerHp = 100, playerArmor = 0, playerPc = 10, playerStrength = 10, playerWeapon = null,
+    enemyHp = 100, enemyArmor = 0, enemyPc = 8, enemyStrength = 10, enemyWeapon = null
   } = options;
 
   world.player.stats.hp = playerHp;
   world.player.stats.hpMax = 100;
   world.player.stats.personalCombat = playerPc;
+  world.player.stats.strength = playerStrength;
   world.player.stats.armor = playerArmor;
 
   world.npc.stats.hp = enemyHp;
   world.npc.stats.hpMax = 100;
   world.npc.stats.personalCombat = enemyPc;
+  world.npc.stats.strength = enemyStrength;
   world.npc.stats.armor = enemyArmor;
 
   world.engine.fire({
     type: "combat:start",
-    data: { player: snap(world.player), enemy: snap(world.npc) }
+    data: { player: snap(world.player, playerWeapon), enemy: snap(world.npc, enemyWeapon) }
   });
   world.engine.flush();
 }
@@ -123,7 +127,68 @@ function state(world) { return world.engine.state.modules.combat; }
   assert.equal(armoredHit.data.reduction, 6);
   assert.equal(armoredHit.data.defended, true);
 
-  // Player-first lethal hit ends combat before the enemy can retaliate.
+  // Armor reduces a normal hit too, not only Defend.
+  const plated = makeWorld(1010);
+  prepare(plated, { enemyArmor: 5 });
+  plated.engine.fire({ type: "combat:action", data: { action: "attack" } });
+  plated.engine.flush();
+  assert.equal(plated.npc.stats.hp, 95, "10 damage - 5 armor on a normal hit");
+  const platedHit = plated.events.filter((event) => event.type === "combat:damage")
+    .find((event) => event.data.targetId === plated.npc.id);
+  assert.equal(platedHit.data.amount, 5);
+  assert.equal(platedHit.data.effectiveArmor, 5);
+  assert.equal(platedHit.data.reduction, 5);
+
+  // A usable weapon adds damage and its armor piercing cuts the target's armor.
+  const longsword = {
+    key: "tempered_longsword", name: "Tempered Longsword", rarity: "uncommon",
+    damage: 6, strength: 6, armorPiercing: 16
+  };
+  const armed = makeWorld(1011);
+  prepare(armed, { enemyArmor: 4, playerWeapon: longsword });
+  armed.engine.fire({ type: "combat:action", data: { action: "attack" } });
+  armed.engine.flush();
+  assert.equal(armed.npc.stats.hp, 87, "10 + 6 damage; 4 armor with 16% piercing rounds to 3");
+  const armedHit = armed.events.filter((event) => event.type === "combat:damage")
+    .find((event) => event.data.targetId === armed.npc.id);
+  assert.equal(armedHit.data.base, 16);
+  assert.equal(armedHit.data.weaponDamage, 6);
+  assert.equal(armedHit.data.armorPiercing, 16);
+  assert.equal(armedHit.data.effectiveArmor, 3);
+  assert.equal(armedHit.data.reduction, 3);
+  assert.equal(armedHit.data.tooHeavy, false);
+  assert.equal(armedHit.data.weapon.key, "tempered_longsword");
+  assert.match(armedHit.text, /Tempered Longsword/);
+
+  // Below the Strength requirement the weapon is too heavy: no damage, no piercing.
+  const heavy = makeWorld(1012);
+  prepare(heavy, { playerStrength: 5, enemyArmor: 4, playerWeapon: longsword });
+  heavy.engine.fire({ type: "combat:action", data: { action: "attack" } });
+  heavy.engine.flush();
+  assert.equal(heavy.npc.stats.hp, 94, "a too-heavy weapon adds nothing; 4 armor still blocks");
+  const heavyHit = heavy.events.filter((event) => event.type === "combat:damage")
+    .find((event) => event.data.targetId === heavy.npc.id);
+  assert.equal(heavyHit.data.weapon, null);
+  assert.equal(heavyHit.data.weaponDamage, 0);
+  assert.equal(heavyHit.data.armorPiercing, 0);
+  assert.equal(heavyHit.data.tooHeavy, true);
+  assert.match(heavyHit.text, /too heavy/);
+
+  // The enemy's weapon works the same way on the counterattack.
+  const enemyArmed = makeWorld(1013);
+  prepare(enemyArmed, {
+    enemyPc: 8, enemyStrength: 10,
+    enemyWeapon: { key: "iron_shortsword", name: "Iron Shortsword", rarity: "common", damage: 3, strength: 4, armorPiercing: 6 }
+  });
+  enemyArmed.engine.fire({ type: "combat:action", data: { action: "attack" } });
+  enemyArmed.engine.flush();
+  assert.equal(enemyArmed.player.stats.hp, 89, "8 + 3 enemy damage");
+  const counter = enemyArmed.events.filter((event) => event.type === "combat:damage")
+    .find((event) => event.data.targetId === "main");
+  assert.equal(counter.data.weapon.key, "iron_shortsword");
+  assert.equal(counter.data.weaponDamage, 3);
+
+
   const lethal = makeWorld(1003);
   prepare(lethal, { enemyHp: 10, enemyPc: 8 });
   const playerHpBeforeKill = lethal.player.stats.hp;

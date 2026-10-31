@@ -214,7 +214,7 @@
         locations: { seed: 0, createdAt: "", nextId: 1, locations: {}, currentId: null },
         map: { seed: 0, size: 0, total: 0, lastGeneratedTick: null, lastGeneratedAt: "", landmarks: {} },
         actions: { locationId: null, locationName: "", biomeKey: "", actions: [], lastAction: null },
-        equipment: { nextId: 1, items: {}, equippedByPart: {} },
+        equipment: { nextId: 1, items: {}, equippedByPart: {}, equippedWeaponId: null },
         travel: {
           active: false, paused: false,
           originId: null, originName: "",
@@ -379,7 +379,7 @@
     const chars = node("characters", `v0.5 · next id ${charState.nextId ?? "—"}`, "module", [
       namedNode,
       tempNode,
-      node("Rules", `${(CD.traits || []).length} traits · ${(CD.opposites || []).length} opposite pairs · ${(CD.personalities || []).length} personalities · ${(CD.behaviorAxes || []).length} behavior axes (0-100, data-only) · 5 traits per NPC · ${ST.stats.length} stats (9 base + armor)`, "content")
+      node("Rules", `${(CD.traits || []).length} traits · ${(CD.opposites || []).length} opposite pairs · ${(CD.personalities || []).length} personalities · ${(CD.behaviorAxes || []).length} behavior axes (0-100, data-only) · 5 traits per NPC · ${ST.stats.length} stats (10 base + armor)`, "content")
     ], "built");
 
     /* Main character ------------------------------------------------------ */
@@ -413,25 +413,33 @@
     const gearItems = Object.values(equipState.items || {}).sort((a, b) => String(a.id).localeCompare(String(b.id)));
     const gearByPart = equipState.equippedByPart || {};
     const partName = (key) => (bodyDefs().find((def) => def.key === key) || {}).label || key;
-    const gearWorn = gearItems.filter((item) => (Array.isArray(item.parts) ? item.parts : []).some((part) => gearByPart[part] === item.id));
-    const gearArmor = Math.min(Number(EQD.maxArmor) || 100, gearWorn.reduce((sum, item) => sum + (Number(item.armor) || 0), 0));
+    const gearArmorWorn = gearItems.filter((item) => item.kind !== "weapon" && (Array.isArray(item.parts) ? item.parts : []).some((part) => gearByPart[part] === item.id));
+    const gearWeapon = equipState.equippedWeaponId ? (equipState.items || {})[equipState.equippedWeaponId] : null;
+    const gearWorn = gearWeapon ? [...gearArmorWorn, gearWeapon] : gearArmorWorn;
+    const gearArmor = Math.min(Number(EQD.maxArmor) || 100, gearArmorWorn.reduce((sum, item) => sum + (Number(item.armor) || 0), 0));
     const coveredParts = bodyDefs().filter((def) => gearByPart[def.key]);
-    const equipmentBranch = node("equipment", `v0.2 · ${gearItems.length} item(s) · armor ${gearArmor}/100 · ${coveredParts.length}/${bodyDefs().length} parts`, "module", [
+    const gearStat = (item) => item.kind === "weapon"
+      ? `weapon · damage ${item.damage ?? 0} · Strength ${item.strength ?? 1} · ${item.armorPiercing ?? 0}% piercing`
+      : `${(Array.isArray(item.parts) ? item.parts : []).map(partName).join(", ") || "no parts"} · armor ${item.armor ?? 0}`;
+    const equipmentBranch = node("equipment", `v0.3 · ${gearItems.length} item(s) · armor ${gearArmor}/100 · ${coveredParts.length}/${bodyDefs().length} parts`, "module", [
       node("Worn", gearWorn.length
-        ? `${gearWorn.length} item(s) · armor ${gearArmor} · Defend blocks ${gearArmor * 2}`
+        ? `${gearWorn.length} item(s) · armor ${gearArmor} · ${gearWeapon ? `weapon ${gearWeapon.name}` : "no weapon"}`
         : "nothing equipped", gearWorn.length ? "state" : "warn"),
       group(`Body coverage (${coveredParts.length}/${bodyDefs().length})`, coveredParts.length ? "one worn item per part" : "no parts covered",
         coveredParts.map((def) => {
           const item = (equipState.items || {})[gearByPart[def.key]] || {};
           return node(def.label, `${item.name || "?"} · armor ${item.armor ?? 0}`, "state", [], "equipped");
         }), "state"),
-      group(`Items (${gearItems.length})`, gearItems.length ? "main character only" : "find or scavenge armor",
+      node("Weapon slot", gearWeapon
+        ? `${gearWeapon.name} · ${gearWeapon.rarity || "common"} · damage ${gearWeapon.damage} · needs Strength ${gearWeapon.strength} · ${gearWeapon.armorPiercing}% piercing`
+        : "empty", gearWeapon ? "state" : "warn"),
+      group(`Items (${gearItems.length})`, gearItems.length ? "main character only" : "find or scavenge equipment",
         gearItems.map((item) => node(
           item.name || item.id,
-          `${item.id} · ${(Array.isArray(item.parts) ? item.parts : []).map(partName).join(", ") || "no parts"} · armor ${item.armor} · ${item.equipped ? "equipped" : "in inventory"}`,
+          `${item.id} · ${item.kind || "armor"} · ${item.rarity || "common"} · ${gearStat(item)} · ${item.equipped ? "equipped" : "in inventory"}`,
           "state", [], item.equipped ? "equipped" : ""
         )), "state"),
-      node("Rules", "ten body parts · overlapping items replace each other · totalArmor is the sum of worn armor · equipment:equipped mirrors totalArmor into main stats · NPCs cannot equip yet", "content")
+      node("Rules", `${(EQD.rarities || []).length} rarity ranks · armor covers body parts · one weapon slot · weapons need Strength and add damage + armor piercing · totalArmor is the sum of worn armor · equipment:equipped mirrors totalArmor into main stats · NPCs cannot equip yet`, "content")
     ], gearItems.length ? "built" : "empty");
 
     /* Combat -------------------------------------------------------------- */
@@ -440,18 +448,18 @@
     const combatEnemy = combatState.enemy || null;
     const combatLog = Array.isArray(combatState.log) ? combatState.log : [];
     const combatLine = (c) => c
-      ? `${c.name} · HP ${c.hp}/${c.hpMax} · PC ${c.personalCombat} · armor ${c.armor ?? 0}`
+      ? `${c.name} · HP ${c.hp}/${c.hpMax} · PC ${c.personalCombat} · Str ${c.strength ?? "—"} · armor ${c.armor ?? 0}${c.weapon ? ` · ${c.weapon.name} (dmg ${c.weapon.damage}, ${c.weapon.armorPiercing}% pierce)` : ""}`
       : "—";
     const combatSummary = combatState.active
       ? `round ${combatState.round} · ${combatState.turn || "—"} turn`
       : combatState.winnerName
         ? `ended · ${combatState.winnerName} won in ${combatState.round}`
         : "no combat";
-    const combatBranch = node("combat", `v0.1 · ${combatSummary}`, "module", [
+    const combatBranch = node("combat", `v0.2 · ${combatSummary}`, "module", [
       node("Player", combatLine(combatPlayer), "state"),
       node("Enemy", combatLine(combatEnemy), "state"),
       node("Turn", combatSummary, "state"),
-      node("Rules", "player first · attack = Personal Combat · defend = max(0, damage - armor × 2) · armor comes from equipment · enemy always attacks", "content"),
+      node("Rules", "player first · attack = Personal Combat + weapon damage (the weapon needs enough Strength) · armor reduces every hit and Defend doubles it · weapon armor piercing shrinks effective armor · enemy always attacks", "content"),
       group(`Log (${combatLog.length})`, combatLog.length ? "most recent entries" : "empty",
         combatLog.slice(-6).map((line) => node(line, "", "state")), "state")
     ], combatState.active || combatState.winnerName ? "built" : "empty");
@@ -570,7 +578,7 @@
       node("locations/data.js", `${biomes.length} biomes · ${weatherTotal} weather entries · ${(LOC.namePrefixes || []).length} prefixes · ${(LOC.nameSuffixes || []).length} suffixes · ${(LOC.namePatterns || []).length} name patterns · ${(LOC.travelGraph && LOC.travelGraph.minutesPerDistance) || 15} min per league`, "content"),
       node("actions/data.js", `${defaultActions.length} default actions · ${overrides.length} biome override(s) · ${defaultActions.reduce((sum, action) => sum + ((action.outcomes || []).length), 0)} outcomes`, "content"),
       node("travel/data.js", `${(TRD.events || []).length} travel events · ${TRD.chancePercent ?? 0}% per check · every ${TRD.minutesPerCheck ?? 5} min · ${Object.keys(TRD.chanceByBiome || {}).length} biome override(s)`, "content"),
-      node("equipment/data.js", `${(EQD.items || []).length} armor items · ${bodyDefs().length} body parts · max armor ${EQD.maxArmor ?? 100} · auto-equip ${EQD.autoEquip === false ? "off" : "on"}`, "content"),
+      node("equipment/data.js", `${(EQD.items || []).filter((i) => i.kind !== "weapon").length} armor + ${(EQD.items || []).filter((i) => i.kind === "weapon").length} weapons · ${(EQD.rarities || []).length} rarities · ${bodyDefs().length} body parts · max armor ${EQD.maxArmor ?? 100} · auto-equip ${EQD.autoEquip === false ? "off" : "on"}`, "content"),
       node("combat/data.js", `${(CBD.actions || []).length} actions · attack ${(CBD.attack && CBD.attack.stat) || "personalCombat"} × ${(CBD.attack && CBD.attack.multiplier) || 1} · defend armor × ${(CBD.defend && CBD.defend.armorMultiplier) || 2}`, "content"),
       node("editor/schemas.js", "content-editor model · 5 editable types · strict JSON round-trip · no state or events", "content"),
       group(`Biome events (${biomes.length} files)`, eventsSummary, biomeNodes, "content"),
@@ -591,9 +599,10 @@
         node("travel:advance", "UI → travel.advance() · one 5-minute check", "event"),
         node("travel:continue", "UI → travel.resume() · clears the event pause", "event"),
         node("travel:cancel", "UI → travel.cancel() · abandons the journey", "event"),
-        node("equipment:add", "UI → equipment.add() · data { key? }", "event"),
+        node("equipment:add", "UI, events/mobs → equipment.add() · data { key?, kind?, rarity? }", "event"),
         node("equipment:equip", "UI → equipment.equip() · data { itemId }", "event"),
         node("equipment:unequip", "UI → equipment.unequip() · data { itemId? } (omit to clear all)", "event"),
+        node("equipment:remove", "UI, events/mobs → equipment.remove() · data { itemId } (destroys)", "event"),
         node("combat:start", "UI → combat.start() · data { player, enemy } snapshots", "event"),
         node("combat:action", "UI → combat.action() · data { action: attack|defend }", "event")
       ], "event"),
@@ -618,11 +627,12 @@
         node("mainCharacter:saved", "mainCharacter · identity only (no image)", "event"),
         node("mainCharacter:statChanged", "mainCharacter · any non-equipment stat: stat, delta, value, max", "event"),
         node("mainCharacter:armorChanged", "mainCharacter · armor mirrored from equipment", "event"),
-        node("equipment:added", "equipment · { itemId, key, name, parts, armor, equipped, source }", "event"),
-        node("equipment:equipped", "equipment · { itemId, name, parts, armor, totalArmor, replacedItemIds }", "event"),
+        node("equipment:added", "equipment · { itemId, key, name, kind, rarity, parts, stats, equipped, source }", "event"),
+        node("equipment:equipped", "equipment · { itemId, name, kind, rarity, parts, stats, totalArmor, replacedItemIds }", "event"),
         node("equipment:unequipped", "equipment · { itemId, itemIds, parts, armor, totalArmor }", "event"),
-        node("combat:started", "combat · player/enemy ids and names", "event"),
-        node("combat:damage", "combat · source, target, amount, hpBefore/After, armor", "event"),
+        node("equipment:removed", "equipment · { itemId, key, name, kind, rarity, wasEquipped, totalArmor }", "event"),
+        node("combat:started", "combat · player/enemy ids, names and weapons", "event"),
+        node("combat:damage", "combat · source, target, amount, base, armor, piercing, strength, weapon, tooHeavy", "event"),
         node("combat:defended", "combat · player brace, armor and reduction", "event"),
         node("combat:ended", "combat · winner, loser, rounds", "event")
       ], "event")

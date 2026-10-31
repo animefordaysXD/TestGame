@@ -1,4 +1,4 @@
-# Modular Text-RPG Engine — Spec v1.5
+# Modular Text-RPG Engine — Spec v1.6
 
 Plain JS/HTML, no build step, no dependencies. A small core runs the clock, event bus,
 RNG, state and save/load. All gameplay lives in modules that own one state slice and talk
@@ -153,16 +153,18 @@ Slices are JSON-safe. Never cache a slice object; `load()` replaces the whole st
 | travel:resumed | travel | `{ destinationId, destinationName, elapsedMinutes, durationMinutes, remainingMinutes }` |
 | travel:completed | travel | `{ destinationId, destinationName, originId, originName, distance, elapsedMinutes, durationMinutes, eventCount, atTick, at }` |
 | travel:cancelled | travel | `{ destinationId, destinationName, elapsedMinutes, durationMinutes }` |
-| equipment:add (request) | UI | `{ key? }` (omit to pick randomly) |
+| equipment:add (request) | UI | `{ key?, kind?, rarity? }` (`key` names an item; otherwise a weighted random pick, optionally filtered) |
 | equipment:equip (request) | UI | `{ itemId }` |
 | equipment:unequip (request) | UI | `{ itemId? }` (omit to clear all) |
-| equipment:added | equipment | `{ itemId, key, name, parts, armor, equipped, source }` |
-| equipment:equipped | equipment | `{ itemId, key, name, parts, armor, totalArmor, replacedItemIds }` |
-| equipment:unequipped | equipment | `{ itemId, itemIds, items, key, name, parts, armor, totalArmor }` |
-| combat:start (request) | UI | `{ player, enemy }` combatant snapshots |
+| equipment:remove (request) | UI, future events/mobs | `{ itemId }` (destroys the item; unequips it first when worn) |
+| equipment:added | equipment | `{ itemId, key, name, kind, rarity, parts, armor?, damage?, strength?, armorPiercing?, equipped, source }` |
+| equipment:equipped | equipment | `{ itemId, key, name, kind, rarity, parts, armor?, damage?, strength?, armorPiercing?, totalArmor, replacedItemIds }` |
+| equipment:unequipped | equipment | `{ itemId, itemIds, items, key, name, kind, rarity, parts, armor, totalArmor }` |
+| equipment:removed | equipment | `{ itemId, key, name, kind, rarity, wasEquipped, totalArmor }` |
+| combat:start (request) | UI | `{ player, enemy }` combatant snapshots with `personalCombat`, `strength`, `armor`, `weapon` |
 | combat:action (request) | UI | `{ action: "attack" \| "defend" }` |
-| combat:started | combat | `{ playerId, playerName, enemyId, enemyName }` |
-| combat:damage | combat | `{ action, sourceId, sourceName, targetId, targetName, amount, hpBefore, hpAfter, hpMax, defended, armor, reduction }` |
+| combat:started | combat | `{ playerId, playerName, enemyId, enemyName, playerWeapon, enemyWeapon }` |
+| combat:damage | combat | `{ action, sourceId, sourceName, targetId, targetName, amount, base, hpBefore, hpAfter, hpMax, defended, armor, effectiveArmor, armorMultiplier, reduction, armorPiercing, strength, weapon, weaponDamage, tooHeavy }` |
 | combat:defended | combat | `{ id, name, armor, reduction }` |
 | combat:ended | combat | `{ winnerId, winnerName, loserId, loserName, rounds }` |
 | mainCharacter:saved | mainCharacter | `{ id, name, gender, age }` (no image) |
@@ -181,7 +183,7 @@ Slices are JSON-safe. Never cache a slice object; `load()` replaces the whole st
 | map | locations | `seed`, `size`, `total`, `lastGeneratedTick`, `lastGeneratedAt`, `landmarks{}` | one map spawn request: fixed landmarks plus random locations through `location:add` |
 | actions | none | `locationId`, `locationName`, `biomeKey`, `actions[]`, `lastAction` | five area actions with costs, outcomes, time and route-based travel |
 | travel | none | `active`, `paused`, `distance`, route, `elapsedMinutes`, `durationMinutes`, `checks`, `eventCount`, `lastEvent`, `lastCompleted` | 5-minute journey checks; pause/resume on travel events |
-| equipment | none | `nextId`, `items{}`, `equippedByPart{}` | main-character armor on body parts; mirrors summed armor into the character stat |
+| equipment | none | `nextId`, `items{}`, `equippedByPart{}`, `equippedWeaponId` | main-character armor on body parts plus one weapon slot; mirrors summed armor into the character stat |
 
 `save/gameSave.js` is not a module and has no registry row: it owns no slice and emits no
 events. It captures, migrates and restores the whole state (see **Save files** above).
@@ -224,13 +226,14 @@ files directly; see `editor/README.md`.
 
 - Files: `characters/statsData.js` (content only). The characters and mainCharacter
   modules both read `CharacterStatsData.stats`.
-- Every character has the same nine base stats plus an empty armor stat, in this order:
+- Every character has the same ten base stats plus an empty armor stat, in this order:
 
 | key | label | kind | range | main start | NPC roll |
 |---|---|---|---|---|---|
 | `hp` | HP | resource | 0-100 | 100/100 | 70-100 |
 | `stamina` | Stamina | resource | 0-100 | 100/100 | 70-100 |
 | `mana` | Mana | resource | 0-50 | 50/50 | 20-50 |
+| `strength` | Strength | skill | 1-20 | 10 | 1-20, bell |
 | `armor` | Armor | equipment | 0-100 | 0 | 0 |
 | `war` | War | skill | 1-20 | 10 | 1-20, bell |
 | `diplomacy` | Diplomacy | skill | 1-20 | 10 | 1-20, bell |
@@ -243,8 +246,11 @@ files directly; see `editor/README.md`.
   Skills use the definition `max` directly.
 - `armor` is an equipment stat. It starts at 0 for everyone. The `equipment` module
   writes the main character's armor through `equipment:equipped` / `equipment:unequipped`;
-  location and action effects never change it. Combat's Defend action reads it (see
-  **Combat module**). NPCs do not equip yet and stay at 0.
+  location and action effects never change it. Combat reduces every incoming hit by armor
+  and doubles that reduction while defending (see **Combat module**). NPCs do not equip
+  yet and stay at 0.
+- `strength` gates weapons: a weapon only adds damage and armor piercing when the
+  wielder's Strength meets its requirement. It is a normal skill for effects and rolls.
 - Character stat block example:
 
 ```json
@@ -252,6 +258,7 @@ files directly; see `editor/README.md`.
   "hp": 100, "hpMax": 100,
   "stamina": 90, "staminaMax": 100,
   "mana": 50, "manaMax": 50,
+  "strength": 10,
   "armor": 0,
   "war": 10, "diplomacy": 10, "personalCombat": 10,
   "moneyManagement": 10, "intrigue": 10, "intelligence": 10
@@ -376,10 +383,10 @@ mainCharacter: {
   `action:resolved`, `travel:event`, `equipment:equipped` / `equipment:unequipped` and
   `combat:damage`; reset clears the character but keeps those single subscriptions.
 - UI on the test page: name, gender, age, image picker with preview, a stat grid
-  (nine base stats plus armor), a Body grid, **Save main character**, and **Connect
+  (ten base stats plus armor), a Body grid, **Save main character**, and **Connect
   mainChar folder**. NPC cards show a compact stat line and body line.
 
-## Combat module v0.1
+## Combat module v0.2
 
 - Files: `combat/data.js`, `combat/combat.js`; notes in `combat/README.md`.
 - Slice:
@@ -389,7 +396,7 @@ combat: {
   active: false,
   round: 0,
   turn: null,             // "player" while waiting for input
-  player: null,           // { id, name, hp, hpMax, personalCombat, armor }
+  player: null,           // { id, name, hp, hpMax, personalCombat, strength, armor, weapon }
   enemy: null,
   defending: false,
   winnerId: null, winnerName: "",
@@ -402,26 +409,37 @@ combat: {
 
 - The UI starts a duel with `combat:start` and passes `{ player, enemy }` snapshots.
   The module never reads another module's slice; the snapshots contain the stats needed
-  for the fight.
+  for the fight. `strength` defaults to 10 when omitted. `weapon` is `null` or
+  `{ key, name, damage, strength, armorPiercing, rarity }`.
 - The player always moves first: round 1, `turn: "player"`. The player chooses
   **Attack** or **Defend** with `combat:action`.
-- Attack damage is based on the attacker's Personal Combat:
-  `max(minDamage, round(personalCombat * multiplier))`. Defaults are `1` and `1`, so a
-  Personal Combat of 10 deals 10 damage. After a surviving enemy is hit, it immediately
-  attacks back. A lethal player hit ends the fight before the counterattack.
-- The enemy always attacks in v0.1; `CombatData.enemyAction` is the future AI hook.
-- Defend sets `defending` for the next enemy attack. The formula is
-  `max(0, incomingDamage - armor * armorMultiplier)`, with `armorMultiplier: 2`. Armor is
-  written by the equipment module; without equipment it is 0 and Defend blocks nothing.
+- Attack damage is based on the attacker's Personal Combat plus a usable weapon:
+  `max(minDamage, round(personalCombat * multiplier) + weapon.damage)`. Defaults are `1`
+  and `1`, so Personal Combat 10 deals 10 damage without a weapon.
+- A weapon is usable only when the attacker's `strength` is at least `weapon.strength`.
+  A too-heavy weapon adds no damage and no armor piercing; the hit still happens with the
+  bare Personal Combat value and the log says the weapon is too heavy.
+- Armor reduces **every** incoming hit. The attacker's weapon armor piercing shrinks it:
+  `effectiveArmor = round(armor * (100 - armorPiercing) / 100)`, then
+  `reduction = round(effectiveArmor * armorMultiplier)`, and finally
+  `damage = max(0, baseDamage - reduction)`. `armorMultiplier` is 1 for a normal hit and
+  `CombatData.defend.armorMultiplier` (2) while the defender used Defend.
+- Defend sets `defending` for the next enemy attack; the flag is consumed by that hit.
+  After a surviving enemy is hit, it immediately attacks back. A lethal player hit ends
+  the fight before the counterattack.
+- The enemy always attacks in v0.2; `CombatData.enemyAction` is the future AI hook.
 - Damage is emitted as `combat:damage`; the mainCharacter and characters modules apply it
   to the real character slices. The module also emits `combat:started`,
   `combat:defended` and `combat:ended` at `depth + 1` (or one deeper for the enemy turn).
-- `combat:damage` includes `amount`, `hpBefore`, `hpAfter`, `hpMax`, `defended`, `armor`
-  and `reduction`, so the UI and future modules can react without parsing text.
+- `combat:damage` includes `amount`, `base`, `hpBefore`, `hpAfter`, `hpMax`, `defended`,
+  `armor`, `effectiveArmor`, `armorMultiplier`, `reduction`, `armorPiercing`, `strength`,
+  `weapon`, `weaponDamage` and `tooHeavy`, so the UI and future modules can react without
+  parsing text.
 - The slice keeps the final snapshots, winner and log after a fight, so the UI can show
   the result. Starting a new fight resets the slice. Reset clears it.
 - UI on the test page: every NPC card has a **Fight** button; the **Combat** panel shows
   both HP totals, round/turn, **Attack** and **Defend**, and the last eight log lines.
+  The player snapshot includes the equipped weapon and Strength from the equipment panel.
 
 ## Locations module v0.4
 
@@ -683,7 +701,7 @@ travel: {
 - Content: `travel/data.js` owns `minutesPerCheck`, `chancePercent`,
   `chanceByBiome` and `events: [{ id, name, text, weight, enabled, effects }]`.
 
-## Equipment module v0.2
+## Equipment module v0.3
 
 - Files: `equipment/data.js`, `equipment/equipment.js`; notes in `equipment/README.md`.
 - Slice:
@@ -694,41 +712,59 @@ equipment: {
   items: {                       // item id -> item
     "eq_0001": {
       id: "eq_0001", key: "leather_cuirass", name: "Leather Cuirass",
+      kind: "armor", rarity: "uncommon",
       parts: ["torso"], armor: 3, equipped: true,
+      acquiredAtTick: 0, acquiredAt: "1000-01-01 06:00"
+    },
+    "eq_0002": {
+      id: "eq_0002", key: "tempered_longsword", name: "Tempered Longsword",
+      kind: "weapon", rarity: "uncommon",
+      parts: [], damage: 6, strength: 6, armorPiercing: 16, equipped: true,
       acquiredAtTick: 0, acquiredAt: "1000-01-01 06:00"
     }
   },
-  equippedByPart: { torso: "eq_0001" }   // body part key -> item id
+  equippedByPart: { torso: "eq_0001" },   // body part key -> armor item id
+  equippedWeaponId: "eq_0002"             // one weapon slot, or null
 }
 ```
 
-- `equipment/data.js` owns the armor catalogue: `key`, `name`, `parts`, `armor`, `weight`,
-  plus `maxArmor` and `autoEquip`. `parts` uses the keys from `characters/bodyData.js`. Add
-  or tune armor there; module code iterates the list.
-- Each item is worn as one piece over every part it lists. Two worn items may not share a
-  part. Equipping an overlapping item replaces the conflicting items wholly; they stay in
-  the inventory. `equippedByPart` is the source of truth, and `item.equipped` is true when
-  at least one part maps to it.
-- Total armor is the sum of the distinct worn items' armor, clamped to `maxArmor`. A newly
-  acquired item auto-equips when every part it covers is free; otherwise it stays in the
-  inventory.
-- Requests: `equipment:add` (`{ key? }`; omit the key for a weighted random pick),
-  `equipment:equip` (`{ itemId }`) and `equipment:unequip` (`{ itemId? }`; omit the id to
-  clear every worn item).
-- Module events: `equipment:added`, `equipment:equipped` and `equipment:unequipped` at
-  `depth + 1`. The equipped event includes `parts`, `totalArmor` and `replacedItemIds` for
-  the bridge and UI.
+- `equipment/data.js` owns the catalogue and `rarities`. Every item has `kind`
+  (`"armor"` or `"weapon"`) and `rarity` (one of the five keys below); armor also has
+  `parts`, `armor`, and weapons have `damage`, `strength` and `armorPiercing`. Add or
+  tune content there; module code iterates the list.
+- Rarity ranks, weakest first: `common`, `uncommon`, `rare`, `legendary`, `unique`. Each
+  rank defines stat bands (`armor`, `damage`, `strength`, `armorPiercing`) that are
+  strictly stronger than the previous rank. The content editor checks shipped values
+  against those bands. `weight` is the random-find weight.
+- Armor is worn as one piece over every part it lists. Two worn armor items may not share
+  a part. Equipping an overlapping item replaces the conflicting items wholly; they stay
+  in the inventory. `equippedByPart` is the source of truth, and `item.equipped` is true
+  when the item is worn (armor) or in the weapon slot (weapon).
+- Total armor is the sum of the distinct worn armor items' armor, clamped to `maxArmor`.
+  A newly acquired item auto-equips when its slot is free (every covered part for armor,
+  an empty weapon slot for a weapon); otherwise it stays in the inventory.
+- Requests: `equipment:add` (`{ key?, kind?, rarity? }`; omit the key for a weighted
+  random pick, optionally filtered by kind/rarity), `equipment:equip` (`{ itemId }`),
+  `equipment:unequip` (`{ itemId? }`; omit the id to clear every worn item and the weapon)
+  and `equipment:remove` (`{ itemId }`, which destroys the item and unequips it first).
+- Module events: `equipment:added`, `equipment:equipped`, `equipment:unequipped` and
+  `equipment:removed` at `depth + 1`. Equip/unequip events include `kind`, `rarity`,
+  `parts`, `totalArmor` and the item's stats; the equipped event also carries
+  `replacedItemIds`. Weapon events keep `totalArmor` unchanged, so the armor bridge
+  ignores them.
 - The module listens to `action:resolved`; an outcome with `equipmentKey` adds that item
-  (auto-equipping when its parts are free) without the actions module calling it.
+  (auto-equipping when its slot is free) without the actions module calling it.
 - `mainCharacter` listens to the equipped/unequipped events, clamps `totalArmor` to
   0-100, writes `stats.armor` and emits `mainCharacter:armorChanged`. The equipment module
   never reads or writes another module's slice.
 - Save migration: a v0.1 `equippedId` is assigned to every part the item covers; legacy
-  items with `slot: "body"` take `parts` from the catalogue. `equippedId` is removed.
-- Only the main character can equip in v0.2. NPCs stay at armor 0.
-- UI on the test page: an **Equipment** panel with **Find armor**, total armor, covered
-  parts, each item's body parts and per-item **Equip** / **Unequip**, plus **Unequip all**.
-  Find armor requires a saved main character.
+  items with `slot: "body"` take `parts` from the catalogue. `equippedId` is removed and
+  a missing `equippedWeaponId` becomes `null`.
+- Only the main character can equip in v0.3. NPCs stay at armor 0 and have no weapon.
+- UI on the test page: an **Equipment** panel with **Find armor**, **Find weapon**, total
+  armor, covered parts, the weapon slot, each item's rarity and per-item **Equip** /
+  **Unequip** / **Destroy**, plus **Unequip all**. A weapon whose Strength requirement is
+  above the character's Strength cannot be equipped from the UI.
 
 ## File layout
 

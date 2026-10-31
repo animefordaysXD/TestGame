@@ -8,8 +8,8 @@
 > game is and why, read [DESIGN.md](DESIGN.md); unapproved ideas live in
 > [IDEAS.md](IDEAS.md).
 
-Current build: core v0.2, characters v0.5, main character v0.6, equipment v0.2,
-locations v0.4, map v0.1, actions v0.3, travel v0.2, combat v0.1, save helper v0.1,
+Current build: core v0.2, characters v0.5, main character v0.6, equipment v0.3,
+locations v0.4, map v0.1, actions v0.3, travel v0.2, combat v0.2, save helper v0.1,
 plus the read-only status viewer and the content editor (`editor.html` — a tool, not a
 module, and never loaded by the game).
 
@@ -51,8 +51,8 @@ directly with `node test/locations.test.cjs`, `node test/locations-disk.test.cjs
 
 - `engine.js` — core (unchanged v0.2)
 - `characters/` — NPC generator, shared base stats, body data/helper, main character creator and storage
-- `equipment/` — armor catalogue and main-character inventory (equip/unequip)
-- `combat/` — basic player-first duels (Attack/Defend)
+- `equipment/` — armor and weapon catalogue, rarity tiers, main-character inventory (equip/unequip/destroy)
+- `combat/` — player-first duels with weapons, Strength gating and armor piercing (Attack/Defend)
 - `locations/` — procedural map locations linked into a travel graph
 - `map/` — map spawner: fixed tavern/castle/shack plus random location batches
 - `locations/events/` — per-biome event JSON (copy/paste templates and the tundra sample)
@@ -119,12 +119,12 @@ them.
 - **Connect mainChar folder** writes `characters/mainChar/main.json` and a viewable
   `profile.webp`/`.png`/`.svg` file. Later saves rewrite both. Folder access needs
   Chrome or Edge.
-- The main character and every NPC share nine base stats from
-  `characters/statsData.js`: HP, Stamina, Mana, War, Diplomacy, Personal Combat, Money
-  Management, Intrigue and Intelligence, plus an `armor` equipment stat. HP/Stamina/Mana
-  are resources; the skills are 1-20; armor is 0-100 and starts at 0. The main character
-  starts at 100/100 HP, 100/100 Stamina, 50/50 Mana, 0 armor and 10 in each skill. NPCs
-  roll their values.
+- The main character and every NPC share ten base stats from
+  `characters/statsData.js`: HP, Stamina, Mana, Strength, War, Diplomacy, Personal Combat,
+  Money Management, Intrigue and Intelligence, plus an `armor` equipment stat.
+  HP/Stamina/Mana are resources; the skills are 1-20; armor is 0-100 and starts at 0. The
+  main character starts at 100/100 HP, 100/100 Stamina, 50/50 Mana, 0 armor and 10 in each
+  skill. NPCs roll their values. Strength is the weapon requirement used by combat.
 - Location events, resolved area actions and travel interruptions can change any
   non-equipment base stat; the current values are saved with the character. Armor is
   written by the equipment module and is ignored by event/action/travel effects. The
@@ -149,31 +149,39 @@ them.
 
 - Each Temporary Spawn and Named NPC card has a **Fight** button. Save a main character
   first.
-- The player always moves first. **Attack** deals damage based on the attacker's
-  Personal Combat; a surviving enemy immediately counterattacks.
-- **Defend** braces for the next attack. The formula is
-  `max(0, damage - armor * 2)`. Armor comes from equipped equipment; with no armor,
-  Defend blocks nothing.
+- The player always moves first. **Attack** deals Personal Combat damage plus the equipped
+  weapon's damage; a surviving enemy immediately counterattacks.
+- A weapon only works when the attacker's Strength meets its requirement. A too-heavy
+  weapon adds no damage and no armor piercing, and the log says so.
+- Armor reduces every hit. A weapon's armor piercing ignores part of it. **Defend** braces
+  for the next attack and doubles the armor reduction; with no armor it blocks nothing.
 - `combat:damage` lowers the real main/NPC HP; 0 HP ends the duel. A lethal player hit
   skips the enemy counterattack.
-- The enemy always attacks in this basic version. There is no flee, initiative, hit
-  chance or damage variance yet.
+- The enemy always attacks in this version. There is no flee, initiative, hit chance or
+  damage variance yet.
 - Tuning lives in `combat/data.js`; the turn flow and events are documented in
   `combat/README.md` and `ENGINE_SPEC.md`.
 
 ## Equipment
 
-- **Find armor** adds a random item from `equipment/data.js`. Items target body parts
-  (`head`, `torso`, arms, hands, legs, feet) and can cover more than one part.
-- Several items can be worn at once when their parts do not overlap. Equipping an
-  overlapping item replaces the conflicting items whole; total armor is the sum of all
-  worn items. **Unequip all** clears the loadout.
-- Armor is written into the main character's Armor stat and used by combat's Defend
-  action (`armor × 2` damage blocked). The panel shows coverage, every item's parts and
-  total armor.
-- Scavenging can also award armor through an action outcome.
-- The catalogue (name, parts, armor, weight) lives in `equipment/data.js`. Only the main
-  character can equip in this version; NPCs still have armor 0.
+- **Find armor** and **Find weapon** add random items from `equipment/data.js`. Equipment
+  has five rarity ranks: Common, Uncommon, Rare, Legendary and Unique. Higher ranks have
+  better stat bands.
+- Armor items target body parts (`head`, `torso`, arms, hands, legs, feet) and can cover
+  more than one part. Several items can be worn at once when their parts do not overlap.
+  Equipping an overlapping item replaces the conflicting items whole; total armor is the
+  sum of all worn armor.
+- Weapons fill one weapon slot. They add `damage` and `armorPiercing` (a percentage of the
+  target's armor) and can only be equipped when the character's Strength meets the
+  weapon's requirement. The panel shows the slot and warns when a weapon is too heavy.
+- Armor is written into the main character's Armor stat and used by every incoming hit;
+  Defend doubles the reduction. **Unequip all** clears the loadout, and **Destroy**
+  permanently removes an item.
+- Scavenging can also award equipment through an action outcome.
+- The catalogue and rarity bands live in `equipment/data.js`. Only the main character can
+  equip in this version; NPCs still have armor 0 and no weapon.
+- `equipment:add` accepts `{ kind, rarity }` filters and `equipment:remove` destroys an
+  item, so future events and mobs can generate or destroy loot.
 - See `equipment/README.md`.
 
 ## Locations module
@@ -265,8 +273,8 @@ them.
 module: it owns no state, emits no events and is not registered in `buildEngine`.
 
 - Run `npm run serve`, then open <http://127.0.0.1:8765/editor.html>.
-- It edits biome events, travel events and tuning, armor items and settings, area
-  actions and outcomes, and character names, traits and ages.
+- It edits biome events, travel events and tuning, equipment items (armor, weapons, rarity
+  tiers) and settings, area actions and outcomes, and character names, traits and ages.
 - **Open game folder** (Chrome/Edge) writes changes straight into the files. Without a
   folder, **Save changes** downloads each changed file; downloads flatten the path
   (`travel/data.js` becomes `travel-data.js`), so put the file back at its real path.

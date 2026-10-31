@@ -46,9 +46,14 @@
   const itemFields = [
     { key: "key", label: "Key", type: "text", mono: true, help: "Used by actions to hand this item out (equipmentKey)." },
     { key: "name", label: "Name", type: "text" },
-    { key: "parts", label: "Body parts", type: "multiselect", source: "bodyParts", help: "The item covers these parts. Equipping it replaces any item already on one of them." },
-    { key: "armor", label: "Armor", type: "number", min: 0, step: 1, help: "Added to total armor; Defend blocks armor times the combat multiplier." },
-    { key: "weight", label: "Find weight", type: "number", min: 0, step: 1, help: "How often Find armor picks it, relative to the others." },
+    { key: "kind", label: "Kind", type: "select", source: "kinds", help: "Armor covers body parts; a weapon fills the one weapon slot." },
+    { key: "rarity", label: "Rarity", type: "select", source: "rarities", help: "Common, Uncommon, Rare, Legendary or Unique. Stats should stay inside this rank's band." },
+    { key: "parts", label: "Body parts (armor)", type: "multiselect", source: "bodyParts", help: "Armor only. The item covers these parts and replaces any item already on one of them." },
+    { key: "armor", label: "Armor (armor)", type: "number", min: 0, step: 1, help: "Armor only. Added to total armor; every hit is reduced by it and Defend doubles it." },
+    { key: "damage", label: "Damage (weapon)", type: "number", min: 0, step: 1, help: "Weapon only. Added to the wielder's attack damage." },
+    { key: "strength", label: "Strength requirement (weapon)", type: "number", min: 1, max: 20, step: 1, help: "Weapon only. Below this Strength the weapon is too heavy and adds nothing." },
+    { key: "armorPiercing", label: "Armor piercing % (weapon)", type: "number", min: 0, max: 100, step: 1, help: "Weapon only. Ignores this share of the target's armor." },
+    { key: "weight", label: "Find weight", type: "number", min: 0, step: 1, help: "How often a random find picks it, relative to the others." },
     { key: "description", label: "Description", type: "textarea", rows: 2 }
   ];
   const outcomeFields = [
@@ -140,33 +145,65 @@
       }
     },
     {
-      id: "equipment-items", group: "Items", title: "Armor", file: "equipment", kind: "list", at: ["items"],
-      fields: itemFields, label: (i) => i.name || i.key || "(unnamed)", sub: (i) => `${(Array.isArray(i.parts) ? i.parts.join(", ") : "no parts") || "no parts"} · armor ${i.armor}`,
-      newItem: (ctx, list) => ({ key: C.uniqueId(list.map((i) => i.key), "new_item"), name: "New armor", parts: [(ctx.bodyParts[0] && ctx.bodyParts[0].key) || "torso"], armor: 1, weight: 1, description: "" }),
+      id: "equipment-items", group: "Items", title: "Equipment", file: "equipment", kind: "list", at: ["items"],
+      fields: itemFields, label: (i) => i.name || i.key || "(unnamed)",
+      sub: (i) => `${i.kind === "weapon" ? "weapon" : "armor"} · ${i.rarity || "common"}`,
+      newItem: (ctx, list) => ({
+        key: C.uniqueId(list.map((i) => i.key), "new_item"), name: "New item",
+        kind: "armor", rarity: (ctx.rarities[0] || "common"),
+        parts: [(ctx.bodyParts[0] && ctx.bodyParts[0].key) || "torso"], armor: 1,
+        damage: 0, strength: 1, armorPiercing: 0, weight: 1, description: ""
+      }),
       preview(i, ctx, data) {
-        const armor = Number(i.armor), notes = [];
-        const parts = partNames(i.parts, ctx);
-        if (parts.length) notes.push(`Covers ${parts.join(", ")}.`);
-        else notes.push("Covers no body part, so it can never be equipped.");
-        if (Number.isFinite(armor)) notes.push(`Defend blocks ${armor * ctx.armorMultiplier} more damage per hit while worn (armor ${armor} times ${ctx.armorMultiplier}).`);
-        const total = data.equipment.items.reduce((s, x) => s + Math.max(0, Number(x.weight) || 0), 0);
-        if (total > 0) notes.push(`Find armor picks it ${pct((Math.max(0, Number(i.weight) || 0) / total) * 100)} of the time.`);
-        return { log: i.description, chips: [{ text: `Armor ${i.armor}`, tone: "pos" }, ...parts.map((p) => ({ text: p, tone: "flat" }))], notes };
+        const weapon = i.kind === "weapon";
+        const rarity = (ctx.rarityDefs || []).find((r) => r.key === i.rarity);
+        const band = (range) => Array.isArray(range) && range.length === 2 ? `${range[0]}-${range[1]}` : "?";
+        const notes = [];
+        if (rarity) {
+          notes.push(`${rarity.label || rarity.key} band: armor ${band(rarity.armor)}, damage ${band(rarity.damage)}, Strength ${band(rarity.strength)}, piercing ${band(rarity.armorPiercing)}.`);
+        } else if (i.rarity) {
+          notes.push(`Unknown rarity "${i.rarity}".`);
+        }
+        const chips = [{ text: `${i.kind === "weapon" ? "Weapon" : "Armor"} · ${i.rarity || "common"}`, tone: "flat" }];
+
+        if (weapon) {
+          const damage = Number(i.damage), strength = Number(i.strength), piercing = Number(i.armorPiercing);
+          chips.push({ text: `Damage ${i.damage || 0}`, tone: "pos" }, { text: `Str ${i.strength || 0}`, tone: "flat" }, { text: `Pierce ${i.armorPiercing || 0}%`, tone: "neg" });
+          if (Number.isFinite(damage)) notes.push(`Adds ${damage} damage to a wielder who meets Strength ${strength}.`);
+          if (Number.isFinite(piercing)) notes.push(`Ignores ${piercing}% of the target's armor${Number.isFinite(strength) ? `, but only at Strength ${strength} or above` : ""}.`);
+        } else {
+          const armor = Number(i.armor);
+          const parts = partNames(i.parts, ctx);
+          chips.push({ text: `Armor ${i.armor}`, tone: "pos" }, ...parts.map((p) => ({ text: p, tone: "flat" })));
+          if (parts.length) notes.push(`Covers ${parts.join(", ")}.`);
+          else notes.push("Covers no body part, so it can never be equipped.");
+          if (Number.isFinite(armor)) notes.push(`Every hit loses ${armor}; Defend blocks ${armor * ctx.armorMultiplier} (armor ${armor} times ${ctx.armorMultiplier}).`);
+        }
+
+        const total = data.equipment.items
+          .filter((x) => (x.kind === "weapon") === weapon)
+          .reduce((s, x) => s + Math.max(0, Number(x.weight) || 0), 0);
+        if (total > 0) notes.push(`A random ${weapon ? "weapon" : "armor"} find picks it ${pct((Math.max(0, Number(i.weight) || 0) / total) * 100)} of the time.`);
+        return { log: i.description, chips, notes };
       }
     },
     {
       id: "equipment-settings", group: "Items", title: "Equipment settings", file: "equipment", kind: "form", at: [],
       fields: [
         { key: "maxArmor", label: "Armor cap", type: "number", min: 1, step: 1, help: "Total armor from all worn items is clamped to this value." },
-        { key: "autoEquip", label: "Equip new items automatically when their parts are free", type: "bool" }
+        { key: "autoEquip", label: "Equip new items automatically when their slot is free", type: "bool" }
       ],
       preview(_, ctx, data) {
         const items = data.equipment.items || [];
-        const covered = new Set(items.flatMap((item) => Array.isArray(item.parts) ? item.parts : []));
+        const armor = items.filter((item) => item.kind !== "weapon");
+        const weapons = items.filter((item) => item.kind === "weapon");
+        const covered = new Set(armor.flatMap((item) => Array.isArray(item.parts) ? item.parts : []));
+        const rarities = (data.equipment.rarities || []).map((r) => r.label || r.key);
         return { notes: [
-          `${items.length} armor items cover ${covered.size} of ${ctx.bodyParts.length} body parts.`,
-          `Find armor picks by weight; the armour cap is ${data.equipment.maxArmor}.`,
-          data.equipment.autoEquip === false ? "New items stay in the inventory until equipped." : "New items equip automatically when every part they cover is free."
+          `${armor.length} armor items cover ${covered.size} of ${ctx.bodyParts.length} body parts; ${weapons.length} weapons fill the one weapon slot.`,
+          rarities.length ? `Rarity ranks: ${rarities.join(", ")}.` : "No rarity ranks defined: every item falls back to common.",
+          `A find is filtered by kind or rarity and picked by weight; the armour cap is ${data.equipment.maxArmor}.`,
+          data.equipment.autoEquip === false ? "New items stay in the inventory until equipped." : "New items equip automatically when their slot is free."
         ] };
       }
     },
@@ -266,6 +303,7 @@
     const equipment = data.equipment || {};
     const bodyParts = (refs.body && Array.isArray(refs.body.parts) ? refs.body.parts : [])
       .map((part) => ({ key: part.key, label: part.label || part.key }));
+    const rarityDefs = Array.isArray(equipment.rarities) ? equipment.rarities : [];
     return {
       statDefs,
       statKeys: statDefs.filter((d) => d.kind !== "equipment").map((d) => d.key),
@@ -274,6 +312,9 @@
       bodyParts,
       bodyPartKeys: bodyParts.map((part) => part.key),
       equipmentKeys: Array.isArray(equipment.items) ? equipment.items.map((i) => i.key) : [],
+      kinds: ["armor", "weapon"],
+      rarityDefs,
+      rarities: rarityDefs.map((r) => r.key),
       traits: data.characters && Array.isArray(data.characters.traits) ? data.characters.traits : [],
       outcomeIds: outcomeIds(data),
       armorMultiplier: (refs.combat && refs.combat.defend && refs.combat.defend.armorMultiplier) || 2
@@ -283,6 +324,8 @@
   function optionsFor(source, ctx) {
     if (source === "stats") return ctx.statDefs.filter((d) => d.kind !== "equipment").map((d) => ({ value: d.key, label: d.label }));
     if (source === "bodyParts") return (ctx.bodyParts || []).map((part) => ({ value: part.key, label: part.label }));
+    if (source === "kinds") return (ctx.kinds || []).map((kind) => ({ value: kind, label: cap(kind) }));
+    if (source === "rarities") return (ctx.rarityDefs || []).map((r) => ({ value: r.key, label: r.label || r.key }));
     const list = { equipmentKeys: ctx.equipmentKeys, biomes: ctx.biomes, traits: ctx.traits }[source] || [];
     return list.map((v) => ({ value: v, label: v }));
   }
@@ -360,22 +403,61 @@
       const report = makeReporter(out, "equipment-items"), set = makeReporter(out, "equipment-settings");
       if (!Number.isInteger(d.maxArmor) || d.maxArmor < 1) set("error", "Armor cap must be a whole number of at least 1.", null, "maxArmor");
       if (typeof d.autoEquip !== "boolean") set("error", "Auto-equip must be on or off.", null, "autoEquip");
+      if (!Array.isArray(d.rarities) || !d.rarities.length) report("warn", "No rarity ranks defined; every item falls back to common.", null, "rarities");
+      const rarityByKey = new Map((Array.isArray(d.rarities) ? d.rarities : []).map((r) => [r && r.key, r]));
+      if (Array.isArray(d.rarities)) {
+        checkIds(d.rarities, "key", report, "Rarity");
+        d.rarities.forEach((r, i) => {
+          if (!r || typeof r.label !== "string" || !r.label.trim()) report("warn", `Rarity #${i + 1} has no label.`, null, "rarities");
+          for (const field of ["armor", "damage", "strength", "armorPiercing"]) {
+            const range = r && r[field];
+            if (!Array.isArray(range) || range.length !== 2 || !range.every(Number.isInteger) || range[0] > range[1])
+              report("error", `Rarity "${r && r.key}" needs a ${field} range of two whole numbers, low to high.`, null, "rarities");
+          }
+        });
+      }
       if (!Array.isArray(d.items)) return report("error", "The file needs an \"items\" list.");
       checkIds(d.items, "key", report, "Item");
       d.items.forEach((it, i) => {
         if (!it.name) report("warn", "Give the item a name.", i, "name");
-        if (!Array.isArray(it.parts) || !it.parts.length) {
-          report("error", "Target at least one body part.", i, "parts");
-        } else {
-          const seen = new Set();
-          for (const part of it.parts) {
-            if (ctx.bodyPartKeys.length && !ctx.bodyPartKeys.includes(part)) report("error", `Body part "${part}" is not in characters/bodyData.js.`, i, "parts");
-            else if (seen.has(part)) report("warn", `Body part "${part}" is listed twice.`, i, "parts");
-            else seen.add(part);
+        if (!it.kind) report("warn", "Missing kind; the item is treated as armor.", i, "kind");
+        else if (it.kind !== "armor" && it.kind !== "weapon") report("error", "Kind must be \"armor\" or \"weapon\".", i, "kind");
+        if (!it.rarity) report("warn", "Give the item a rarity; common is assumed.", i, "rarity");
+        else if (rarityByKey.size && !rarityByKey.has(it.rarity)) report("error", `Unknown rarity "${it.rarity}".`, i, "rarity");
+        const rarity = rarityByKey.get(it.rarity);
+        const band = (value, range, label, field) => {
+          if (!Array.isArray(range) || range.length !== 2 || !num(value)) return;
+          if (value < range[0] || value > range[1])
+            report("warn", `${label} ${value} is outside the ${it.rarity} band (${range[0]}-${range[1]}).`, i, field);
+        };
+
+        if (it.kind === "weapon") {
+          if (Array.isArray(it.parts) && it.parts.length) report("warn", "Weapons ignore body parts; they fill the weapon slot.", i, "parts");
+          if (!Number.isInteger(it.damage) || it.damage < 1) report("error", "Weapon damage must be a whole number of at least 1.", i, "damage");
+          if (!Number.isInteger(it.strength) || it.strength < 1 || it.strength > 20) report("error", "Strength requirement must be a whole number from 1 to 20.", i, "strength");
+          if (!num(it.armorPiercing) || it.armorPiercing < 0 || it.armorPiercing > 100) report("error", "Armor piercing must be between 0 and 100.", i, "armorPiercing");
+          if (it.armor) report("warn", "Weapons do not add armor; armor is ignored.", i, "armor");
+          if (rarity) {
+            band(it.damage, rarity.damage, "Damage", "damage");
+            band(it.strength, rarity.strength, "Strength requirement", "strength");
+            band(it.armorPiercing, rarity.armorPiercing, "Armor piercing", "armorPiercing");
           }
+        } else {
+          if (it.damage || it.armorPiercing) report("warn", "Armor does not use damage or armor piercing; they are ignored.", i, "damage");
+          if (!Array.isArray(it.parts) || !it.parts.length) {
+            report("error", "Target at least one body part.", i, "parts");
+          } else {
+            const seen = new Set();
+            for (const part of it.parts) {
+              if (ctx.bodyPartKeys.length && !ctx.bodyPartKeys.includes(part)) report("error", `Body part "${part}" is not in characters/bodyData.js.`, i, "parts");
+              else if (seen.has(part)) report("warn", `Body part "${part}" is listed twice.`, i, "parts");
+              else seen.add(part);
+            }
+          }
+          if (!Number.isInteger(it.armor) || it.armor < 0) report("error", "Armor must be a whole number, 0 or more.", i, "armor");
+          else if (Number.isInteger(d.maxArmor) && it.armor > d.maxArmor) report("error", `Armor is above the cap of ${d.maxArmor}.`, i, "armor");
+          if (rarity) band(it.armor, rarity.armor, "Armor", "armor");
         }
-        if (!Number.isInteger(it.armor) || it.armor < 0) report("error", "Armor must be a whole number, 0 or more.", i, "armor");
-        else if (Number.isInteger(d.maxArmor) && it.armor > d.maxArmor) report("error", `Armor is above the cap of ${d.maxArmor}.`, i, "armor");
         if (!num(it.weight) || it.weight < 0) report("error", "Find weight must be a number, 0 or more.", i, "weight");
       });
     },

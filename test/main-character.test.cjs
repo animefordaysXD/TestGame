@@ -128,6 +128,7 @@ async function listNames(dir) {
     stamina: 100, staminaMax: 100,
     mana: 50, manaMax: 50,
     armor: 0,
+    strength: 10,
     war: 10, diplomacy: 10, personalCombat: 10,
     moneyManagement: 10, intrigue: 10, intelligence: 10
   });

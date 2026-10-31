@@ -31,12 +31,13 @@ mercenary, a beast tamer or elven scout, or a highborn noble with court games, a
   dialogue and their own event checker (a cunning commoner may try to rob you).
 - **Saves** are JSON files holding the seed plus the changes.
 - **Open:** inheritance, death rules, how magic works.
-- **Built so far:** engine, stats, ten-part humanoid bodies for every character (status-only),
-  NPCs with 30 personality archetypes (traits plus 0-100 behavior profiles, data-only) and
-  `temp`/`named` buckets (three-tier model planned),
-  equipment/armor, five area actions, timed travel, a travel graph with route distances,
-  combat v0.1, locations, a placeholder map spawner with fixed tavern/castle/shack
-  landmarks, biome events, save files, and a form-based content editor
+- **Built so far:** engine, stats (including Strength), ten-part humanoid bodies for every
+  character (status-only), NPCs with 30 personality archetypes (traits plus 0-100 behavior
+  profiles, data-only) and `temp`/`named` buckets (three-tier model planned), equipment with
+  body-part armor, a weapon slot (swords/spears/maces) and five rarity tiers, five area
+  actions, timed travel, a travel graph with route distances, combat v0.2 (weapon damage,
+  Strength gating and armor piercing), locations, a placeholder map spawner with fixed
+  tavern/castle/shack landmarks, biome events, save files, and a form-based content editor
   (`editor.html`; tooling, not a module).
 
 ## Vision and scope
@@ -101,7 +102,7 @@ mercenary, a beast tamer or elven scout, or a highborn noble with court games, a
 ## Saves and technology
 
 - [Built] Save as a JSON file with the seed and the changes, and load from it — Jo, 2026-10-25 (v1 seed + baseline + changes; export/import; legacy migration)
-- [Built] A form-based content editor for biome events, travel, body-part armor, actions and character names/traits/ages — build, 2026-10-31 (`editor.html`; strict-JSON round-trip, validation, folder saves or downloads; tooling, not a module)
+- [Built] A form-based content editor for biome events, travel, body-part armor, weapons, rarity tiers, actions and character names/traits/ages — build, 2026-10-31 (`editor.html`; strict-JSON round-trip, validation, folder saves or downloads; tooling, not a module)
 - [Idea] IndexedDB autosave plus the file as export and backup — PM, 2026-10-25
 - [Idea] Keep `engine.js` frozen; everything so far fits in modules — PM, 2026-10-25
 
@@ -117,6 +118,8 @@ mercenary, a beast tamer or elven scout, or a highborn noble with court games, a
 - [Idea] Equipment, so armor and Defend matter — PM, 2026-10-25
 - [Built] Body armor with an inventory, equip/unequip and an armor stat that feeds Defend — build, 2026-10-27
 - [Built] Body-part armor targeting: items cover one or more of the ten body parts, several pieces can be worn at once, overlapping items replace each other and total armor is summed — build, 2026-10-31
+- [Built] Weapons (swords, spears, maces) in one weapon slot with base damage, a Strength requirement and armor piercing; five rarity tiers (Common, Uncommon, Rare, Legendary, Unique) with strict stat bands; rarity/kind filtered finds and item destruction — build, 2026-10-31
+- [Idea] Use the filtered `equipment:add` / `equipment:remove` hooks from events, loot tables and mobs so a given rarity can be generated or destroyed without the editor — PM, 2026-10-31
 - [Idea] A shared skill-check rule: roll plus skill against a difficulty — PM, 2026-10-25
 - [Idea] A slow survival clock (hunger, exposure) so Rest, Hunt and Scavenge are needs — PM, 2026-10-25
 
@@ -136,6 +139,7 @@ mercenary, a beast tamer or elven scout, or a highborn noble with court games, a
 
 ## Log
 
+- 2026-10-31: Equipment v0.3 built: swords, spears and maces fill one weapon slot with base damage, a Strength requirement and armor piercing. Five rarity tiers (Common, Uncommon, Rare, Legendary, Unique) define strict stat bands, and `equipment:add` accepts kind/rarity filters while `equipment:remove` destroys items. Combat v0.2 adds weapon damage, Strength gating and armor piercing; armor now reduces every hit and Defend doubles it. The game UI and editor were updated. Summary refreshed.
 - 2026-10-31: Equipment v0.2 built: armor items target the ten body parts, multi-part items are supported, several worn items sum their armor, and overlapping items replace each other whole. `equippedByPart` replaces `equippedId` with save migration; the editor uses a body-part multi-select. Summary refreshed.
 - 2026-10-31: Character bodies built for NPCs and the main character. Ten parts (head, torso, left/right legs, arms, hands, feet) share one data layout and normaliser; each part stores a status starting at `"intact"`. No injury, healing or combat rule reads the status yet; equipment targets the part keys. Summary refreshed.
 - 2026-10-31: Content editor added: `editor.html` edits biome events, travel, armor, actions and character names/traits/ages, validates before saving, and writes strict JSON with headers preserved. It is tooling, not a module. Fixed null help text and duplicate outcome ids during testing. Summary refreshed.

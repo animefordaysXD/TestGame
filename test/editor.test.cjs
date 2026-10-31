@@ -89,6 +89,8 @@ for (const f of S.FILES) {
 for (const r of S.REFS) refs[r.id] = C.parseDataFile(read(r.path), r.global, { allowEval: true }).data;
 
 assert.deepEqual(S.validateAll(loaded, refs).filter((i) => i.level === "error"), [], "shipped content has no errors");
+assert.deepEqual(S.validateAll(loaded, refs).filter((i) => /band/.test(i.message)), [],
+  "every shipped item stays inside its rarity band");
 
 // ----- sections cover the files and previews work -----
 const ctx = S.buildContext(loaded, refs);
@@ -97,6 +99,11 @@ assert.equal(ctx.armorMultiplier, 2);
 assert.equal(ctx.bodyPartKeys.length, refs.body.parts.length, "the editor knows every body part");
 assert.ok(ctx.bodyPartKeys.includes("torso") && ctx.bodyPartKeys.includes("leftHand"));
 assert.ok(ctx.equipmentKeys.includes("leather_cuirass"));
+assert.ok(ctx.equipmentKeys.includes("iron_shortsword"), "the editor knows weapon keys");
+assert.ok(ctx.rarities.includes("unique"));
+assert.deepEqual(S.optionsFor("rarities", ctx).find((o) => o.value === "common"),
+  { value: "common", label: "Common" }, "rarity options use their labels");
+assert.deepEqual(S.optionsFor("kinds", ctx).map((o) => o.value), ["armor", "weapon"]);
 assert.deepEqual(S.optionsFor("bodyParts", ctx)[0], { value: "head", label: "Head" }, "body-part options use the canonical labels");
 const sections = S.sectionsFor(loaded);
 const fileIds = new Set(S.FILES.map((f) => f.id));
@@ -162,6 +169,9 @@ for (const s of sections) {
   assert.ok(armorPreview.notes.some((n) => n.includes("Covers")), "armor preview lists the body parts it covers");
   assert.ok(armorPreview.notes.some((n) => n.includes("Defend blocks")), "armor preview explains Defend");
   assert.ok(armorPreview.chips.some((c) => c.text === "Torso" || c.text === "Head"), "armor preview chips name covered parts");
+  const weaponPreview = armor.preview(loaded.equipment.items.find((i) => i.kind === "weapon"), ctx, loaded);
+  assert.ok(weaponPreview.notes.some((n) => n.includes("Strength")), "weapon preview shows the Strength requirement");
+  assert.ok(weaponPreview.chips.some((c) => /^Pierce \d+%$/.test(c.text)), "weapon preview chips armor piercing");
 }
 
 // ----- checks catch mistakes -----
@@ -188,6 +198,12 @@ const has = (list, level, re) => list.some((i) => i.level === level && re.test(i
   assert.ok(has(problems((d) => { d.equipment.items[0].parts = []; }), "error", /Target at least one body part/));
   assert.ok(has(problems((d) => { d.equipment.items[0].parts = ["torso", "torso"]; }), "warn", /listed twice/));
   assert.ok(has(problems((d) => { d.equipment.items[0].armor = 999; }), "error", /above the cap/));
+  const weaponAt = (d) => d.equipment.items.find((i) => i.kind === "weapon");
+  assert.ok(has(problems((d) => { weaponAt(d).damage = 0; }), "error", /at least 1/), "weapon damage must be positive");
+  assert.ok(has(problems((d) => { weaponAt(d).strength = 25; }), "error", /1 to 20/), "weapon Strength stays in range");
+  assert.ok(has(problems((d) => { weaponAt(d).armorPiercing = 150; }), "error", /between 0 and 100/), "armor piercing is a percentage");
+  assert.ok(has(problems((d) => { weaponAt(d).rarity = "mythic"; }), "error", /Unknown rarity/), "unknown rarities are errors");
+  assert.ok(has(problems((d) => { weaponAt(d).damage = 99; }), "warn", /outside the .* band/), "out-of-band stats warn");
   assert.ok(has(problems((d) => { d.actions.default[0].outcomes[0].equipmentKey = "nothing"; }), "error", /no item "nothing"/));
   assert.ok(has(problems((d) => { d.actions.default[1].outcomes[0].id = d.actions.default[0].outcomes[0].id; }), "error", /Outcome id .* used twice/));
   assert.ok(has(problems((d) => { d.actions.default.pop(); }), "warn", /at least five/));

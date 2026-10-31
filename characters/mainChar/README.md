@@ -5,7 +5,7 @@ Browser mirror for the one main character.
 When you click **Connect mainChar folder** on the test page and choose the `text-rpg`
 folder, the module uses this folder and writes:
 
-- `main.json` — the full character (name, gender, age, nine base stats plus armor, ten-part
+- `main.json` — the full character (name, gender, age, ten base stats plus armor, ten-part
   body with per-part status, image data URL, timestamps)
 - `profile.webp` / `.png` / `.jpg` / `.svg` — a viewable copy of the profile picture
 

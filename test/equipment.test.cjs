@@ -42,7 +42,7 @@ watch(engine);
 const slice = () => engine.state.modules.equipment;
 const itemByKey = (key) => Object.values(slice().items).find((item) => item.key === key);
 
-assert.deepEqual(slice(), { nextId: 1, items: {}, equippedByPart: {} });
+assert.deepEqual(slice(), { nextId: 1, items: {}, equippedByPart: {}, equippedWeaponId: null });
 assert.equal(equipment.totalArmor(), 0);
 assert.deepEqual(equipment.coverage().map((part) => part.part), CharacterBodyData.parts.map((part) => part.key));
 
@@ -156,13 +156,15 @@ act(engine, "equipment:unequip", { itemId: "eq_9999" });
 assert.equal(Object.keys(slice().items).length, beforeInvalid);
 assert.deepEqual(slice().equippedByPart, {});
 
-// Without a key, add() picks from the catalogue with engine.rng and auto-equips a free part.
+// Without a key, add() picks from the catalogue with engine.rng and auto-equips it.
 act(engine, "equipment:add");
 assert.equal(Object.keys(slice().items).length, beforeInvalid + 1);
 const randomItem = Object.values(slice().items).at(-1);
 assert.ok(EquipmentData.items.some((item) => item.key === randomItem.key));
 assert.equal(randomItem.equipped, true, "a free item auto-equips");
-assert.ok(character.stats.armor >= 1);
+assert.ok(["armor", "weapon"].includes(randomItem.kind));
+if (randomItem.kind === "weapon") assert.equal(slice().equippedWeaponId, randomItem.id);
+else assert.ok(character.stats.armor >= 1);
 
 // End-to-end: summed equipped armor makes Defend reduce real combat damage.
 const fight = new Engine({ seed: 3002, tickMinutes: 10 });
@@ -199,7 +201,7 @@ assert.equal(hit.data.amount, 0);
 // Reset clears the slice without duplicating subscriptions.
 const addedBeforeReset = added.length;
 engine.reset(4001);
-assert.deepEqual(slice(), { nextId: 1, items: {}, equippedByPart: {} });
+assert.deepEqual(slice(), { nextId: 1, items: {}, equippedByPart: {}, equippedWeaponId: null });
 assert.equal(equipment.totalArmor(), 0);
 main.save({ name: "After Reset", gender: "female", age: 22 });
 engine.flush();
@@ -255,6 +257,80 @@ assert.equal("slot" in legacySlice.items.eq_0001, false);
 assert.equal(legacySlice.items.eq_0001.equipped, true);
 assert.equal(legacyGear.totalArmor(), 3);
 assert.equal(legacyEngine.state.modules.mainCharacter.character.stats.armor, 3);
+
+// Weapons use one slot, carry a rarity and never change armor.
+{
+  const w = makeWorld(3100);
+  const wSlice = () => w.engine.state.modules.equipment;
+  const equipEvents = [], removedEvents = [];
+  w.engine.on("event:equipment:equipped", (e) => equipEvents.push(e));
+  w.engine.on("event:equipment:removed", (e) => removedEvents.push(e));
+
+  act(w.engine, "equipment:add", { key: "iron_shortsword" });
+  const sword = Object.values(wSlice().items)[0];
+  assert.equal(sword.kind, "weapon");
+  assert.equal(sword.rarity, "common");
+  assert.deepEqual(sword.parts, []);
+  assert.equal(sword.damage, 3);
+  assert.equal(sword.strength, 4);
+  assert.equal(sword.armorPiercing, 6);
+  assert.equal(wSlice().equippedWeaponId, sword.id, "a free weapon slot auto-equips");
+  assert.equal(w.equipment.weaponFor("main").key, "iron_shortsword");
+  assert.equal(w.equipment.weaponFor("someone_else"), null);
+  assert.equal(w.character.stats.armor, 0, "a weapon never changes armor");
+  assert.equal(w.equipment.totalArmor(), 0);
+
+  // A second weapon stays in the inventory; equipping it replaces the first.
+  act(w.engine, "equipment:add", { key: "warhammer" });
+  const hammer = Object.values(wSlice().items).find((item) => item.key === "warhammer");
+  assert.equal(hammer.equipped, false);
+  act(w.engine, "equipment:equip", { itemId: hammer.id });
+  assert.equal(wSlice().equippedWeaponId, hammer.id);
+  assert.equal(wSlice().items[sword.id].equipped, false);
+  assert.deepEqual(equipEvents.at(-1).data.replacedItemIds, [sword.id]);
+  assert.equal(equipEvents.at(-1).data.kind, "weapon");
+  assert.equal(equipEvents.at(-1).data.rarity, "rare");
+  assert.equal(equipEvents.at(-1).data.totalArmor, 0, "weapon events keep the armor total");
+
+  // Rarity and kind filters narrow a random find.
+  act(w.engine, "equipment:add", { kind: "weapon", rarity: "unique" });
+  const uniqueWeapon = Object.values(wSlice().items).at(-1);
+  assert.equal(uniqueWeapon.kind, "weapon");
+  assert.equal(uniqueWeapon.rarity, "unique");
+  assert.equal(uniqueWeapon.equipped, false, "the one weapon slot is taken");
+
+  act(w.engine, "equipment:add", { kind: "armor", rarity: "legendary" });
+  const legendaryArmor = Object.values(wSlice().items).at(-1);
+  assert.equal(legendaryArmor.kind, "armor");
+  assert.equal(legendaryArmor.rarity, "legendary");
+  assert.equal(legendaryArmor.key, "dragonscale_cuirass", "it is the only legendary armor");
+  assert.equal(legendaryArmor.equipped, true);
+  assert.equal(w.character.stats.armor, 8);
+
+  // Destroy an inventory item.
+  const beforeRemove = Object.keys(wSlice().items).length;
+  act(w.engine, "equipment:remove", { itemId: uniqueWeapon.id });
+  assert.equal(Object.keys(wSlice().items).length, beforeRemove - 1);
+  assert.equal(wSlice().items[uniqueWeapon.id], undefined);
+  assert.equal(removedEvents.at(-1).data.rarity, "unique");
+  assert.equal(removedEvents.at(-1).data.wasEquipped, false);
+
+  // Destroying a worn weapon clears the slot and reports it.
+  act(w.engine, "equipment:remove", { itemId: hammer.id });
+  assert.equal(wSlice().equippedWeaponId, null);
+  assert.equal(w.equipment.equippedWeapon(), null);
+  assert.equal(removedEvents.at(-1).data.wasEquipped, true);
+  assert.equal(removedEvents.at(-1).data.kind, "weapon");
+
+  // The rarity bands get stricter with rank.
+  assert.deepEqual(EquipmentData.rarities.map((rarity) => rarity.key),
+    ["common", "uncommon", "rare", "legendary", "unique"]);
+  for (let i = 1; i < EquipmentData.rarities.length; i++) {
+    const lower = EquipmentData.rarities[i - 1], higher = EquipmentData.rarities[i];
+    assert.ok(higher.armor[0] > lower.armor[1], `${higher.key} armor starts above ${lower.key}`);
+    assert.ok(higher.damage[0] > lower.damage[1], `${higher.key} damage starts above ${lower.key}`);
+  }
+}
 
 for (const file of ["../equipment/equipment.js", "../equipment/data.js"]) {
   const text = fs.readFileSync(path.join(__dirname, file), "utf8");

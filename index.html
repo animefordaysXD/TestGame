@@ -123,11 +123,12 @@
   <h2>Equipment <span class="seed" id="equipArmor"></span></h2>
   <div class="bar">
     <button class="primary" id="equipFind">Find armor</button>
+    <button id="equipFindWeapon">Find weapon</button>
     <button id="equipClear">Unequip all</button>
   </div>
-  <p class="meta" id="equipStatus">No armor equipped. Defend reduces incoming damage by armor × 2.</p>
+  <p class="meta" id="equipStatus">No armor or weapon equipped.</p>
   <ul class="chars" id="equipment"></ul>
-  <p class="meta">Each item covers body parts. Worn items must not share a part; equipping one replaces the items it overlaps. Armor is the sum of all worn items and is written into the main character's Armor stat. Only the main character can wear equipment in this version.</p>
+  <p class="meta">Armor covers body parts and cannot share a part with another worn item. A weapon fills one weapon slot and needs Strength to use: below the requirement it adds no damage and no armor piercing. Armor reduces every hit and Defend doubles it. Only the main character can wear equipment in this version.</p>
 
   <h2>Characters</h2>
   <div class="bar">
@@ -145,7 +146,7 @@
       <div class="combatant"><span class="stat-label" id="combatEnemyName">Enemy</span><strong id="combatEnemyHp">—</strong></div>
     </div>
     <p class="meta" id="combatStatus">No combat. Use Fight on an NPC.</p>
-    <p class="meta">Attack uses Personal Combat. Defend applies max(0, damage − armor × 2); equip armor above to make it matter.</p>
+    <p class="meta">Attack uses Personal Combat plus the equipped weapon. Armor reduces every hit; Defend doubles that reduction, and a weapon's armor piercing cuts through it.</p>
     <div class="bar">
       <button id="combatAttack" disabled>Attack</button>
       <button id="combatDefend" disabled>Defend</button>
@@ -802,8 +803,14 @@
   engine.on("event:mainCharacter:armorChanged", renderMainStats);
 
   // ----- Equipment panel -----
+  const rarityLabel = (key) => {
+    const def = (window.EquipmentData && Array.isArray(EquipmentData.rarities))
+      ? EquipmentData.rarities.find((rarity) => rarity.key === key) : null;
+    return def ? def.label : (key || "Common");
+  };
+
   function renderEquipment() {
-    const s = engine.state.modules.equipment || { items: {}, equippedByPart: {} };
+    const s = engine.state.modules.equipment || { items: {}, equippedByPart: {}, equippedWeaponId: null };
     const items = Object.values(s.items || {});
     const byPart = s.equippedByPart || {};
     const bodyParts = (window.CharacterBodyData && Array.isArray(window.CharacterBodyData.parts)) ? window.CharacterBodyData.parts : [];
@@ -812,43 +819,66 @@
       return def ? def.label : key;
     };
     const labels = (parts) => (Array.isArray(parts) ? parts : []).map(partLabel);
-    const worn = items.filter((item) => Array.isArray(item.parts) && item.parts.some((part) => byPart[part] === item.id));
+    const isWorn = (item) => item.kind === "weapon"
+      ? s.equippedWeaponId === item.id
+      : (Array.isArray(item.parts) && item.parts.some((part) => byPart[part] === item.id));
+    const worn = items.filter(isWorn);
     const armor = equipmentModule.totalArmor();
+    const weapon = equipmentModule.equippedWeapon();
     const covered = bodyParts.filter((part) => byPart[part.key]);
-    const hasMain = !!(engine.state.modules.mainCharacter && engine.state.modules.mainCharacter.character);
+    const main = engine.state.modules.mainCharacter && engine.state.modules.mainCharacter.character;
+    const strength = main && main.stats ? Math.round(Number(main.stats.strength) || 0) : 0;
+    const hasMain = !!main;
 
     $("equipFind").disabled = !hasMain;
+    $("equipFindWeapon").disabled = !hasMain;
     $("equipClear").disabled = !hasMain || !worn.length;
-    $("equipArmor").textContent = `armor ${armor}/100 · ${covered.length}/${bodyParts.length} parts`;
+    $("equipArmor").textContent = weapon
+      ? `${weapon.name} · armor ${armor}/100`
+      : `armor ${armor}/100 · ${covered.length}/${bodyParts.length} parts`;
+
+    const weaponStatus = weapon
+      ? `Weapon: ${weapon.name} (${rarityLabel(weapon.rarity)}) · damage ${weapon.damage} · ${weapon.armorPiercing}% armor piercing${strength < weapon.strength ? ` · TOO HEAVY (need Strength ${weapon.strength})` : ""}`
+      : "No weapon equipped.";
     $("equipStatus").textContent = worn.length
-      ? `Wearing ${worn.length} item${worn.length === 1 ? "" : "s"} · armor ${armor}/100 · covered: ${covered.map((part) => part.label).join(", ")} · Defend blocks ${armor * 2} damage.`
-      : items.length
-        ? "No armor equipped. Equip an item below."
-        : "No armor yet. Find armor here, or scavenge while exploring.";
+      ? `Wearing ${worn.length} item${worn.length === 1 ? "" : "s"} · armor ${armor}/100. ${weaponStatus}`
+      : `${items.length ? "Nothing equipped." : "No equipment yet. Find armor or a weapon here, or scavenge while exploring."} ${weaponStatus}`;
 
     const ul = $("equipment");
     ul.innerHTML = "";
     if (!items.length) {
       const li = document.createElement("li");
       li.className = "empty";
-      li.textContent = hasMain ? "No armor in the inventory." : "Save a main character first.";
+      li.textContent = hasMain ? "No equipment in the inventory." : "Save a main character first.";
       ul.append(li);
       return;
     }
 
     for (const item of items) {
+      const equipped = isWorn(item);
       const li = document.createElement("li"), box = document.createElement("div");
       const title = document.createElement("strong");
-      title.textContent = item.name;
+      title.textContent = `${item.name} · ${rarityLabel(item.rarity)}`;
       const sm = document.createElement("small");
-      sm.textContent = `${labels(item.parts).join(", ") || "no parts"} · armor ${item.armor} · ${item.equipped ? "equipped" : "in inventory"}`;
+      sm.textContent = item.kind === "weapon"
+        ? `weapon · damage ${item.damage} · Strength ${item.strength} · ${item.armorPiercing}% armor piercing · ${equipped ? "equipped" : "in inventory"}`
+        : `${labels(item.parts).join(", ") || "no parts"} · armor ${item.armor} · ${equipped ? "equipped" : "in inventory"}`;
       box.append(title, sm);
       li.append(box);
 
+      const actions = document.createElement("div");
+      actions.className = "row-actions";
+
       const b = document.createElement("button");
-      if (item.equipped) {
+      if (equipped) {
         b.textContent = "Unequip";
         b.onclick = () => act("equipment:unequip", { itemId: item.id });
+      } else if (item.kind === "weapon") {
+        const tooHeavy = strength < item.strength;
+        b.textContent = tooHeavy ? "Too heavy" : "Equip";
+        b.title = `${item.name} (${rarityLabel(item.rarity)}) — damage ${item.damage}, needs Strength ${item.strength}, ${item.armorPiercing}% armor piercing${tooHeavy ? `; current Strength ${strength}` : ""}`;
+        b.disabled = !hasMain || tooHeavy;
+        b.onclick = () => act("equipment:equip", { itemId: item.id });
       } else {
         const conflicts = [...new Set((item.parts || []).map((part) => byPart[part]).filter((id) => id && id !== item.id))]
           .map((id) => (s.items[id] || {}).name).filter(Boolean);
@@ -857,7 +887,18 @@
         b.disabled = !hasMain;
         b.onclick = () => act("equipment:equip", { itemId: item.id });
       }
-      li.append(b);
+
+      const destroy = document.createElement("button");
+      destroy.textContent = "Destroy";
+      destroy.title = `Destroy ${item.name} (${rarityLabel(item.rarity)}). This cannot be undone.`;
+      destroy.disabled = !hasMain;
+      destroy.onclick = () => {
+        if (window.confirm(`Destroy ${item.name}? This cannot be undone.`))
+          act("equipment:remove", { itemId: item.id });
+      };
+
+      actions.append(b, destroy);
+      li.append(actions);
       ul.append(li);
     }
   }
@@ -867,11 +908,18 @@
       alert("Save a main character before finding equipment.");
       return;
     }
-    act("equipment:add");
+    act("equipment:add", { kind: "armor" });
+  };
+  $("equipFindWeapon").onclick = () => {
+    if (!engine.state.modules.mainCharacter.character) {
+      alert("Save a main character before finding equipment.");
+      return;
+    }
+    act("equipment:add", { kind: "weapon" });
   };
   $("equipClear").onclick = () => act("equipment:unequip");
 
-  for (const name of ["equipment:added", "equipment:equipped", "equipment:unequipped"]) {
+  for (const name of ["equipment:added", "equipment:equipped", "equipment:unequipped", "equipment:removed"]) {
     engine.on(`event:${name}`, renderEquipment);
   }
 
@@ -966,13 +1014,21 @@
 
   // ----- Combat panel -----
   function combatSnapshot(c) {
+    const weapon = c && c.id === "main" && equipmentModule ? equipmentModule.weaponFor(c.id) : null;
     return {
       id: c.id,
       name: c.name,
       hp: c.stats.hp,
       hpMax: c.stats.hpMax,
       personalCombat: c.stats.personalCombat,
-      armor: c.stats.armor ?? 0
+      strength: c.stats.strength ?? 10,
+      armor: c.stats.armor ?? 0,
+      weapon: weapon
+        ? {
+          key: weapon.key, name: weapon.name, rarity: weapon.rarity,
+          damage: weapon.damage, strength: weapon.strength, armorPiercing: weapon.armorPiercing
+        }
+        : null
     };
   }
 

@@ -3,13 +3,14 @@
 **Repository:** <https://github.com/animefordaysXD/TestGame>
 
 **Last updated:** 2026-10-31
-**Current spec:** `ENGINE_SPEC.md` v1.5
+**Current spec:** `ENGINE_SPEC.md` v1.6
 **Status:** working test page with a procedural map spawner (configurable random locations
 plus fixed tavern/castle/shack landmarks), a travel graph of connected locations,
-procedural locations, biome events, a main-character creator with nine base stats plus
+procedural locations, biome events, a main-character creator with ten base stats plus
 armor and a ten-part body, NPCs with the same stats, bodies and 30 named personality
 archetypes, basic player-first
-combat (Attack/Defend), an equipment module whose armor feeds Defend, five area actions
+combat (Attack/Defend), an equipment module with body-part armor plus a weapon slot
+(damage, Strength requirement, armor piercing) and five rarity tiers, five area actions
 with costs/outcomes/time, route-based timed travel with 5-minute event checks and
 pause/resume, real JSON save files (seed + baseline + changes) alongside the quick local
 save, and a live node-tree status page.
@@ -71,12 +72,13 @@ Tests currently cover:
 - `test/actions.test.cjs` — five-action loading, biome overrides, weighted outcomes,
   stat costs, time, route time/distance override, travel through locations, equipment
   rewards, reset, save/load.
-- `test/equipment.test.cjs` — body-part inventory, free-part auto-equip, overlap replacement,
-  summed armor, armor bridge, combat/Defend integration, reset, save/load and v0.1 migration.
+- `test/equipment.test.cjs` — body-part inventory, free-slot auto-equip, overlap replacement,
+  summed armor, the weapon slot, rarity/kind filtered finds, destruction, the armor bridge,
+  combat integration, reset, save/load and v0.1 migration.
 - `test/travel.test.cjs` — 5-minute checks, event pause/resume, effects, distance
   persistence, duration rounding, cancel, reset, save/load.
-- `test/combat.test.cjs` — player-first turns, attack damage, defend/armor, lethal hits,
-  invalid actions, reset, save/load.
+- `test/combat.test.cjs` — player-first turns, attack damage, weapon damage and armor
+  piercing, Strength gating, defend/armor, lethal hits, invalid actions, reset, save/load.
 - `test/save.test.cjs` — capture, exact restore, JSON round-trip, legacy v0 migration,
   newer-format refusal, unsafe paths, `applyChanges`.
 - `test/editor.test.cjs` — editor formatter stability, byte-identical round-trips of every
@@ -117,8 +119,8 @@ Tests currently cover:
 |---|---|---|
 | `characters` | `nextId`, `named{}`, `temp{}` | NPC generator with personality, behavior and base stats; Named NPC / Temporary Spawn |
 | `mainCharacter` | `character` | one player character, profile image, base stats, JSON mirror |
-| `equipment` | `nextId`, `items{}`, `equippedByPart{}` | main-character armor on body parts; sums worn armor into the character stat |
-| `combat` | `active`, `round`, `turn`, `player`, `enemy`, `defending`, `winner*`, `log[]` | basic player-first duels; Attack/Defend |
+| `equipment` | `nextId`, `items{}`, `equippedByPart{}`, `equippedWeaponId` | main-character armor on body parts plus one weapon slot; rarity tiers; sums worn armor into the character stat |
+| `combat` | `active`, `round`, `turn`, `player`, `enemy`, `defending`, `winner*`, `log[]` | basic player-first duels; weapon damage, Strength gating and armor piercing; Attack/Defend |
 | `locations` | `seed`, `createdAt`, `nextId`, `locations{}` (with `connections[]`), `currentId` | procedural locations linked into a travel graph, visit rolls, JSON mirror |
 | `map` | `seed`, `size`, `total`, `lastGeneratedTick`, `lastGeneratedAt`, `landmarks{}` | map spawner: fixed tavern/castle/shack plus a configurable batch of random locations |
 | `actions` | `locationId`, `locationName`, `biomeKey`, `actions[]`, `lastAction` | five area actions with costs, outcomes, time and route-aware Travel |
@@ -136,11 +138,11 @@ directly; see the content-editor section below.
 - Name, gender, age, optional profile image.
 - Uploaded images are centre-cropped to 256 px and stored as WebP/PNG data URLs; a
   missing image gets a generated SVG initials avatar.
-- Every character (main and NPC) has the same nine base stats from
-  `characters/statsData.js`: HP, Stamina, Mana, War, Diplomacy, Personal Combat, Money
-  Management, Intrigue and Intelligence, plus an `armor` equipment stat. Resources are HP
-  0-100, Stamina 0-100 and Mana 0-50; skills are 1-20; armor is 0-100 and starts at 0.
-  Main starts full/10; NPCs roll their values.
+- Every character (main and NPC) has the same ten base stats from
+  `characters/statsData.js`: HP, Stamina, Mana, Strength, War, Diplomacy, Personal Combat,
+  Money Management, Intrigue and Intelligence, plus an `armor` equipment stat. Resources
+  are HP 0-100, Stamina 0-100 and Mana 0-50; skills are 1-20; armor is 0-100 and starts
+  at 0. Main starts full/10; NPCs roll their values.
 - Stats live in `character.stats`; resources also store `hpMax`, `staminaMax` and
   `manaMax`. Old saves with top-level `stamina` are migrated on load.
 - `location:event` effects with `{ stat, delta }` can change any non-equipment base stat;
@@ -183,13 +185,15 @@ directly; see the content-editor section below.
   the log limit. `combat/combat.js` owns the turn flow.
 - The UI starts a duel from an NPC card's **Fight** button. It sends main/NPC snapshots
   in `combat:start`; the module never reads another module's slice.
-- The player always moves first. **Attack** deals Personal Combat damage; a surviving
-  enemy immediately counterattacks. **Defend** braces for that counterattack.
+- The player always moves first. **Attack** deals Personal Combat damage plus the
+  equipped weapon's damage (when Strength meets its requirement); a surviving enemy
+  immediately counterattacks. **Defend** braces for that counterattack.
 - `combat:damage` is applied to the real main/NPC slices by their modules. Lethal player
   hits skip the counterattack; 0 HP ends the fight with `combat:ended`.
-- Defend uses `max(0, damage - armor * 2)`. Armor is written by the equipment module;
-  with no armor equipped, Defend blocks nothing.
-- The enemy always attacks in v0.1. There is no flee, positioning, initiative, hit
+- Armor reduces every hit and Defend doubles that reduction. A weapon's armor piercing
+  shrinks the target's effective armor before the reduction. Armor is written by the
+  equipment module; with no armor equipped it blocks nothing.
+- The enemy always attacks in v0.2. There is no flee, positioning, initiative, hit
   chance or damage variance yet.
 
 ### Locations
@@ -291,26 +295,31 @@ directly; see the content-editor section below.
 
 ### Equipment
 
-- `equipment/data.js` owns the armor catalogue (`key`, `name`, `parts`, `armor`, `weight`),
-  `maxArmor` and `autoEquip`. `parts` uses the ten keys from `characters/bodyData.js`.
-  Twelve items cover the head, torso, arms, hands, legs and feet.
-- An item can cover several parts. Several items can be worn at once as long as no part is
-  shared; equipping an overlapping item removes the conflicting items whole. Total armor is
-  the sum of the distinct worn items, clamped to `maxArmor`.
-- A new item auto-equips when every part it covers is free; otherwise it stays in the
-  inventory. Requests are `equipment:add`, `equipment:equip` and `equipment:unequip`
-  (`{ itemId? }`, omit to clear all); module events are `equipment:added`,
-  `equipment:equipped` and `equipment:unequipped`.
-- `equippedByPart` is the source of truth; v0.1 saves with `equippedId`/`slot` are migrated
-  on load.
+- `equipment/data.js` owns the catalogue and five rarity ranks (`common`, `uncommon`,
+  `rare`, `legendary`, `unique`) with stat bands for armor, damage, Strength and armor
+  piercing. Every item has `kind` (`"armor"` or `"weapon"`) and `rarity`.
+- Armor uses `parts` (the ten keys from `characters/bodyData.js`) and `armor`. Weapons use
+  one weapon slot and carry `damage`, a `strength` requirement and `armorPiercing`.
+- An armor item can cover several parts. Several armor items can be worn at once as long as
+  no part is shared; equipping an overlapping item removes the conflicting items whole.
+  Total armor is the sum of the distinct worn armor, clamped to `maxArmor`.
+- A new item auto-equips when its slot is free (every covered part for armor, an empty
+  weapon slot for a weapon); otherwise it stays in the inventory. Requests are
+  `equipment:add` (`{ key?, kind?, rarity? }`), `equipment:equip`, `equipment:unequip`
+  (`{ itemId? }`), `equipment:remove` (`{ itemId }`); module events are
+  `equipment:added`, `equipment:equipped`, `equipment:unequipped` and
+  `equipment:removed`.
+- `equippedByPart` is the source of truth for armor and `equippedWeaponId` for the weapon;
+  v0.1 saves with `equippedId`/`slot` are migrated on load.
 - The module listens to `action:resolved` and adds the item named by `equipmentKey`.
 - `mainCharacter` listens to the equipped/unequipped events, clamps `totalArmor` to
-  0-100, writes `stats.armor` and emits `mainCharacter:armorChanged`. The equipment
-  module never reads another slice.
+  0-100, writes `stats.armor` and emits `mainCharacter:armorChanged`. Weapon events keep
+  the unchanged `totalArmor`, so they do not touch the armor stat. The equipment module
+  never reads another slice.
 - Only the main character can equip. The UI has an **Equipment** panel with **Find
-  armor**, total armor, covered parts, each item's target parts, per-item **Equip** /
-  **Unequip** and **Unequip all**; Find armor needs a saved main character. Scavenge can
-  award armor.
+  armor**, **Find weapon**, total armor, covered parts, the weapon slot, per-item
+  **Equip** / **Unequip** / **Destroy** and **Unequip all**; finds need a saved main
+  character. Scavenge can award equipment.
 
 ### Content editor
 
@@ -391,10 +400,10 @@ UI Travel interruption
 ```
 
 ```text
-UI Equip / Unequip / Find armor
-  -> equipment:equip / unequip / add
-  -> equipment.equip()/unequip()/add() -> equipment:equipped / unequipped / added
-  -> mainCharacter.applyEquipment() -> mainCharacter:armorChanged
+UI Equip / Unequip / Find / Destroy
+  -> equipment:equip / unequip / add / remove
+  -> equipment.equip()/unequip()/add()/remove() -> equipment:equipped / unequipped / added / removed
+  -> mainCharacter.applyEquipment() -> mainCharacter:armorChanged when armor changed
   -> engine.flush() from the UI
 ```
 
@@ -424,6 +433,15 @@ UI Import save file
 
 ## Recent work
 
+- Equipment v0.3 and combat v0.2: added swords, spears and maces in one weapon slot with
+  base damage, a Strength requirement and armor piercing; added five rarity tiers
+  (Common, Uncommon, Rare, Legendary, Unique) with strict stat bands. A new shared
+  `strength` stat gates weapons. `equipment:add` accepts `kind`/`rarity` filters and
+  `equipment:remove` destroys items, so future events and mobs can generate or destroy
+  loot. Combat now adds weapon damage, ignores part of the target's armor, and armor
+  reduces every hit while Defend doubles it. The game UI gains Find armor/Find weapon,
+  rarity labels, a weapon slot, Strength-gated equipping and Destroy buttons; the editor
+  validates kind, rarity and stat bands. All twelve Node test files pass.
 - Equipment v0.2: armor now targets the ten body-part keys. Item `parts` can cover several
   parts, several items can be worn at once, and overlapping items replace each other whole.
   `equippedByPart` replaces `equippedId` with save migration; total armor is summed and
@@ -441,9 +459,10 @@ UI Import save file
   smoke-tested saving the main character, spawning an NPC and loading status.html with no
   console errors; all twelve Node test files pass.
 - Added the content editor (`editor.html`, `editor/core.js`, `editor/schemas.js`) as a
-  tool, not a module. It edits biome events, travel events/tuning, armor items/settings,
-  area actions/outcomes, and character names/traits/ages in forms, with validation,
-  previews and both direct folder saves and per-file downloads.
+  tool, not a module. It edits biome events, travel events/tuning, equipment items
+  (armor, weapons, rarity tiers)/settings, area actions/outcomes, and character
+  names/traits/ages in forms, with validation, previews and both direct folder saves and
+  per-file downloads.
 - Converted `travel/data.js`, `equipment/data.js`, `actions/data.js` and
   `characters/data.js` to strict JSON inside their `window.X = { ... };` wrapper so the
   editor can round-trip them byte-for-byte. The characters conversion preserves all 30
@@ -552,12 +571,16 @@ UI Import save file
   locations link to the current area plus a random neighbour, so the graph can grow as a
   chain and the layout is not geographic.
 - Base stats are stored, and location events/actions can change them. Combat uses Personal
-  Combat and armor, but there is no progression, training or opposed-roll system yet.
+  Combat, Strength, armor and a weapon, but there is no progression, training or
+  opposed-roll system yet.
 - Combat is one-on-one and player-first. There is no flee, positioning, initiative, hit
   chance, damage variance or enemy AI; the enemy always attacks.
-- Equipment is main-character-only and targets the ten body parts. NPCs still fight at
-  armor 0. Armor is mirrored to the main character present when the item is equipped; the
-  UI requires a saved character before **Find armor**.
+- Equipment is main-character-only. Armor targets the ten body parts and one weapon can be
+  carried. NPCs still fight at armor 0 with no weapon. Armor is mirrored to the main
+  character present when the item is equipped; the UI requires a saved character before
+  **Find armor** or **Find weapon**.
+- Rarity affects stats and find weight only. `equipment:add` and `equipment:remove` are
+  ready for events/mobs, but no content generates or destroys a rarity-tiered item yet.
 - NPC personality archetypes, traits and behavior profiles are generated and displayed, but
   no AI reads them yet. Combat has no enemy AI, dialogue is not implemented, and NPC events
   do not use personality.
@@ -607,8 +630,9 @@ UI Import save file
    pairs; keep travel resolution modular.
 3. Use stats in action and event checks (success/chance based on skill and difficulty)
    and add requirements such as minimum stamina or a needed item.
-4. Expand equipment: NPC loadouts, more slots (head/hands/weapon), item quality and
-   inventory limits; keep the armor-to-stat bridge event-based.
+4. Expand equipment: NPC loadouts and loot tables that call `equipment:add` with a rarity
+   filter or `equipment:remove`; inventory limits and maybe more slots. Keep the
+   armor-to-stat bridge event-based.
 5. Add per-biome action overrides and test them in the UI.
 6. Add event conditions (weather, time, once/cooldown) to the biome event schema.
 7. Expand combat: enemy AI, flee, multiple opponents, hit chance/damage variance, or
@@ -639,23 +663,24 @@ change, update ENGINE_SPEC.md, MODULES.md (including its update log), HANDOFF.md
 and the hand-maintained branches in status.html. Commit only when asked; do not push without
 explicit approval.
 
-Current build: core v0.2; characters v0.5; mainCharacter v0.6; equipment v0.2; locations v0.4;
-map v0.1; actions v0.3; travel v0.2; combat v0.1; save helper v0.1. Working: a procedural map
+Current build: core v0.2; characters v0.5; mainCharacter v0.6; equipment v0.3; locations v0.4;
+map v0.1; actions v0.3; travel v0.2; combat v0.2; save helper v0.1. Working: a procedural map
 spawner with a configurable random count and fixed tavern/castle/shack landmarks; a travel graph
 of connected locations with distances and route-based times; procedural locations; biome events
-(only tundra has a live event); shared stats and ten-part bodies; 30 named NPC personality
-archetypes with traits and behavior profiles (data-only, no AI reads them yet); body-part
-equipment with summed armor feeding Defend; five area actions with time, costs and weighted outcomes; route-based
+(only tundra has a live event); shared stats (including Strength) and ten-part bodies; 30 named
+NPC personality archetypes with traits and behavior profiles (data-only, no AI reads them yet);
+body-part armor plus a weapon slot, five rarity tiers, and armor/weapon stats feeding combat;
+five area actions with time, costs and weighted outcomes; route-based
 timed travel with 5-minute checks, event pause/resume and arrival through locations; basic
-player-first combat; real JSON save files (seed + baseline + changes) with legacy migration and
-unsafe-path guards, alongside quick localStorage saves; a read-only status tree; and a form-based
-content editor (`editor.html`) that is a tool, not a module. Twelve Node test files are wired
-into npm test.
+player-first combat with weapon damage, Strength gating and armor piercing; real JSON save files
+(seed + baseline + changes) with legacy migration and unsafe-path guards, alongside quick
+localStorage saves; a read-only status tree; and a form-based content editor (`editor.html`)
+that is a tool, not a module. Twelve Node test files are wired into npm test.
 
 Known gaps: the map spawner is a placeholder (landmarks are ordinary locations with no interiors
 or layout rules); actions and events have no requirements or skill checks; travel events are
 stat-only scenes with no choices or combat handoff; hostility is display-only; the graph has no
-coordinates or map view; most biomes have no live event; NPCs cannot equip; combat has no flee,
+coordinates or map view; most biomes have no live event; NPCs cannot equip and carry no weapon; combat has no flee,
 enemy AI, hit chance or variance; personality and behavior do not drive behaviour yet; body
 part status is structural only and no rule injures, heals or equips it; the
 three-tier NPC model is only approximated by temp/named buckets.

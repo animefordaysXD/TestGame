@@ -1,6 +1,6 @@
 # Design — Living Medieval Sandbox
 
-**Last updated:** 2026-10-29
+**Last updated:** 2026-10-31
 **Owner:** Jo (decisions) · **PM role:** the AI session (proposals, tracking, trade-offs)
 
 This file is the source of truth for **what the game is and why**. `HANDOFF.md` says how the
@@ -245,9 +245,10 @@ and writes the data back without touching the game or the engine.
 - **Strict JSON in a JS wrapper.** Files keep their `window.X = { ... };` form and header
   comment, but the object is strict JSON so the editor can round-trip it losslessly. Unknown
   fields survive saves; older JavaScript-syntax files open with a lossy warning.
-- **Editable today:** biome events, travel events/tuning, armor items/settings, area actions
-  and outcomes, and character names/traits/ages. Map, locations, stats, combat tuning,
-  body layout, behavior axes and personality archetypes are not editable yet.
+- **Editable today:** biome events, travel events/tuning, equipment items (armor and weapons),
+  rarity tiers and settings, area actions and outcomes, and character names/traits/ages. Map,
+  locations, stats, combat tuning, body layout, behavior axes and personality archetypes are
+  not editable yet.
 - **Direct or downloaded saves.** With a folder connection (Chrome/Edge) saves write straight
   to disk; otherwise files download and must be moved back by hand.
 
@@ -270,6 +271,31 @@ yet.
 - **Visible in the UI.** The main-character panel has a Body grid and NPC cards show a
   compact body line; `status.html` expands the parts.
 
+### 3.17 Equipment, weapons and rarity — Decided, Implemented (equipment v0.3, combat v0.2)
+
+Equipment is the first real source of combat power. Armor already existed per body part; this
+slice adds weapons and item quality without replacing the body-part model.
+
+- **Three weapon families:** swords, spears and maces. More families can be added as data.
+- **A weapon needs three numbers:** base damage, a Strength requirement, and armor piercing as
+  a percentage of the target's total armor. A character below the requirement cannot use the
+  weapon: it adds no damage and no piercing. Strength becomes a shared base stat for this.
+- **One weapon slot.** Weapons are not body parts, so `equippedWeaponId` sits beside
+  `equippedByPart`. Armor keeps its multi-part coverage and overlap-replacement rules.
+- **Five rarity ranks, weakest first:** Common, Uncommon, Rare, Legendary and Unique. Each rank
+  defines a stat band for armor, damage, Strength requirement and armor piercing, and every
+  higher rank starts above the previous rank's maximum. Items live in one list with a `kind`
+  (`"armor"` or `"weapon"`) and a `rarity`; the content editor checks each item against its
+  band and warns when a value falls outside it.
+- **Random finds can be filtered by kind or rarity**, and an item can be destroyed. Those two
+  hooks are the path for events, loot tables and mobs to generate or remove equipment later;
+  no content uses them yet.
+- **Combat v0.2:** attack = Personal Combat plus a usable weapon's damage; armor piercing
+  shrinks the target's effective armor; armor reduces every hit, and Defend doubles that
+  reduction. Everything stays deterministic.
+- **Still open:** how quickly higher rarities should appear, whether rarity has non-stat effects,
+  and how NPC loadouts and loot tables will hand out or destroy items.
+
 ## 4. Roadmap — Proposed
 
 Build playable slices, not systems in isolation. Each slice is a game you can play.
@@ -287,8 +313,8 @@ distance-based times), five area actions with time, costs and weighted outcomes,
 with interruption checks, and biome rolls on arrival exist. A placeholder map spawner now
 creates a configurable batch of random locations plus fixed tavern/castle/shack landmarks;
 real layouts and atlas slots are still missing. Hostility-driven risk and events
-for most biomes are still missing. Slice 2 is partly built: armor/equipment and the armor
-bridge exist, but money, companions and beasts do not.
+for most biomes are still missing. Slice 2 is partly built: body-part armor, one weapon slot and
+five item rarities exist with the armor bridge, but money, companions and beasts do not.
 
 ## 5. Status snapshot
 
@@ -297,15 +323,15 @@ bridge exist, but money, companions and beasts do not.
 | engine core v0.2, event bus, seeded RNG, turn stepping | working, frozen |
 | characters v0.5: stats, ten-part body, 30 personality archetypes with traits and 0-100 behavior profiles (data-only); `temp`/`named` approximation (three-tier model planned) | working |
 | main character v0.6: stats, ten-part body, portrait, effect bridges, armor mirror | working |
-| equipment v0.2: body-part armor, multi-part coverage, summed armor, inventory, equip/unequip | working |
+| equipment v0.3: body-part armor, one weapon slot (swords/spears/maces), five rarity tiers, inventory, equip/unequip/destroy | working |
 | actions v0.3: five area actions with time, costs, outcomes, route-aware Travel | working |
 | travel v0.2: 5-minute checks, event pause/resume, arrival handoff | working |
 | locations v0.4: procedural locations and a travel graph with distances; fixed `kind` landmarks | working |
 | map v0.1: placeholder map spawner with a configurable random batch and fixed tavern/castle/shack | working |
-| combat v0.1 | working |
+| combat v0.2: weapon damage, Strength gating and armor piercing; armor reduces every hit | working |
 | biome events | 1 of 10 biomes has a live event |
 | **save files v0.1 (seed + changes, JSON export/import)** | working |
-| **content editor v0.1 (`editor.html`, tool — not a module)** | working for biome events, travel, armor, actions, character names/traits/ages |
+| **content editor v0.1 (`editor.html`, tool — not a module)** | working for biome events, travel, equipment (armor, weapons, rarity bands), actions, character names/traits/ages |
 | character injury, healing and body-part effects | not started (body shape + status field exist) |
 | atlas, slots, keyed RNG, founding/razing | not started |
 | family, inheritance, courts, dialogue, NPC event checker | not started |
