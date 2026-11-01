@@ -34,11 +34,11 @@ mercenary, a beast tamer or elven scout, or a highborn noble with court games, a
 - **Built so far:** engine, stats (including Strength), ten-part humanoid bodies for every
   character (status-only), NPCs with 30 personality archetypes (traits plus 0-100 behavior
   profiles, data-only) and `temp`/`named` buckets (three-tier model planned), equipment with
-  body-part armor, a weapon slot (swords/spears/maces) and five rarity tiers, five area
-  actions, timed travel, a travel graph with route distances, combat v0.2 (weapon damage,
-  Strength gating and armor piercing), locations, a placeholder map spawner with fixed
-  tavern/castle/shack landmarks, biome events, save files, and a form-based content editor
-  (`editor.html`; tooling, not a module).
+  body-part armor, a weapon slot (swords/spears/axes/maces), weapon and armor types, and five
+  rarity tiers, five area actions, timed travel, a travel graph with route distances, combat
+  v0.2 (weapon damage, Strength gating and armor piercing), locations, a placeholder map
+  spawner with fixed tavern/castle/shack landmarks, biome events, save files, and a
+  form-based content editor (`editor.html`; tooling, not a module).
 
 ## Vision and scope
 
@@ -118,7 +118,8 @@ mercenary, a beast tamer or elven scout, or a highborn noble with court games, a
 - [Idea] Equipment, so armor and Defend matter — PM, 2026-10-25
 - [Built] Body armor with an inventory, equip/unequip and an armor stat that feeds Defend — build, 2026-10-27
 - [Built] Body-part armor targeting: items cover one or more of the ten body parts, several pieces can be worn at once, overlapping items replace each other and total armor is summed — build, 2026-10-31
-- [Built] Weapons (swords, spears, maces) in one weapon slot with base damage, a Strength requirement and armor piercing; five rarity tiers (Common, Uncommon, Rare, Legendary, Unique) with strict stat bands; rarity/kind filtered finds and item destruction — build, 2026-10-31
+- [Built] Weapons (swords, spears, axes, maces) in one weapon slot with base damage, a Strength requirement and armor piercing; five rarity tiers (Common, Uncommon, Rare, Legendary, Unique) with strict stat bands; rarity/kind filtered finds and item destruction — build, 2026-10-31
+- [Built] Weapon types (sword, spear, axe, mace) and armor types (cloth, leather, mail, plate, scale), data-driven and shown in the game, status page and editor; type-filtered finds and a five-rarity axe family — build, 2026-11-01
 - [Idea] Use the filtered `equipment:add` / `equipment:remove` hooks from events, loot tables and mobs so a given rarity can be generated or destroyed without the editor — PM, 2026-10-31
 - [Idea] A shared skill-check rule: roll plus skill against a difficulty — PM, 2026-10-25
 - [Idea] A slow survival clock (hunger, exposure) so Rest, Hunt and Scavenge are needs — PM, 2026-10-25
@@ -139,6 +140,7 @@ mercenary, a beast tamer or elven scout, or a highborn noble with court games, a
 
 ## Log
 
+- 2026-11-01: Equipment v0.4 built: every item now has a data-driven weapon or armor type. Weapons use sword/spear/axe/mace, armor uses cloth/leather/mail/plate/scale, and a five-rarity axe family fills out the new family. `equipment:add` filters by type, event payloads carry the type, old saves fall back to the catalogue, and the game, status page and editor show and validate it. Summary refreshed.
 - 2026-10-31: Equipment v0.3 built: swords, spears and maces fill one weapon slot with base damage, a Strength requirement and armor piercing. Five rarity tiers (Common, Uncommon, Rare, Legendary, Unique) define strict stat bands, and `equipment:add` accepts kind/rarity filters while `equipment:remove` destroys items. Combat v0.2 adds weapon damage, Strength gating and armor piercing; armor now reduces every hit and Defend doubles it. The game UI and editor were updated. Summary refreshed.
 - 2026-10-31: Equipment v0.2 built: armor items target the ten body parts, multi-part items are supported, several worn items sum their armor, and overlapping items replace each other whole. `equippedByPart` replaces `equippedId` with save migration; the editor uses a body-part multi-select. Summary refreshed.
 - 2026-10-31: Character bodies built for NPCs and the main character. Ten parts (head, torso, left/right legs, arms, hands, feet) share one data layout and normaliser; each part stores a status starting at `"intact"`. No injury, healing or combat rule reads the status yet; equipment targets the part keys. Summary refreshed.

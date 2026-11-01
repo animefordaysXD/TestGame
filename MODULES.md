@@ -10,8 +10,8 @@
 > - `IDEAS.md` - running idea list; decisions graduate to `DESIGN.md`.
 > - `MODULES.md` (this file) - practical per-module map and adjustment guide.
 
-**Last updated:** 2026-10-31
-**Build:** core v0.2, characters v0.5, mainCharacter v0.6, equipment v0.3,
+**Last updated:** 2026-11-01
+**Build:** core v0.2, characters v0.5, mainCharacter v0.6, equipment v0.4,
 locations v0.4, map v0.1, actions v0.3, travel v0.2, combat v0.2, save helper v0.1,
 status viewer and content editor (both tools, not modules).
 
@@ -44,6 +44,7 @@ Newest first. Keep entries short; details live in the module sections.
 
 | Date | Change | Files |
 |---|---|---|
+| 2026-11-01 | Equipment v0.4: added data-driven weapon types (`sword`, `spear`, `axe`, `mace`) and armor types (`cloth`, `leather`, `mail`, `plate`, `scale`). Every catalogue item now carries `weaponType` or `armorType`; added a five-rarity axe family; saves missing a type fall back to the catalogue definition. `equipment:add` accepts `weaponType`/`armorType` filters, module events and the UI/status views show type labels, and the editor validates type keys and wrong-kind fields. | `equipment/*`, `editor/schemas.js`, `index.html`, `combat/combat.js`, tests, docs, `status.html` |
 | 2026-10-31 | Equipment v0.3: swords, spears and maces fill one weapon slot with base damage, a Strength requirement and armor piercing. Added five rarity ranks (Common, Uncommon, Rare, Legendary, Unique) with strict stat bands, a shared `strength` stat, rarity/kind filtered random finds and `equipment:remove` destruction. Combat v0.2 adds weapon damage, Strength gating and armor piercing, and armor now reduces every hit while Defend doubles it. The game UI gains Find armor/Find weapon, rarity labels, a weapon slot, Strength-gated equipping and Destroy buttons; the editor validates kind, rarity and bands. | `characters/statsData.js`, `equipment/*`, `combat/*`, `index.html`, `editor/schemas.js`, tests, docs, `status.html` |
 | 2026-10-31 | Equipment v0.2: armor now targets the ten body-part keys from `characters/bodyData.js` through `parts: []`. Items can cover several parts, several items can be worn at once, and overlapping parts replace conflicting items whole. Total armor sums worn items (clamped to `maxArmor`); `equippedByPart` replaces `equippedId`, with v0.1 save migration. Added head, arm, leg, hand and foot armour plus a body coverage view in the game and status tree. The editor gains a body-part multi-select, body-data reference and part checks. | `equipment/*`, `index.html`, `editor/*`, `test/equipment.test.cjs`, `test/editor.test.cjs`, docs, `status.html` |
 | 2026-10-31 | Bodies: every NPC and the main character now own the same ten-part humanoid body (`head`, `torso`, paired legs/arms/hands/feet) from `characters/bodyData.js`, built/normalised by `characters/body.js`. Parts store `key`, `label`, `kind`, `side`, `parent`, `vital` and `status` (`"intact"` by default). Characters v0.5 and mainCharacter v0.6 add `body` to generation, save/load, migration and their UI; old saves gain missing parts and keep saved statuses. Status-only for now: no injury, combat or healing rule reads it; equipment uses the part keys. | `characters/bodyData.js`, `characters/body.js`, `characters/characters.js`, `characters/mainCharacter.js`, `index.html`, tests, docs, `status.html` |
@@ -72,7 +73,7 @@ Newest first. Keep entries short; details live in the module sections.
 | save helper | 0.1 | none (not a module) | none | none | Export/Import save file | `save.test.cjs` |
 | characters | 0.5 | `nextId`, `named{}`, `temp{}` | `character:spawn/save/clearTemp`, `location:changed`, `combat:damage` | `character:spawned/saved/tempCleared` | NPC cards + body line | `characters.test.cjs` |
 | mainCharacter | 0.6 | `character` | `location:event`, `action:resolved`, `travel:event`, `equipment:equipped/unequipped`, `combat:damage` | `mainCharacter:saved/statChanged/armorChanged` | Main character + body grid | `main-character.test.cjs` |
-| equipment | 0.3 | `nextId`, `items{}`, `equippedByPart{}`, `equippedWeaponId` | `equipment:add/equip/unequip/remove`, `action:resolved` | `equipment:added/equipped/unequipped/removed` | Equipment | `equipment.test.cjs` |
+| equipment | 0.4 | `nextId`, `items{}`, `equippedByPart{}`, `equippedWeaponId` | `equipment:add/equip/unequip/remove`, `action:resolved` | `equipment:added/equipped/unequipped/removed` | Equipment | `equipment.test.cjs` |
 | locations | 0.4 | `seed`, `createdAt`, `nextId`, `locations{}` (with `connections[]`), `currentId` | `location:add` | `location:added/visited/event` | Locations + biome events | `locations.test.cjs`, `locations-disk.test.cjs`, `biome-events.test.cjs` |
 | map | 0.1 | `seed`, `size`, `total`, `lastGeneratedTick`, `lastGeneratedAt`, `landmarks{}` | `map:generate`, `location:added` | `map:generated` | Locations panel (map status) | `map.test.cjs` |
 | actions | 0.3 | `locationId`, `locationName`, `biomeKey`, `actions[]`, `lastAction` | `location:visited`, `action:choose` | `actions:loaded`, `action:chosen/resolved/blocked` | Actions | `actions.test.cjs` |
@@ -340,7 +341,7 @@ directly and then `engine.flush()`.
 
 ---
 
-## Equipment (`equipment/equipment.js` v0.3)
+## Equipment (`equipment/equipment.js` v0.4)
 
 ### Role
 
@@ -350,15 +351,18 @@ stat. It never reads or writes another module's slice.
 
 ### Files and state
 
-- `equipment/data.js` - the catalogue plus five rarity ranks. Every item has `kind`
-  (`"armor"` or `"weapon"`) and `rarity`; armor has `parts` and `armor`, weapons have
-  `damage`, `strength` and `armorPiercing`. Also `maxArmor` and `autoEquip`. `parts` uses
-  the keys from `characters/bodyData.js`.
+- `equipment/data.js` - the catalogue, five rarity ranks and the type lists. Every item has
+  `kind` (`"armor"` or `"weapon"`), `rarity` and `weaponType` or `armorType`; armor has
+  `parts` and `armor`, weapons have `damage`, `strength` and `armorPiercing`. Also
+  `maxArmor` and `autoEquip`. `parts` uses the keys from `characters/bodyData.js`.
+- Type keys: weapons `sword`, `spear`, `axe`, `mace`; armor `cloth`, `leather`, `mail`,
+  `plate`, `scale`. They are listed in `weaponTypes` and `armorTypes`, so adding a family
+  is a data change.
 - Slice: `{ nextId, items: { id: item }, equippedByPart: { part: id }, equippedWeaponId }`.
-- Armor item: `{ id: "eq_0001", key, name, kind: "armor", rarity, parts, armor, equipped,
-  acquiredAtTick, acquiredAt }`.
-- Weapon item: `{ id: "eq_0002", key, name, kind: "weapon", rarity, parts: [], damage,
-  strength, armorPiercing, equipped, acquiredAtTick, acquiredAt }`.
+- Armor item: `{ id: "eq_0001", key, name, kind: "armor", rarity, armorType, parts, armor,
+  equipped, acquiredAtTick, acquiredAt }`.
+- Weapon item: `{ id: "eq_0002", key, name, kind: "weapon", rarity, weaponType, parts: [],
+  damage, strength, armorPiercing, equipped, acquiredAtTick, acquiredAt }`.
 
 ### Code map
 
@@ -367,26 +371,30 @@ stat. It never reads or writes another module's slice.
 | `CATALOG` | Map of catalogue `key` -> definition; unknown keys are rejected; armor needs a known part, weapons need damage |
 | `cleanParts(value)` | De-duplicates and filters part keys to `characters/bodyData.js` |
 | `cleanRarity(value, fallback)` | Falls back to the item definition, then `common` |
+| `cleanType(set, value, fallback, defaultKey)` | Validates a `weaponType`/`armorType` against its list |
 | `weightedPick(rng, items)` | Random find, weighted by `weight` (default 1) |
 | `cleanItem(raw)` | Validates an item during load; migrates legacy `slot` items through the catalogue |
 | `normalize()` | Repairs `nextId`, drops invalid items, rebuilds `equippedByPart`, migrates `equippedId` and `equippedWeaponId` |
 | `totalArmor()` / `armorFor(id)` | Sum of distinct worn armor (clamped), or 0 for non-main characters |
 | `equippedWeapon()` / `weaponFor(id)` | The weapon in the slot, or null; weapons only for `"main"` |
 | `rarityFor(key)` | The rarity definition for a key |
+| `weaponTypeFor(key)` / `armorTypeFor(key)` | The type definition for a key, or null |
 | `coverage()` | Body-ordered `{ part, label, itemId }` rows for the UI |
-| `add(depth, data)` | Adds an item; random when no `key`, filtered by `kind`/`rarity`; auto-equips a free slot |
+| `add(depth, data)` | Adds an item; random when no `key`, filtered by `kind`/`rarity`/type; auto-equips a free slot |
 | `equip(itemId, depth)` | Claims every part for armor, or the weapon slot; emits `equipment:equipped` |
 | `unequip(itemId, depth)` | Removes one item, or every worn item and the weapon when no id is given |
 | `remove(itemId, depth)` | Unequips when needed, deletes the item, emits `equipment:removed` |
 
 ### Events
 
-- Listens: `equipment:add` (`{ key?, kind?, rarity? }`), `equipment:equip` (`{ itemId }`),
-  `equipment:unequip` (`{ itemId? }`), `equipment:remove` (`{ itemId }`), and
-  `action:resolved` (adds the item named by `equipmentKey` with `source: actionId`).
+- Listens: `equipment:add` (`{ key?, kind?, rarity?, weaponType?, armorType? }`),
+  `equipment:equip` (`{ itemId }`), `equipment:unequip` (`{ itemId? }`),
+  `equipment:remove` (`{ itemId }`), and `action:resolved` (adds the item named by
+  `equipmentKey` with `source: actionId`).
 - Emits at `depth + 1`: `equipment:added`, `equipment:equipped` (includes `kind`, `rarity`,
-  `parts`, item stats, `totalArmor` and `replacedItemIds`), `equipment:unequipped`
-  (includes `itemIds` and the removed `items`) and `equipment:removed`.
+  `weaponType`/`armorType`, `parts`, item stats, `totalArmor` and `replacedItemIds`),
+  `equipment:unequipped` (includes `itemIds` and the removed `items`) and
+  `equipment:removed`.
 
 ### Adjust it
 
@@ -396,6 +404,7 @@ stat. It never reads or writes another module's slice.
 | Change what armor covers | Its `parts` list, using `characters/bodyData.js` keys |
 | Change a weapon's power | Its `damage`, `strength` requirement and `armorPiercing` |
 | Change rarity stat bands | `equipment/data.js` `rarities` (the four ranges) |
+| Add an item family | Add a `{ key, label }` to `weaponTypes` or `armorTypes`, then use it on items |
 | Change drop odds from Find armor/weapon | Item `weight` |
 | Change the equip cap | `maxArmor` and `statsData.js` `armor.max` |
 | Stop auto-equipping | `autoEquip: false` |
@@ -413,8 +422,10 @@ stat. It never reads or writes another module's slice.
   `totalArmor`, so `mainCharacter` ignores them.
 - Inventory is unlimited and items do not stack.
 - `add()` auto-equips only when the slot is free; it never replaces worn equipment.
-- `equipment:add` with a `rarity` or `kind` that matches nothing returns `null` and fires
-  no event.
+- `equipment:add` with a `rarity`, `kind` or type that matches nothing returns `null` and
+  fires no event.
+- A saved item's missing or unknown type falls back to its catalogue definition, then to
+  the first defined type. Types are descriptive; combat reads the numeric stats.
 - Unknown `equipmentKey` values are ignored silently (no item, no error).
 - Load drops items whose `key` disappeared from the catalogue; do not rename keys
   without migrating saves.
@@ -441,7 +452,7 @@ Damage is announced; the character modules apply it to the real characters.
 - Slice: `active`, `round`, `turn`, `player`, `enemy`, `defending`, `winner*`,
   `loser*`, `startedAt*`, `endedAt*`, `log[]`.
 - Snapshots: `{ id, name, hp, hpMax, personalCombat, strength, armor, weapon }`.
-  `weapon` is `null` or `{ key, name, damage, strength, armorPiercing, rarity }`.
+  `weapon` is `null` or `{ key, name, damage, strength, armorPiercing, rarity, weaponType? }`.
 
 ### Code map
 
@@ -1083,7 +1094,7 @@ Import save file
 | More NPC names or traits | `characters/data.js` |
 | Personality archetypes or behavior tuning | `characters/data.js` `personalities` / `behaviorAxes` |
 | Character creation rules or portrait limits | `characters/mainCharacterData.js` |
-| Armor/weapon stats, rarity bands, item drop weights, auto-equip | `equipment/data.js` |
+| Armor/weapon types and stats, rarity bands, item drop weights, auto-equip | `equipment/data.js` |
 | Attack/defend formulas, combat log size | `combat/data.js` |
 | Map default size, fixed landmarks | `map/data.js` |
 | Biomes, weather, naming, hostility bands | `locations/data.js` |

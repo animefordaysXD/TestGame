@@ -45,8 +45,8 @@ their own armor value.
 
 Each snapshot is `{ id, name, hp, hpMax, personalCombat, strength, armor, weapon }`.
 `strength` defaults to 10 when omitted. `weapon` is `null` or
-`{ key, name, damage, strength, armorPiercing, rarity }`. The UI builds the player's
-weapon from `equipmentModule.weaponFor("main")`.
+`{ key, name, damage, strength, armorPiercing, rarity, weaponType? }`. The UI builds the
+player's weapon from `equipmentModule.weaponFor("main")`.
 
 ## State slice
 

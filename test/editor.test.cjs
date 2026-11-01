@@ -101,8 +101,14 @@ assert.ok(ctx.bodyPartKeys.includes("torso") && ctx.bodyPartKeys.includes("leftH
 assert.ok(ctx.equipmentKeys.includes("leather_cuirass"));
 assert.ok(ctx.equipmentKeys.includes("iron_shortsword"), "the editor knows weapon keys");
 assert.ok(ctx.rarities.includes("unique"));
+assert.deepEqual(ctx.weaponTypes, ["sword", "spear", "axe", "mace"], "the editor knows the weapon types");
+assert.deepEqual(ctx.armorTypes, ["cloth", "leather", "mail", "plate", "scale"], "the editor knows the armor types");
 assert.deepEqual(S.optionsFor("rarities", ctx).find((o) => o.value === "common"),
   { value: "common", label: "Common" }, "rarity options use their labels");
+assert.deepEqual(S.optionsFor("weaponTypes", ctx).find((o) => o.value === "axe"),
+  { value: "axe", label: "Axe" }, "weapon-type options use their labels");
+assert.deepEqual(S.optionsFor("armorTypes", ctx).find((o) => o.value === "plate"),
+  { value: "plate", label: "Plate" }, "armor-type options use their labels");
 assert.deepEqual(S.optionsFor("kinds", ctx).map((o) => o.value), ["armor", "weapon"]);
 assert.deepEqual(S.optionsFor("bodyParts", ctx)[0], { value: "head", label: "Head" }, "body-part options use the canonical labels");
 const sections = S.sectionsFor(loaded);
@@ -172,6 +178,16 @@ for (const s of sections) {
   const weaponPreview = armor.preview(loaded.equipment.items.find((i) => i.kind === "weapon"), ctx, loaded);
   assert.ok(weaponPreview.notes.some((n) => n.includes("Strength")), "weapon preview shows the Strength requirement");
   assert.ok(weaponPreview.chips.some((c) => /^Pierce \d+%$/.test(c.text)), "weapon preview chips armor piercing");
+  assert.ok(weaponPreview.chips.some((c) => /^Weapon · Sword · /.test(c.text)), "weapon preview names its type");
+  assert.ok(armorPreview.chips.some((c) => /^Armor · \w+ · /.test(c.text)), "armor preview names its type");
+  const sword = loaded.equipment.items.find((i) => i.key === "iron_shortsword");
+  assert.match(armor.sub(sword), /weapon · sword · common/, "the list subtitle shows the weapon type");
+  const freshItem = armor.newItem(ctx, loaded.equipment.items);
+  assert.ok(ctx.armorTypes.includes(freshItem.armorType), "a new item has an armor type");
+  assert.equal("weaponType" in freshItem, false, "a new armor item has no weapon type");
+  const freshErrors = problems((d) => { d.equipment.items.push(C.clone(freshItem)); })
+    .filter((i) => i.level === "error" && /new_item|weaponType|armorType/.test(i.message));
+  assert.deepEqual(freshErrors, [], "a new armor item starts valid");
 }
 
 // ----- checks catch mistakes -----
@@ -199,6 +215,14 @@ const has = (list, level, re) => list.some((i) => i.level === level && re.test(i
   assert.ok(has(problems((d) => { d.equipment.items[0].parts = ["torso", "torso"]; }), "warn", /listed twice/));
   assert.ok(has(problems((d) => { d.equipment.items[0].armor = 999; }), "error", /above the cap/));
   const weaponAt = (d) => d.equipment.items.find((i) => i.kind === "weapon");
+  const armorAt = (d) => d.equipment.items.find((i) => i.kind !== "weapon");
+  assert.ok(has(problems((d) => { weaponAt(d).weaponType = "trident"; }), "error", /Unknown weaponType/), "unknown weapon types are errors");
+  assert.ok(has(problems((d) => { weaponAt(d).weaponType = ""; }), "warn", /Give the weapon a weaponType/), "weapons need a type");
+  assert.ok(has(problems((d) => { weaponAt(d).armorType = "leather"; }), "error", /Weapons use weaponType/), "weapons reject armor types");
+  assert.ok(has(problems((d) => { armorAt(d).armorType = "chain"; }), "error", /Unknown armorType/), "unknown armor types are errors");
+  assert.ok(has(problems((d) => { armorAt(d).armorType = ""; }), "warn", /Give the armor an armorType/), "armor needs a type");
+  assert.ok(has(problems((d) => { armorAt(d).weaponType = "sword"; }), "error", /Armor uses armorType/), "armor rejects weapon types");
+  assert.ok(has(problems((d) => { d.equipment.weaponTypes.push({ key: "sword", label: "Sword" }); }), "error", /used twice/), "type keys are unique");
   assert.ok(has(problems((d) => { weaponAt(d).damage = 0; }), "error", /at least 1/), "weapon damage must be positive");
   assert.ok(has(problems((d) => { weaponAt(d).strength = 25; }), "error", /1 to 20/), "weapon Strength stays in range");
   assert.ok(has(problems((d) => { weaponAt(d).armorPiercing = 150; }), "error", /between 0 and 100/), "armor piercing is a percentage");

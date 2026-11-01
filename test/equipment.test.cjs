@@ -51,11 +51,13 @@ act(engine, "equipment:add", { key: "leather_cuirass" });
 const cuirass = itemByKey("leather_cuirass");
 assert.deepEqual(cuirass.parts, ["torso"]);
 assert.equal(cuirass.equipped, true);
+assert.equal(cuirass.armorType, "leather");
 assert.deepEqual(slice().equippedByPart, { torso: cuirass.id });
 assert.equal(character.stats.armor, 3, "equipment writes the main character's armor stat");
 assert.equal(added.length, 1);
 assert.equal(added[0].depth, 1, "equipment:added is a follow-up");
 assert.equal(added[0].data.equipped, true);
+assert.equal(added[0].data.armorType, "leather");
 assert.deepEqual(added[0].data.parts, ["torso"]);
 assert.equal(equipped.length, 1);
 assert.equal(equipped[0].depth, 1);
@@ -253,6 +255,7 @@ const legacySlice = legacyEngine.state.modules.equipment;
 assert.equal("equippedId" in legacySlice, false, "the old single id is removed");
 assert.deepEqual(legacySlice.equippedByPart, { torso: "eq_0001" });
 assert.deepEqual(legacySlice.items.eq_0001.parts, ["torso"]);
+assert.equal(legacySlice.items.eq_0001.armorType, "leather", "an old save takes its type from the catalogue");
 assert.equal("slot" in legacySlice.items.eq_0001, false);
 assert.equal(legacySlice.items.eq_0001.equipped, true);
 assert.equal(legacyGear.totalArmor(), 3);
@@ -270,11 +273,17 @@ assert.equal(legacyEngine.state.modules.mainCharacter.character.stats.armor, 3);
   const sword = Object.values(wSlice().items)[0];
   assert.equal(sword.kind, "weapon");
   assert.equal(sword.rarity, "common");
+  assert.equal(sword.weaponType, "sword");
   assert.deepEqual(sword.parts, []);
   assert.equal(sword.damage, 3);
   assert.equal(sword.strength, 4);
   assert.equal(sword.armorPiercing, 6);
   assert.equal(wSlice().equippedWeaponId, sword.id, "a free weapon slot auto-equips");
+  assert.equal(equipEvents[0].data.weaponType, "sword");
+  assert.deepEqual(w.equipment.weaponTypes, ["sword", "spear", "axe", "mace"]);
+  assert.equal(w.equipment.weaponTypeFor("axe").label, "Axe");
+  assert.equal(w.equipment.armorTypeFor("plate").label, "Plate");
+  assert.equal(w.equipment.weaponTypeFor("trident"), null);
   assert.equal(w.equipment.weaponFor("main").key, "iron_shortsword");
   assert.equal(w.equipment.weaponFor("someone_else"), null);
   assert.equal(w.character.stats.armor, 0, "a weapon never changes armor");
@@ -290,7 +299,15 @@ assert.equal(legacyEngine.state.modules.mainCharacter.character.stats.armor, 3);
   assert.deepEqual(equipEvents.at(-1).data.replacedItemIds, [sword.id]);
   assert.equal(equipEvents.at(-1).data.kind, "weapon");
   assert.equal(equipEvents.at(-1).data.rarity, "rare");
+  assert.equal(equipEvents.at(-1).data.weaponType, "mace");
   assert.equal(equipEvents.at(-1).data.totalArmor, 0, "weapon events keep the armor total");
+
+  // Type filters narrow a random find too.
+  act(w.engine, "equipment:add", { kind: "weapon", weaponType: "axe" });
+  const axe = Object.values(wSlice().items).at(-1);
+  assert.equal(axe.kind, "weapon");
+  assert.equal(axe.weaponType, "axe");
+  assert.ok(EquipmentData.items.some((item) => item.key === axe.key && item.weaponType === "axe"));
 
   // Rarity and kind filters narrow a random find.
   act(w.engine, "equipment:add", { kind: "weapon", rarity: "unique" });
@@ -307,6 +324,12 @@ assert.equal(legacyEngine.state.modules.mainCharacter.character.stats.armor, 3);
   assert.equal(legendaryArmor.equipped, true);
   assert.equal(w.character.stats.armor, 8);
 
+  act(w.engine, "equipment:add", { kind: "armor", armorType: "plate" });
+  const plate = Object.values(wSlice().items).at(-1);
+  assert.equal(plate.kind, "armor");
+  assert.equal(plate.armorType, "plate");
+  assert.ok(EquipmentData.items.some((item) => item.key === plate.key && item.armorType === "plate"));
+
   // Destroy an inventory item.
   const beforeRemove = Object.keys(wSlice().items).length;
   act(w.engine, "equipment:remove", { itemId: uniqueWeapon.id });
@@ -321,6 +344,18 @@ assert.equal(legacyEngine.state.modules.mainCharacter.character.stats.armor, 3);
   assert.equal(w.equipment.equippedWeapon(), null);
   assert.equal(removedEvents.at(-1).data.wasEquipped, true);
   assert.equal(removedEvents.at(-1).data.kind, "weapon");
+
+  // Every catalogue entry has a type from the matching list, and the axe family spans all ranks.
+  const weaponTypeKeys = EquipmentData.weaponTypes.map((type) => type.key);
+  const armorTypeKeys = EquipmentData.armorTypes.map((type) => type.key);
+  assert.deepEqual(weaponTypeKeys, ["sword", "spear", "axe", "mace"]);
+  assert.deepEqual(armorTypeKeys, ["cloth", "leather", "mail", "plate", "scale"]);
+  for (const item of EquipmentData.items) {
+    if (item.kind === "weapon") assert.ok(weaponTypeKeys.includes(item.weaponType), `${item.key} has a weapon type`);
+    else assert.ok(armorTypeKeys.includes(item.armorType), `${item.key} has an armor type`);
+  }
+  const axes = EquipmentData.items.filter((item) => item.kind === "weapon" && item.weaponType === "axe");
+  assert.deepEqual(axes.map((item) => item.rarity), ["common", "uncommon", "rare", "legendary", "unique"]);
 
   // The rarity bands get stricter with rank.
   assert.deepEqual(EquipmentData.rarities.map((rarity) => rarity.key),

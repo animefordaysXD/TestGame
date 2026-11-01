@@ -7,17 +7,34 @@
      requirement and `armorPiercing` (0-100). Combat adds `damage` to the owner's
      attack and ignores that percentage of the target's armor. A weapon only works
      when the owner's Strength meets the requirement.
+   `weaponType` must be a key from `weaponTypes` for a weapon; `armorType` must be a key
+   from `armorTypes` for armor. They group item families (sword/spear/axe/mace and
+   cloth/leather/mail/plate/scale) and can filter random finds; they do not change stats.
    `rarity` must be one of `rarities` below. The ranges in that block are the stat
    bands for each rank; higher ranks are strictly stronger. The catalogue values must
    stay inside their band (the content editor checks this).
    `weight` only affects the random Find equipment pick. Actions can award an item by
    referencing its `key` from actions/data.js. `autoEquip` puts a newly acquired item
    on when its slot is free; a conflicting item stays in the inventory.
-   Rarity-filtered random picks and item destruction are available through
-   `equipment:add { rarity? }` and `equipment:remove { itemId }` for future events/mobs.
+   Type/rarity-filtered random picks and item destruction are available through
+   `equipment:add { kind?, rarity?, weaponType?, armorType? }` and
+   `equipment:remove { itemId }` for future events/mobs.
    Edited by editor.html. Keep the object below strict JSON (quoted keys, no comments, no
    trailing commas); put notes in this header instead. */
 window.EquipmentData = {
+  "weaponTypes": [
+    { "key": "sword", "label": "Sword" },
+    { "key": "spear", "label": "Spear" },
+    { "key": "axe", "label": "Axe" },
+    { "key": "mace", "label": "Mace" }
+  ],
+  "armorTypes": [
+    { "key": "cloth", "label": "Cloth" },
+    { "key": "leather", "label": "Leather" },
+    { "key": "mail", "label": "Mail" },
+    { "key": "plate", "label": "Plate" },
+    { "key": "scale", "label": "Scale" }
+  ],
   "rarities": [
     {
       "key": "common",
@@ -71,6 +88,7 @@ window.EquipmentData = {
       "name": "Traveler's Cloak",
       "kind": "armor",
       "rarity": "common",
+      "armorType": "cloth",
       "parts": ["torso", "leftArm", "rightArm"],
       "armor": 1,
       "weight": 5,
@@ -81,6 +99,7 @@ window.EquipmentData = {
       "name": "Scavenged Leather",
       "kind": "armor",
       "rarity": "common",
+      "armorType": "leather",
       "parts": ["torso"],
       "armor": 1,
       "weight": 3,
@@ -91,6 +110,7 @@ window.EquipmentData = {
       "name": "Padded Gambeson",
       "kind": "armor",
       "rarity": "common",
+      "armorType": "cloth",
       "parts": ["torso", "leftArm", "rightArm"],
       "armor": 2,
       "weight": 4,
@@ -101,6 +121,7 @@ window.EquipmentData = {
       "name": "Leather Cuirass",
       "kind": "armor",
       "rarity": "uncommon",
+      "armorType": "leather",
       "parts": ["torso"],
       "armor": 3,
       "weight": 3,
@@ -111,6 +132,7 @@ window.EquipmentData = {
       "name": "Chain Shirt",
       "kind": "armor",
       "rarity": "uncommon",
+      "armorType": "mail",
       "parts": ["torso", "leftArm", "rightArm"],
       "armor": 4,
       "weight": 2,
@@ -121,6 +143,7 @@ window.EquipmentData = {
       "name": "Iron Plate",
       "kind": "armor",
       "rarity": "rare",
+      "armorType": "plate",
       "parts": ["torso"],
       "armor": 5,
       "weight": 1,
@@ -131,6 +154,7 @@ window.EquipmentData = {
       "name": "Leather Cap",
       "kind": "armor",
       "rarity": "common",
+      "armorType": "leather",
       "parts": ["head"],
       "armor": 1,
       "weight": 4,
@@ -141,6 +165,7 @@ window.EquipmentData = {
       "name": "Iron Helm",
       "kind": "armor",
       "rarity": "common",
+      "armorType": "plate",
       "parts": ["head"],
       "armor": 2,
       "weight": 2,
@@ -151,6 +176,7 @@ window.EquipmentData = {
       "name": "Leather Bracers",
       "kind": "armor",
       "rarity": "common",
+      "armorType": "leather",
       "parts": ["leftArm", "rightArm"],
       "armor": 1,
       "weight": 3,
@@ -161,6 +187,7 @@ window.EquipmentData = {
       "name": "Leather Greaves",
       "kind": "armor",
       "rarity": "common",
+      "armorType": "leather",
       "parts": ["leftLeg", "rightLeg"],
       "armor": 2,
       "weight": 3,
@@ -171,6 +198,7 @@ window.EquipmentData = {
       "name": "Traveler's Boots",
       "kind": "armor",
       "rarity": "common",
+      "armorType": "leather",
       "parts": ["leftFoot", "rightFoot"],
       "armor": 1,
       "weight": 4,
@@ -181,6 +209,7 @@ window.EquipmentData = {
       "name": "Work Gloves",
       "kind": "armor",
       "rarity": "common",
+      "armorType": "leather",
       "parts": ["leftHand", "rightHand"],
       "armor": 1,
       "weight": 3,
@@ -191,6 +220,7 @@ window.EquipmentData = {
       "name": "Dwarven Hauberk",
       "kind": "armor",
       "rarity": "rare",
+      "armorType": "mail",
       "parts": ["torso", "leftArm", "rightArm"],
       "armor": 6,
       "weight": 1,
@@ -201,6 +231,7 @@ window.EquipmentData = {
       "name": "Dragonscale Cuirass",
       "kind": "armor",
       "rarity": "legendary",
+      "armorType": "scale",
       "parts": ["torso"],
       "armor": 8,
       "weight": 0.5,
@@ -211,6 +242,7 @@ window.EquipmentData = {
       "name": "Aegis of the First King",
       "kind": "armor",
       "rarity": "unique",
+      "armorType": "plate",
       "parts": ["torso", "leftArm", "rightArm"],
       "armor": 10,
       "weight": 0.2,
@@ -221,6 +253,7 @@ window.EquipmentData = {
       "name": "Iron Shortsword",
       "kind": "weapon",
       "rarity": "common",
+      "weaponType": "sword",
       "damage": 3,
       "strength": 4,
       "armorPiercing": 6,
@@ -232,6 +265,7 @@ window.EquipmentData = {
       "name": "Tempered Longsword",
       "kind": "weapon",
       "rarity": "uncommon",
+      "weaponType": "sword",
       "damage": 6,
       "strength": 6,
       "armorPiercing": 16,
@@ -243,6 +277,7 @@ window.EquipmentData = {
       "name": "Knight's Broadsword",
       "kind": "weapon",
       "rarity": "rare",
+      "weaponType": "sword",
       "damage": 9,
       "strength": 8,
       "armorPiercing": 26,
@@ -254,6 +289,7 @@ window.EquipmentData = {
       "name": "Dawnblade",
       "kind": "weapon",
       "rarity": "legendary",
+      "weaponType": "sword",
       "damage": 13,
       "strength": 10,
       "armorPiercing": 36,
@@ -265,6 +301,7 @@ window.EquipmentData = {
       "name": "King's Oath",
       "kind": "weapon",
       "rarity": "unique",
+      "weaponType": "sword",
       "damage": 18,
       "strength": 13,
       "armorPiercing": 46,
@@ -276,6 +313,7 @@ window.EquipmentData = {
       "name": "Ashwood Spear",
       "kind": "weapon",
       "rarity": "common",
+      "weaponType": "spear",
       "damage": 3,
       "strength": 5,
       "armorPiercing": 9,
@@ -287,6 +325,7 @@ window.EquipmentData = {
       "name": "Boar Spear",
       "kind": "weapon",
       "rarity": "uncommon",
+      "weaponType": "spear",
       "damage": 6,
       "strength": 7,
       "armorPiercing": 20,
@@ -298,6 +337,7 @@ window.EquipmentData = {
       "name": "War Pike",
       "kind": "weapon",
       "rarity": "rare",
+      "weaponType": "spear",
       "damage": 9,
       "strength": 9,
       "armorPiercing": 30,
@@ -309,6 +349,7 @@ window.EquipmentData = {
       "name": "Stormlance",
       "kind": "weapon",
       "rarity": "legendary",
+      "weaponType": "spear",
       "damage": 12,
       "strength": 11,
       "armorPiercing": 40,
@@ -320,6 +361,7 @@ window.EquipmentData = {
       "name": "Wyrmpiercer",
       "kind": "weapon",
       "rarity": "unique",
+      "weaponType": "spear",
       "damage": 17,
       "strength": 14,
       "armorPiercing": 50,
@@ -331,6 +373,7 @@ window.EquipmentData = {
       "name": "Wooden Club",
       "kind": "weapon",
       "rarity": "common",
+      "weaponType": "mace",
       "damage": 4,
       "strength": 4,
       "armorPiercing": 3,
@@ -342,6 +385,7 @@ window.EquipmentData = {
       "name": "Iron Mace",
       "kind": "weapon",
       "rarity": "uncommon",
+      "weaponType": "mace",
       "damage": 7,
       "strength": 7,
       "armorPiercing": 12,
@@ -353,6 +397,7 @@ window.EquipmentData = {
       "name": "Warhammer",
       "kind": "weapon",
       "rarity": "rare",
+      "weaponType": "mace",
       "damage": 10,
       "strength": 9,
       "armorPiercing": 22,
@@ -364,6 +409,7 @@ window.EquipmentData = {
       "name": "Skullbreaker",
       "kind": "weapon",
       "rarity": "legendary",
+      "weaponType": "mace",
       "damage": 14,
       "strength": 11,
       "armorPiercing": 32,
@@ -375,11 +421,72 @@ window.EquipmentData = {
       "name": "Worldender",
       "kind": "weapon",
       "rarity": "unique",
+      "weaponType": "mace",
       "damage": 20,
       "strength": 15,
       "armorPiercing": 42,
       "weight": 0.1,
       "description": "A maul of impossible weight. The stories say it broke a mountain."
+    },
+    {
+      "key": "woodcutter_axe",
+      "name": "Woodcutter's Axe",
+      "kind": "weapon",
+      "rarity": "common",
+      "weaponType": "axe",
+      "damage": 3,
+      "strength": 4,
+      "armorPiercing": 2,
+      "weight": 5,
+      "description": "A broad work axe. It splits wood, and it will split a shield."
+    },
+    {
+      "key": "bearded_axe",
+      "name": "Bearded Axe",
+      "kind": "weapon",
+      "rarity": "uncommon",
+      "weaponType": "axe",
+      "damage": 6,
+      "strength": 6,
+      "armorPiercing": 14,
+      "weight": 3,
+      "description": "A long-bearded blade that catches an edge behind a shield."
+    },
+    {
+      "key": "battle_axe",
+      "name": "Battle Axe",
+      "kind": "weapon",
+      "rarity": "rare",
+      "weaponType": "axe",
+      "damage": 9,
+      "strength": 8,
+      "armorPiercing": 24,
+      "weight": 1.5,
+      "description": "A war axe balanced for a single terrible blow."
+    },
+    {
+      "key": "executioners_axe",
+      "name": "Executioner's Axe",
+      "kind": "weapon",
+      "rarity": "legendary",
+      "weaponType": "axe",
+      "damage": 13,
+      "strength": 10,
+      "armorPiercing": 34,
+      "weight": 0.5,
+      "description": "Its edge is kept for one purpose, and it has never failed at it."
+    },
+    {
+      "key": "worldsplitter",
+      "name": "Worldsplitter",
+      "kind": "weapon",
+      "rarity": "unique",
+      "weaponType": "axe",
+      "damage": 19,
+      "strength": 13,
+      "armorPiercing": 44,
+      "weight": 0.1,
+      "description": "A giant's axe. The notch in its blade is said to be a mountain's answer."
     }
   ],
   "maxArmor": 100,

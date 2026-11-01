@@ -2,15 +2,16 @@
 
 **Repository:** <https://github.com/animefordaysXD/TestGame>
 
-**Last updated:** 2026-10-31
-**Current spec:** `ENGINE_SPEC.md` v1.6
+**Last updated:** 2026-11-01
+**Current spec:** `ENGINE_SPEC.md` v1.7
 **Status:** working test page with a procedural map spawner (configurable random locations
 plus fixed tavern/castle/shack landmarks), a travel graph of connected locations,
 procedural locations, biome events, a main-character creator with ten base stats plus
 armor and a ten-part body, NPCs with the same stats, bodies and 30 named personality
 archetypes, basic player-first
 combat (Attack/Defend), an equipment module with body-part armor plus a weapon slot
-(damage, Strength requirement, armor piercing) and five rarity tiers, five area actions
+(damage, Strength requirement, armor piercing), weapon/armor types and five rarity tiers,
+five area actions
 with costs/outcomes/time, route-based timed travel with 5-minute event checks and
 pause/resume, real JSON save files (seed + baseline + changes) alongside the quick local
 save, and a live node-tree status page.
@@ -73,7 +74,8 @@ Tests currently cover:
   stat costs, time, route time/distance override, travel through locations, equipment
   rewards, reset, save/load.
 - `test/equipment.test.cjs` — body-part inventory, free-slot auto-equip, overlap replacement,
-  summed armor, the weapon slot, rarity/kind filtered finds, destruction, the armor bridge,
+  summed armor, the weapon slot, type/rarity/kind filtered finds, destruction, the armor
+  bridge,
   combat integration, reset, save/load and v0.1 migration.
 - `test/travel.test.cjs` — 5-minute checks, event pause/resume, effects, distance
   persistence, duration rounding, cancel, reset, save/load.
@@ -295,20 +297,23 @@ directly; see the content-editor section below.
 
 ### Equipment
 
-- `equipment/data.js` owns the catalogue and five rarity ranks (`common`, `uncommon`,
+- `equipment/data.js` owns the catalogue, five rarity ranks (`common`, `uncommon`,
   `rare`, `legendary`, `unique`) with stat bands for armor, damage, Strength and armor
-  piercing. Every item has `kind` (`"armor"` or `"weapon"`) and `rarity`.
+  piercing, and the type lists. Every item has `kind` (`"armor"` or `"weapon"`), `rarity`
+  and a matching `weaponType` (`sword`, `spear`, `axe`, `mace`) or `armorType` (`cloth`,
+  `leather`, `mail`, `plate`, `scale`).
 - Armor uses `parts` (the ten keys from `characters/bodyData.js`) and `armor`. Weapons use
   one weapon slot and carry `damage`, a `strength` requirement and `armorPiercing`.
+  Types are descriptive grouping today; combat still reads the numeric stats.
 - An armor item can cover several parts. Several armor items can be worn at once as long as
   no part is shared; equipping an overlapping item removes the conflicting items whole.
   Total armor is the sum of the distinct worn armor, clamped to `maxArmor`.
 - A new item auto-equips when its slot is free (every covered part for armor, an empty
   weapon slot for a weapon); otherwise it stays in the inventory. Requests are
-  `equipment:add` (`{ key?, kind?, rarity? }`), `equipment:equip`, `equipment:unequip`
-  (`{ itemId? }`), `equipment:remove` (`{ itemId }`); module events are
+  `equipment:add` (`{ key?, kind?, rarity?, weaponType?, armorType? }`), `equipment:equip`,
+  `equipment:unequip` (`{ itemId? }`), `equipment:remove` (`{ itemId }`); module events are
   `equipment:added`, `equipment:equipped`, `equipment:unequipped` and
-  `equipment:removed`.
+  `equipment:removed`, each carrying `weaponType` or `armorType`.
 - `equippedByPart` is the source of truth for armor and `equippedWeaponId` for the weapon;
   v0.1 saves with `equippedId`/`slot` are migrated on load.
 - The module listens to `action:resolved` and adds the item named by `equipmentKey`.
@@ -317,9 +322,9 @@ directly; see the content-editor section below.
   the unchanged `totalArmor`, so they do not touch the armor stat. The equipment module
   never reads another slice.
 - Only the main character can equip. The UI has an **Equipment** panel with **Find
-  armor**, **Find weapon**, total armor, covered parts, the weapon slot, per-item
-  **Equip** / **Unequip** / **Destroy** and **Unequip all**; finds need a saved main
-  character. Scavenge can award equipment.
+  armor**, **Find weapon**, total armor, covered parts, the weapon slot, per-item type and
+  rarity, **Equip** / **Unequip** / **Destroy** and **Unequip all**; finds need a saved
+  main character. Scavenge can award equipment.
 
 ### Content editor
 
@@ -433,6 +438,12 @@ UI Import save file
 
 ## Recent work
 
+- Equipment v0.4: added data-driven weapon types (sword, spear, axe, mace) and armor
+  types (cloth, leather, mail, plate, scale). Every item now carries `weaponType` or
+  `armorType`; added a five-rarity axe family and typed all existing gear. `equipment:add`
+  accepts type filters, event payloads and serialized items carry the type, old saves fall
+  back to the catalogue definition, and the UI/status/editor show and validate types. All
+  twelve Node test files pass.
 - Equipment v0.3 and combat v0.2: added swords, spears and maces in one weapon slot with
   base damage, a Strength requirement and armor piercing; added five rarity tiers
   (Common, Uncommon, Rare, Legendary, Unique) with strict stat bands. A new shared
@@ -579,8 +590,9 @@ UI Import save file
   carried. NPCs still fight at armor 0 with no weapon. Armor is mirrored to the main
   character present when the item is equipped; the UI requires a saved character before
   **Find armor** or **Find weapon**.
-- Rarity affects stats and find weight only. `equipment:add` and `equipment:remove` are
-  ready for events/mobs, but no content generates or destroys a rarity-tiered item yet.
+- Rarity and type affect stats, labels and find filters only. `equipment:add` and
+  `equipment:remove` are ready for events/mobs, but no content generates or destroys a
+  rarity-tiered item yet.
 - NPC personality archetypes, traits and behavior profiles are generated and displayed, but
   no AI reads them yet. Combat has no enemy AI, dialogue is not implemented, and NPC events
   do not use personality.
@@ -663,14 +675,14 @@ change, update ENGINE_SPEC.md, MODULES.md (including its update log), HANDOFF.md
 and the hand-maintained branches in status.html. Commit only when asked; do not push without
 explicit approval.
 
-Current build: core v0.2; characters v0.5; mainCharacter v0.6; equipment v0.3; locations v0.4;
+Current build: core v0.2; characters v0.5; mainCharacter v0.6; equipment v0.4; locations v0.4;
 map v0.1; actions v0.3; travel v0.2; combat v0.2; save helper v0.1. Working: a procedural map
 spawner with a configurable random count and fixed tavern/castle/shack landmarks; a travel graph
 of connected locations with distances and route-based times; procedural locations; biome events
 (only tundra has a live event); shared stats (including Strength) and ten-part bodies; 30 named
 NPC personality archetypes with traits and behavior profiles (data-only, no AI reads them yet);
-body-part armor plus a weapon slot, five rarity tiers, and armor/weapon stats feeding combat;
-five area actions with time, costs and weighted outcomes; route-based
+body-part armor plus a weapon slot, weapon/armor types, five rarity tiers, and armor/weapon stats
+feeding combat; five area actions with time, costs and weighted outcomes; route-based
 timed travel with 5-minute checks, event pause/resume and arrival through locations; basic
 player-first combat with weapon damage, Strength gating and armor piercing; real JSON save files
 (seed + baseline + changes) with legacy migration and unsafe-path guards, alongside quick

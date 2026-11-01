@@ -8,7 +8,7 @@
 > game is and why, read [DESIGN.md](DESIGN.md); unapproved ideas live in
 > [IDEAS.md](IDEAS.md).
 
-Current build: core v0.2, characters v0.5, main character v0.6, equipment v0.3,
+Current build: core v0.2, characters v0.5, main character v0.6, equipment v0.4,
 locations v0.4, map v0.1, actions v0.3, travel v0.2, combat v0.2, save helper v0.1,
 plus the read-only status viewer and the content editor (`editor.html` — a tool, not a
 module, and never loaded by the game).
@@ -51,7 +51,7 @@ directly with `node test/locations.test.cjs`, `node test/locations-disk.test.cjs
 
 - `engine.js` — core (unchanged v0.2)
 - `characters/` — NPC generator, shared base stats, body data/helper, main character creator and storage
-- `equipment/` — armor and weapon catalogue, rarity tiers, main-character inventory (equip/unequip/destroy)
+- `equipment/` — armor and weapon catalogue, weapon/armor types, rarity tiers, main-character inventory (equip/unequip/destroy)
 - `combat/` — player-first duels with weapons, Strength gating and armor piercing (Attack/Defend)
 - `locations/` — procedural map locations linked into a travel graph
 - `map/` — map spawner: fixed tavern/castle/shack plus random location batches
@@ -165,8 +165,9 @@ them.
 ## Equipment
 
 - **Find armor** and **Find weapon** add random items from `equipment/data.js`. Equipment
-  has five rarity ranks: Common, Uncommon, Rare, Legendary and Unique. Higher ranks have
-  better stat bands.
+  has five rarity ranks (Common, Uncommon, Rare, Legendary and Unique) and item types:
+  weapons are swords, spears, axes or maces; armor is cloth, leather, mail, plate or scale.
+  Higher ranks have better stat bands.
 - Armor items target body parts (`head`, `torso`, arms, hands, legs, feet) and can cover
   more than one part. Several items can be worn at once when their parts do not overlap.
   Equipping an overlapping item replaces the conflicting items whole; total armor is the
@@ -178,10 +179,11 @@ them.
   Defend doubles the reduction. **Unequip all** clears the loadout, and **Destroy**
   permanently removes an item.
 - Scavenging can also award equipment through an action outcome.
-- The catalogue and rarity bands live in `equipment/data.js`. Only the main character can
-  equip in this version; NPCs still have armor 0 and no weapon.
-- `equipment:add` accepts `{ kind, rarity }` filters and `equipment:remove` destroys an
-  item, so future events and mobs can generate or destroy loot.
+- The catalogue, type lists and rarity bands live in `equipment/data.js`. Only the main
+  character can equip in this version; NPCs still have armor 0 and no weapon.
+- `equipment:add` accepts `{ kind, rarity, weaponType, armorType }` filters and
+  `equipment:remove` destroys an item, so future events and mobs can generate or destroy
+  loot.
 - See `equipment/README.md`.
 
 ## Locations module
@@ -273,8 +275,8 @@ them.
 module: it owns no state, emits no events and is not registered in `buildEngine`.
 
 - Run `npm run serve`, then open <http://127.0.0.1:8765/editor.html>.
-- It edits biome events, travel events and tuning, equipment items (armor, weapons, rarity
-  tiers) and settings, area actions and outcomes, and character names, traits and ages.
+- It edits biome events, travel events and tuning, equipment items (armor, weapons, types,
+  rarity tiers) and settings, area actions and outcomes, and character names, traits and ages.
 - **Open game folder** (Chrome/Edge) writes changes straight into the files. Without a
   folder, **Save changes** downloads each changed file; downloads flatten the path
   (`travel/data.js` becomes `travel-data.js`), so put the file back at its real path.

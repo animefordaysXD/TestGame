@@ -1,19 +1,20 @@
 # Equipment
 
-The `equipment` module owns armor and weapons for the main character. It is v0.3.
+The `equipment` module owns armor and weapons for the main character. It is v0.4.
 Armor targets the ten body parts from `characters/bodyData.js`; weapons use one dedicated
-weapon slot. NPCs do not equip yet.
+weapon slot. Items also carry a weapon or armor type. NPCs do not equip yet.
 
 ## Files
 
-- `equipment/data.js` — the catalogue and the five rarity ranks. Every item has `kind`
-  (`"armor"` or `"weapon"`) and `rarity`; armor has `parts` and `armor`, weapons have
+- `equipment/data.js` — the catalogue, the five rarity ranks and the weapon/armor type
+  lists. Every item has `kind` (`"armor"` or `"weapon"`), `rarity` and a type: armor has
+  `armorType`, weapons have `weaponType`. Armor also has `parts` and `armor`; weapons have
   `damage`, `strength` and `armorPiercing`. Also `maxArmor` and the `autoEquip` flag.
   Edit this file to add or tune equipment.
 - `equipment/equipment.js` — inventory, per-part armor and weapon-slot equip/unequip,
-  rarity/kind filtered finds, item destruction and event emission.
+  type/rarity/kind filtered finds, item destruction and event emission.
 - `test/equipment.test.cjs` — Node tests, including overlap replacement, summed armor,
-  weapon slots, rarity filters, destruction, save migration and a real combat check.
+  weapon slots, type filters, destruction, save migration and a real combat check.
 
 ## State slice
 
@@ -27,6 +28,7 @@ equipment: {
       name: "Leather Cuirass",
       kind: "armor",
       rarity: "uncommon",
+      armorType: "leather",
       parts: ["torso"],
       armor: 3,
       equipped: true,
@@ -39,6 +41,7 @@ equipment: {
       name: "Tempered Longsword",
       kind: "weapon",
       rarity: "uncommon",
+      weaponType: "sword",
       parts: [],
       damage: 6,
       strength: 6,
@@ -63,6 +66,19 @@ are uncovered.
 `equipped` is a convenience flag: it is true when an armor item covers at least one worn
 part, or when the item is the equipped weapon. `equippedByPart` is the source of truth for
 armor, and `equippedWeaponId` is the source of truth for the weapon.
+
+## Types
+
+`equipment/data.js` lists the type keys, so content can add a new family without changing
+module code:
+
+| weapons (`weaponType`) | armor (`armorType`) |
+|---|---|
+| `sword`, `spear`, `axe`, `mace` | `cloth`, `leather`, `mail`, `plate`, `scale` |
+
+Every item must use a type from the matching list. A missing or unknown type falls back to
+the catalogue definition and then to the first defined type when a save is loaded. Types are
+descriptive today: combat still uses the numeric stats, not the family.
 
 ## Rarity
 
@@ -96,14 +112,14 @@ never reads a character's stats.
 
 | type | direction | data |
 |---|---|---|
-| `equipment:add` | request (UI, test, future events) | `{ key?, kind?, rarity? }` — omit the key to pick randomly with `engine.rng`, optionally filtered |
+| `equipment:add` | request (UI, test, future events) | `{ key?, kind?, rarity?, weaponType?, armorType? }` — omit the key to pick randomly with `engine.rng`, optionally filtered |
 | `equipment:equip` | request (UI) | `{ itemId }` |
 | `equipment:unequip` | request (UI) | `{ itemId? }` — omit the id to clear every worn item and the weapon |
 | `equipment:remove` | request (UI, future events/mobs) | `{ itemId }` — destroys the item; a worn item is unequipped first |
-| `equipment:added` | module | `{ itemId, key, name, kind, rarity, parts, armor?, damage?, strength?, armorPiercing?, equipped, source }` |
-| `equipment:equipped` | module | `{ itemId, key, name, kind, rarity, parts, ...stats, totalArmor, replacedItemIds }` |
-| `equipment:unequipped` | module | `{ itemId, itemIds, items, key, name, kind, rarity, parts, armor, totalArmor }` |
-| `equipment:removed` | module | `{ itemId, key, name, kind, rarity, wasEquipped, totalArmor }` |
+| `equipment:added` | module | `{ itemId, key, name, kind, rarity, weaponType?, armorType?, parts, armor?, damage?, strength?, armorPiercing?, equipped, source }` |
+| `equipment:equipped` | module | `{ itemId, key, name, kind, rarity, weaponType?, armorType?, parts, ...stats, totalArmor, replacedItemIds }` |
+| `equipment:unequipped` | module | `{ itemId, itemIds, items, key, name, kind, rarity, weaponType?, armorType?, parts, armor, totalArmor }` |
+| `equipment:removed` | module | `{ itemId, key, name, kind, rarity, weaponType?, armorType?, wasEquipped, totalArmor }` |
 
 For a multi-item unequip, `itemId` and `key` are null, `name` is `"<n> items"`, and
 `items` lists what was removed. The module also listens to `action:resolved`: when an
@@ -124,16 +140,16 @@ Combat reads that armor stat. Every hit loses `effectiveArmor * armorMultiplier`
 
 ## Save migration
 
-v0.3 loads older saves. The v0.1 single `equippedId` is removed and its item is assigned
+v0.4 loads older saves. The v0.1 single `equippedId` is removed and its item is assigned
 to every part it covers; legacy items that only have `slot: "body"` take their
-definition's `parts` from `equipment/data.js`. Conflicting flagged items are assigned in
-id order, and the rest stay in the inventory. A missing `equippedWeaponId` becomes `null`;
-a flagged weapon fills it when the slot is free.
+definition's `parts` from `equipment/data.js`. Missing types take the catalogue definition.
+Conflicting flagged items are assigned in id order, and the rest stay in the inventory. A
+missing `equippedWeaponId` becomes `null`; a flagged weapon fills it when the slot is free.
 
 ## UI
 
 The **Equipment** panel shows total armor, covered parts, the weapon slot, every inventory
-item's rarity and stats, and per-item **Equip** / **Unequip** / **Destroy** buttons.
+item's type, rarity and stats, and per-item **Equip** / **Unequip** / **Destroy** buttons.
 **Find armor** and **Find weapon** add a random item of that kind (they need a saved main
 character). **Unequip all** clears the loadout. A weapon above the character's Strength
 cannot be equipped from the UI.
@@ -146,6 +162,6 @@ cannot be equipped from the UI.
 - Armor is mirrored into the main character present when the item is equipped. Save the
   main character first (the UI disables finds until you do).
 - Location events cannot change armor; only equipment does.
-- Rarity only affects stats and find weight today. Events, loot tables and mobs can
-  already request a filtered random item or destroy one, but no content uses those hooks
-  yet.
+- Rarity and type only affect grouping, labels and find filters today; stats still drive
+  combat. Events, loot tables and mobs can already request a filtered random item or
+  destroy one, but no content uses those hooks yet.

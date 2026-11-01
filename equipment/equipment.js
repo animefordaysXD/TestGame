@@ -1,4 +1,4 @@
-/* Equipment module v0.3 — armor and weapons for the main character.
+/* Equipment module v0.4 — armor and weapons for the main character.
    Owns the `equipment` slice. Other modules never touch it: the UI fires
    equipment:add / equipment:equip / equipment:unequip / equipment:remove requests,
    and this module announces equipment:added / equipment:equipped /
@@ -8,8 +8,10 @@
    Weapons occupy one dedicated slot, so one weapon is carried at a time. A weapon has
    base `damage`, a `strength` requirement and `armorPiercing` (0-100). Combat reads the
    equipped weapon from the snapshot the UI builds; this module does not read stats.
-   Every item carries a `rarity` from equipment/data.js. A random add can be filtered by
-   rarity or kind, and `equipment:remove` destroys an item, ready for future events/mobs.
+   Every item carries a `rarity` from equipment/data.js plus a `weaponType` (sword, spear,
+   axe, mace) or `armorType` (cloth, leather, mail, plate, scale). A random add can be
+   filtered by rarity, kind or type, and `equipment:remove` destroys an item, ready for
+   future events/mobs.
    The mainCharacter module listens to the equipped/unequipped events and writes its
    own `stats.armor` from the announced total. Actions can award an item through a
    resolved outcome (`equipmentKey`) without calling this module directly. Content
@@ -34,6 +36,16 @@
   const DEFAULT_RARITY = RARITY_KEYS[0] || "common";
   const KINDS = ["armor", "weapon"];
 
+  // Type definitions are data too: the catalogue and the editor share these lists.
+  const typeSet = (defs) => {
+    const list = (Array.isArray(defs) ? defs : []).filter((def) => def && typeof def.key === "string");
+    return { keys: list.map((def) => def.key), byKey: new Map(list.map((def) => [def.key, def])) };
+  };
+  const WEAPON_TYPES = typeSet(D.weaponTypes);
+  const ARMOR_TYPES = typeSet(D.armorTypes);
+  const DEFAULT_WEAPON_TYPE = WEAPON_TYPES.keys[0] || null;
+  const DEFAULT_ARMOR_TYPE = ARMOR_TYPES.keys[0] || null;
+
   const rawParts = (value) => (Array.isArray(value) ? value : []).filter((p) => typeof p === "string" && p.trim()).map((p) => p.trim());
   const cleanParts = (value) => {
     const seen = new Set();
@@ -49,6 +61,8 @@
   const cleanKind = (value, fallback) => (KINDS.includes(value) ? value : fallback);
   const cleanRarity = (value, fallback) =>
     RARITY_BY_KEY.has(value) ? value : (RARITY_BY_KEY.has(fallback) ? fallback : DEFAULT_RARITY);
+  const cleanType = (set, value, fallback, defaultKey) =>
+    set.byKey.has(value) ? value : (set.byKey.has(fallback) ? fallback : defaultKey);
   const int = (value, fallback) => {
     const n = Number(value);
     return Number.isFinite(n) ? Math.round(n) : fallback;
@@ -61,6 +75,8 @@
     item.kind = cleanKind(item.kind, "armor");
     item.rarity = cleanRarity(item.rarity, DEFAULT_RARITY);
     if (item.kind === "weapon") {
+      item.weaponType = cleanType(WEAPON_TYPES, item.weaponType, null, DEFAULT_WEAPON_TYPE);
+      delete item.armorType;
       item.parts = [];
       item.damage = Math.max(0, int(item.damage, 0));
       item.strength = clamp(int(item.strength, 1), 1, 20);
@@ -68,6 +84,8 @@
       if (!item.damage)
         throw new Error(`equipment/data.js weapon "${item.key}" must have damage above 0`);
     } else {
+      item.armorType = cleanType(ARMOR_TYPES, item.armorType, null, DEFAULT_ARMOR_TYPE);
+      delete item.weaponType;
       item.parts = cleanParts(item.parts);
       if (!item.parts.length)
         throw new Error(`equipment/data.js item "${item.key}" must target at least one body part`);
@@ -107,11 +125,13 @@
     };
 
     if (definition.kind === "weapon") {
+      item.weaponType = cleanType(WEAPON_TYPES, raw.weaponType, definition.weaponType, DEFAULT_WEAPON_TYPE);
       item.parts = [];
       item.damage = Math.max(0, int(raw.damage ?? definition.damage, 0));
       item.strength = clamp(int(raw.strength ?? definition.strength, 1), 1, 20);
       item.armorPiercing = clamp(int(raw.armorPiercing ?? definition.armorPiercing, 0), 0, 100);
     } else {
+      item.armorType = cleanType(ARMOR_TYPES, raw.armorType, definition.armorType, DEFAULT_ARMOR_TYPE);
       const parts = cleanParts(raw.parts);
       item.parts = parts.length ? parts : definition.parts.slice();
       item.armor = clamp(int(raw.armor ?? definition.armor, 0), 0, MAX_ARMOR);
@@ -214,6 +234,10 @@
       ? { damage: item.damage, strength: item.strength, armorPiercing: item.armorPiercing }
       : { armor: item.armor };
 
+    const itemTypes = (item) => item.kind === "weapon"
+      ? { weaponType: item.weaponType }
+      : { armorType: item.armorType };
+
     const statText = (item) => item.kind === "weapon"
       ? `damage ${item.damage}, Strength ${item.strength}, ${item.armorPiercing}% armor piercing`
       : `armor ${item.armor}`;
@@ -225,7 +249,7 @@
         text: `${item.name} is equipped${names.length ? `, replacing ${names.join(", ")}` : ""} (${statText(item)}).`,
         data: {
           itemId: item.id, key: item.key, name: item.name, kind: item.kind, rarity: item.rarity,
-          parts: item.parts.slice(), ...itemStats(item),
+          ...itemTypes(item), parts: item.parts.slice(), ...itemStats(item),
           totalArmor: totalArmor(), replacedItemIds: replacedItemIds.slice()
         }
       }, depth);
@@ -233,6 +257,7 @@
 
     const mod = {
       name: "equipment", depends: [], parts: BODY_PARTS.slice(), kinds: KINDS.slice(), rarities: RARITY_KEYS.slice(),
+      weaponTypes: WEAPON_TYPES.keys.slice(), armorTypes: ARMOR_TYPES.keys.slice(),
 
       init(eng) {
         engine = eng;
@@ -273,13 +298,23 @@
         return RARITY_BY_KEY.get(key) || null;
       },
 
+      weaponTypeFor(key) {
+        return WEAPON_TYPES.byKey.get(key) || null;
+      },
+
+      armorTypeFor(key) {
+        return ARMOR_TYPES.byKey.get(key) || null;
+      },
+
       // Add one catalogue item. Without a key the module picks with engine.rng.
-      // Optional `rarity` and `kind` filters narrow that random pick.
+      // Optional `rarity`, `kind`, `weaponType` and `armorType` filters narrow that pick.
       add(depth = 0, data = {}) {
         const s = S();
         const requestedKey = typeof data.key === "string" ? data.key.trim() : "";
         const kind = KINDS.includes(data.kind) ? data.kind : null;
         const rarity = RARITY_BY_KEY.has(data.rarity) ? data.rarity : null;
+        const weaponType = WEAPON_TYPES.byKey.has(data.weaponType) ? data.weaponType : null;
+        const armorType = ARMOR_TYPES.byKey.has(data.armorType) ? data.armorType : null;
 
         let definition;
         if (requestedKey) {
@@ -288,6 +323,8 @@
           let pool = [...CATALOG.values()];
           if (kind) pool = pool.filter((item) => item.kind === kind);
           if (rarity) pool = pool.filter((item) => item.rarity === rarity);
+          if (weaponType) pool = pool.filter((item) => item.kind === "weapon" && item.weaponType === weaponType);
+          if (armorType) pool = pool.filter((item) => item.kind === "armor" && item.armorType === armorType);
           definition = weightedPick(engine.rng, pool);
         }
         if (!definition) return null;
@@ -304,10 +341,12 @@
           acquiredAt: now.text
         };
         if (definition.kind === "weapon") {
+          item.weaponType = definition.weaponType;
           item.damage = definition.damage;
           item.strength = definition.strength;
           item.armorPiercing = definition.armorPiercing;
         } else {
+          item.armorType = definition.armorType;
           item.armor = clamp(int(definition.armor, 0), 0, MAX_ARMOR);
         }
 
@@ -327,7 +366,7 @@
           text: `${item.name} (${statText(item)}) is added to the inventory${autoEquipped ? " and equipped" : ""}.`,
           data: {
             itemId: item.id, key: item.key, name: item.name, kind: item.kind, rarity: item.rarity,
-            parts: item.parts.slice(), ...itemStats(item),
+            ...itemTypes(item), parts: item.parts.slice(), ...itemStats(item),
             equipped: item.equipped, source: data.source || "inventory"
           }
         }, depth);
@@ -402,12 +441,14 @@
             itemIds: removed.map((item) => item.id),
             items: removed.map((item) => ({
               id: item.id, key: item.key, name: item.name, kind: item.kind, rarity: item.rarity,
-              parts: item.parts.slice(), ...itemStats(item)
+              ...itemTypes(item), parts: item.parts.slice(), ...itemStats(item)
             })),
             key: single ? single.key : null,
             name: single ? single.name : `${removed.length} items`,
             kind: single ? single.kind : null,
             rarity: single ? single.rarity : null,
+            weaponType: single && single.kind === "weapon" ? single.weaponType : null,
+            armorType: single && single.kind === "armor" ? single.armorType : null,
             parts,
             armor: armorItems.reduce((sum, item) => sum + item.armor, 0),
             damage: single && single.kind === "weapon" ? single.damage : 0,
@@ -435,7 +476,7 @@
           text: `${item.name} is destroyed.`,
           data: {
             itemId: id, key: item.key, name: item.name, kind: item.kind, rarity: item.rarity,
-            wasEquipped, totalArmor: totalArmor()
+            ...itemTypes(item), wasEquipped, totalArmor: totalArmor()
           }
         }, depth + (wasEquipped ? 2 : 1));
         return item;

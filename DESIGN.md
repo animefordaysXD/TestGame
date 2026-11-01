@@ -245,8 +245,8 @@ and writes the data back without touching the game or the engine.
 - **Strict JSON in a JS wrapper.** Files keep their `window.X = { ... };` form and header
   comment, but the object is strict JSON so the editor can round-trip it losslessly. Unknown
   fields survive saves; older JavaScript-syntax files open with a lossy warning.
-- **Editable today:** biome events, travel events/tuning, equipment items (armor and weapons),
-  rarity tiers and settings, area actions and outcomes, and character names/traits/ages. Map,
+- **Editable today:** biome events, travel events/tuning, equipment items (armor, weapons,
+  types), rarity tiers and settings, area actions and outcomes, and character names/traits/ages. Map,
   locations, stats, combat tuning, body layout, behavior axes and personality archetypes are
   not editable yet.
 - **Direct or downloaded saves.** With a folder connection (Chrome/Edge) saves write straight
@@ -271,12 +271,14 @@ yet.
 - **Visible in the UI.** The main-character panel has a Body grid and NPC cards show a
   compact body line; `status.html` expands the parts.
 
-### 3.17 Equipment, weapons and rarity — Decided, Implemented (equipment v0.3, combat v0.2)
+### 3.17 Equipment, weapons, types and rarity — Decided, Implemented (equipment v0.4, combat v0.2)
 
 Equipment is the first real source of combat power. Armor already existed per body part; this
-slice adds weapons and item quality without replacing the body-part model.
+slice adds weapons, item families and item quality without replacing the body-part model.
 
-- **Three weapon families:** swords, spears and maces. More families can be added as data.
+- **Weapon families and armor types are data.** Weapons use `weaponType` (sword, spear, axe,
+  mace); armor uses `armorType` (cloth, leather, mail, plate, scale). Both lists live in
+  `equipment/data.js`, so adding a family is a content change, not module code.
 - **A weapon needs three numbers:** base damage, a Strength requirement, and armor piercing as
   a percentage of the target's total armor. A character below the requirement cannot use the
   weapon: it adds no damage and no piercing. Strength becomes a shared base stat for this.
@@ -287,7 +289,7 @@ slice adds weapons and item quality without replacing the body-part model.
   higher rank starts above the previous rank's maximum. Items live in one list with a `kind`
   (`"armor"` or `"weapon"`) and a `rarity`; the content editor checks each item against its
   band and warns when a value falls outside it.
-- **Random finds can be filtered by kind or rarity**, and an item can be destroyed. Those two
+- **Random finds can be filtered by kind, rarity or type**, and an item can be destroyed. Those
   hooks are the path for events, loot tables and mobs to generate or remove equipment later;
   no content uses them yet.
 - **Combat v0.2:** attack = Personal Combat plus a usable weapon's damage; armor piercing
@@ -323,7 +325,7 @@ five item rarities exist with the armor bridge, but money, companions and beasts
 | engine core v0.2, event bus, seeded RNG, turn stepping | working, frozen |
 | characters v0.5: stats, ten-part body, 30 personality archetypes with traits and 0-100 behavior profiles (data-only); `temp`/`named` approximation (three-tier model planned) | working |
 | main character v0.6: stats, ten-part body, portrait, effect bridges, armor mirror | working |
-| equipment v0.3: body-part armor, one weapon slot (swords/spears/maces), five rarity tiers, inventory, equip/unequip/destroy | working |
+| equipment v0.4: body-part armor, one weapon slot (swords/spears/axes/maces), weapon and armor types, five rarity tiers, inventory, equip/unequip/destroy | working |
 | actions v0.3: five area actions with time, costs, outcomes, route-aware Travel | working |
 | travel v0.2: 5-minute checks, event pause/resume, arrival handoff | working |
 | locations v0.4: procedural locations and a travel graph with distances; fixed `kind` landmarks | working |
@@ -331,7 +333,7 @@ five item rarities exist with the armor bridge, but money, companions and beasts
 | combat v0.2: weapon damage, Strength gating and armor piercing; armor reduces every hit | working |
 | biome events | 1 of 10 biomes has a live event |
 | **save files v0.1 (seed + changes, JSON export/import)** | working |
-| **content editor v0.1 (`editor.html`, tool — not a module)** | working for biome events, travel, equipment (armor, weapons, rarity bands), actions, character names/traits/ages |
+| **content editor v0.1 (`editor.html`, tool — not a module)** | working for biome events, travel, equipment (armor, weapons, types, rarity bands), actions, character names/traits/ages |
 | character injury, healing and body-part effects | not started (body shape + status field exist) |
 | atlas, slots, keyed RNG, founding/razing | not started |
 | family, inheritance, courts, dialogue, NPC event checker | not started |

@@ -808,6 +808,14 @@
       ? EquipmentData.rarities.find((rarity) => rarity.key === key) : null;
     return def ? def.label : (key || "Common");
   };
+  const typeLabel = (item) => {
+    if (!item) return "Unknown";
+    const weapon = item.kind === "weapon";
+    const defs = window.EquipmentData && (weapon ? EquipmentData.weaponTypes : EquipmentData.armorTypes);
+    const key = weapon ? item.weaponType : item.armorType;
+    const def = Array.isArray(defs) ? defs.find((type) => type.key === key) : null;
+    return def ? def.label : (key || "Untyped");
+  };
 
   function renderEquipment() {
     const s = engine.state.modules.equipment || { items: {}, equippedByPart: {}, equippedWeaponId: null };
@@ -838,7 +846,7 @@
       : `armor ${armor}/100 · ${covered.length}/${bodyParts.length} parts`;
 
     const weaponStatus = weapon
-      ? `Weapon: ${weapon.name} (${rarityLabel(weapon.rarity)}) · damage ${weapon.damage} · ${weapon.armorPiercing}% armor piercing${strength < weapon.strength ? ` · TOO HEAVY (need Strength ${weapon.strength})` : ""}`
+      ? `Weapon: ${weapon.name} (${typeLabel(weapon)} · ${rarityLabel(weapon.rarity)}) · damage ${weapon.damage} · ${weapon.armorPiercing}% armor piercing${strength < weapon.strength ? ` · TOO HEAVY (need Strength ${weapon.strength})` : ""}`
       : "No weapon equipped.";
     $("equipStatus").textContent = worn.length
       ? `Wearing ${worn.length} item${worn.length === 1 ? "" : "s"} · armor ${armor}/100. ${weaponStatus}`
@@ -858,11 +866,11 @@
       const equipped = isWorn(item);
       const li = document.createElement("li"), box = document.createElement("div");
       const title = document.createElement("strong");
-      title.textContent = `${item.name} · ${rarityLabel(item.rarity)}`;
+      title.textContent = `${item.name} · ${typeLabel(item)} · ${rarityLabel(item.rarity)}`;
       const sm = document.createElement("small");
       sm.textContent = item.kind === "weapon"
-        ? `weapon · damage ${item.damage} · Strength ${item.strength} · ${item.armorPiercing}% armor piercing · ${equipped ? "equipped" : "in inventory"}`
-        : `${labels(item.parts).join(", ") || "no parts"} · armor ${item.armor} · ${equipped ? "equipped" : "in inventory"}`;
+        ? `${typeLabel(item)} · damage ${item.damage} · Strength ${item.strength} · ${item.armorPiercing}% armor piercing · ${equipped ? "equipped" : "in inventory"}`
+        : `${typeLabel(item)} armor · ${labels(item.parts).join(", ") || "no parts"} · armor ${item.armor} · ${equipped ? "equipped" : "in inventory"}`;
       box.append(title, sm);
       li.append(box);
 
@@ -876,14 +884,14 @@
       } else if (item.kind === "weapon") {
         const tooHeavy = strength < item.strength;
         b.textContent = tooHeavy ? "Too heavy" : "Equip";
-        b.title = `${item.name} (${rarityLabel(item.rarity)}) — damage ${item.damage}, needs Strength ${item.strength}, ${item.armorPiercing}% armor piercing${tooHeavy ? `; current Strength ${strength}` : ""}`;
+        b.title = `${item.name} (${typeLabel(item)}, ${rarityLabel(item.rarity)}) — damage ${item.damage}, needs Strength ${item.strength}, ${item.armorPiercing}% armor piercing${tooHeavy ? `; current Strength ${strength}` : ""}`;
         b.disabled = !hasMain || tooHeavy;
         b.onclick = () => act("equipment:equip", { itemId: item.id });
       } else {
         const conflicts = [...new Set((item.parts || []).map((part) => byPart[part]).filter((id) => id && id !== item.id))]
           .map((id) => (s.items[id] || {}).name).filter(Boolean);
         b.textContent = "Equip";
-        b.title = `Equip ${item.name} (${labels(item.parts).join(", ")}, armor ${item.armor})${conflicts.length ? ` — replaces ${conflicts.join(", ")}` : ""}`;
+        b.title = `Equip ${item.name} (${typeLabel(item)}, ${labels(item.parts).join(", ")}, armor ${item.armor})${conflicts.length ? ` — replaces ${conflicts.join(", ")}` : ""}`;
         b.disabled = !hasMain;
         b.onclick = () => act("equipment:equip", { itemId: item.id });
       }
@@ -1025,7 +1033,7 @@
       armor: c.stats.armor ?? 0,
       weapon: weapon
         ? {
-          key: weapon.key, name: weapon.name, rarity: weapon.rarity,
+          key: weapon.key, name: weapon.name, rarity: weapon.rarity, weaponType: weapon.weaponType,
           damage: weapon.damage, strength: weapon.strength, armorPiercing: weapon.armorPiercing
         }
         : null

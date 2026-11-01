@@ -48,6 +48,8 @@
     { key: "name", label: "Name", type: "text" },
     { key: "kind", label: "Kind", type: "select", source: "kinds", help: "Armor covers body parts; a weapon fills the one weapon slot." },
     { key: "rarity", label: "Rarity", type: "select", source: "rarities", help: "Common, Uncommon, Rare, Legendary or Unique. Stats should stay inside this rank's band." },
+    { key: "weaponType", label: "Weapon type", type: "select", source: "weaponTypes", help: "Weapon only. Sword, spear, axe or mace." },
+    { key: "armorType", label: "Armor type", type: "select", source: "armorTypes", help: "Armor only. Cloth, leather, mail, plate or scale." },
     { key: "parts", label: "Body parts (armor)", type: "multiselect", source: "bodyParts", help: "Armor only. The item covers these parts and replaces any item already on one of them." },
     { key: "armor", label: "Armor (armor)", type: "number", min: 0, step: 1, help: "Armor only. Added to total armor; every hit is reduced by it and Defend doubles it." },
     { key: "damage", label: "Damage (weapon)", type: "number", min: 0, step: 1, help: "Weapon only. Added to the wielder's attack damage." },
@@ -147,16 +149,21 @@
     {
       id: "equipment-items", group: "Items", title: "Equipment", file: "equipment", kind: "list", at: ["items"],
       fields: itemFields, label: (i) => i.name || i.key || "(unnamed)",
-      sub: (i) => `${i.kind === "weapon" ? "weapon" : "armor"} · ${i.rarity || "common"}`,
+      sub: (i) => `${i.kind === "weapon" ? "weapon" : "armor"} · ${(i.kind === "weapon" ? i.weaponType : i.armorType) || "untyped"} · ${i.rarity || "common"}`,
       newItem: (ctx, list) => ({
         key: C.uniqueId(list.map((i) => i.key), "new_item"), name: "New item",
         kind: "armor", rarity: (ctx.rarities[0] || "common"),
+        armorType: (ctx.armorTypes[0] || "cloth"),
         parts: [(ctx.bodyParts[0] && ctx.bodyParts[0].key) || "torso"], armor: 1,
         damage: 0, strength: 1, armorPiercing: 0, weight: 1, description: ""
       }),
       preview(i, ctx, data) {
         const weapon = i.kind === "weapon";
         const rarity = (ctx.rarityDefs || []).find((r) => r.key === i.rarity);
+        const typeKey = weapon ? i.weaponType : i.armorType;
+        const typeDefs = (weapon ? ctx.weaponTypeDefs : ctx.armorTypeDefs) || [];
+        const typeDef = typeDefs.find((t) => t.key === typeKey);
+        const typeName = typeDef ? (typeDef.label || typeDef.key) : (typeKey || "untyped");
         const band = (range) => Array.isArray(range) && range.length === 2 ? `${range[0]}-${range[1]}` : "?";
         const notes = [];
         if (rarity) {
@@ -164,7 +171,9 @@
         } else if (i.rarity) {
           notes.push(`Unknown rarity "${i.rarity}".`);
         }
-        const chips = [{ text: `${i.kind === "weapon" ? "Weapon" : "Armor"} · ${i.rarity || "common"}`, tone: "flat" }];
+        if (!typeKey) notes.push(`No ${weapon ? "weapon" : "armor"} type: it falls back to ${typeDefs[0] ? (typeDefs[0].label || typeDefs[0].key) : "none"}.`);
+        else if (!typeDef) notes.push(`Unknown ${weapon ? "weapon" : "armor"} type "${typeKey}".`);
+        const chips = [{ text: `${weapon ? "Weapon" : "Armor"} · ${typeName} · ${i.rarity || "common"}`, tone: "flat" }];
 
         if (weapon) {
           const damage = Number(i.damage), strength = Number(i.strength), piercing = Number(i.armorPiercing);
@@ -199,10 +208,14 @@
         const weapons = items.filter((item) => item.kind === "weapon");
         const covered = new Set(armor.flatMap((item) => Array.isArray(item.parts) ? item.parts : []));
         const rarities = (data.equipment.rarities || []).map((r) => r.label || r.key);
+        const weaponTypes = (data.equipment.weaponTypes || []).map((t) => t.label || t.key);
+        const armorTypes = (data.equipment.armorTypes || []).map((t) => t.label || t.key);
         return { notes: [
           `${armor.length} armor items cover ${covered.size} of ${ctx.bodyParts.length} body parts; ${weapons.length} weapons fill the one weapon slot.`,
           rarities.length ? `Rarity ranks: ${rarities.join(", ")}.` : "No rarity ranks defined: every item falls back to common.",
-          `A find is filtered by kind or rarity and picked by weight; the armour cap is ${data.equipment.maxArmor}.`,
+          weaponTypes.length ? `Weapon types: ${weaponTypes.join(", ")}.` : "No weapon types defined: weapons fall back to untyped.",
+          armorTypes.length ? `Armor types: ${armorTypes.join(", ")}.` : "No armor types defined: armor falls back to untyped.",
+          `A find is filtered by kind, rarity or type and picked by weight; the armour cap is ${data.equipment.maxArmor}.`,
           data.equipment.autoEquip === false ? "New items stay in the inventory until equipped." : "New items equip automatically when their slot is free."
         ] };
       }
@@ -304,6 +317,8 @@
     const bodyParts = (refs.body && Array.isArray(refs.body.parts) ? refs.body.parts : [])
       .map((part) => ({ key: part.key, label: part.label || part.key }));
     const rarityDefs = Array.isArray(equipment.rarities) ? equipment.rarities : [];
+    const weaponTypeDefs = Array.isArray(equipment.weaponTypes) ? equipment.weaponTypes : [];
+    const armorTypeDefs = Array.isArray(equipment.armorTypes) ? equipment.armorTypes : [];
     return {
       statDefs,
       statKeys: statDefs.filter((d) => d.kind !== "equipment").map((d) => d.key),
@@ -315,6 +330,10 @@
       kinds: ["armor", "weapon"],
       rarityDefs,
       rarities: rarityDefs.map((r) => r.key),
+      weaponTypeDefs,
+      weaponTypes: weaponTypeDefs.map((t) => t.key),
+      armorTypeDefs,
+      armorTypes: armorTypeDefs.map((t) => t.key),
       traits: data.characters && Array.isArray(data.characters.traits) ? data.characters.traits : [],
       outcomeIds: outcomeIds(data),
       armorMultiplier: (refs.combat && refs.combat.defend && refs.combat.defend.armorMultiplier) || 2
@@ -326,6 +345,8 @@
     if (source === "bodyParts") return (ctx.bodyParts || []).map((part) => ({ value: part.key, label: part.label }));
     if (source === "kinds") return (ctx.kinds || []).map((kind) => ({ value: kind, label: cap(kind) }));
     if (source === "rarities") return (ctx.rarityDefs || []).map((r) => ({ value: r.key, label: r.label || r.key }));
+    if (source === "weaponTypes") return (ctx.weaponTypeDefs || []).map((t) => ({ value: t.key, label: t.label || t.key }));
+    if (source === "armorTypes") return (ctx.armorTypeDefs || []).map((t) => ({ value: t.key, label: t.label || t.key }));
     const list = { equipmentKeys: ctx.equipmentKeys, biomes: ctx.biomes, traits: ctx.traits }[source] || [];
     return list.map((v) => ({ value: v, label: v }));
   }
@@ -405,6 +426,19 @@
       if (typeof d.autoEquip !== "boolean") set("error", "Auto-equip must be on or off.", null, "autoEquip");
       if (!Array.isArray(d.rarities) || !d.rarities.length) report("warn", "No rarity ranks defined; every item falls back to common.", null, "rarities");
       const rarityByKey = new Map((Array.isArray(d.rarities) ? d.rarities : []).map((r) => [r && r.key, r]));
+      const checkTypeDefs = (list, field, label) => {
+        if (!Array.isArray(list) || !list.length) {
+          report("warn", `No ${label.toLowerCase()}s defined; the first one is assumed.`, null, field);
+          return new Map();
+        }
+        checkIds(list, "key", report, label);
+        list.forEach((t, i) => {
+          if (!t || typeof t.label !== "string" || !t.label.trim()) report("warn", `${label} #${i + 1} has no label.`, null, field);
+        });
+        return new Map(list.map((t) => [t && t.key, t]));
+      };
+      const weaponTypeByKey = checkTypeDefs(d.weaponTypes, "weaponTypes", "Weapon type");
+      const armorTypeByKey = checkTypeDefs(d.armorTypes, "armorTypes", "Armor type");
       if (Array.isArray(d.rarities)) {
         checkIds(d.rarities, "key", report, "Rarity");
         d.rarities.forEach((r, i) => {
@@ -432,6 +466,9 @@
         };
 
         if (it.kind === "weapon") {
+          if (!it.weaponType) report("warn", "Give the weapon a weaponType; the first type is assumed.", i, "weaponType");
+          else if (weaponTypeByKey.size && !weaponTypeByKey.has(it.weaponType)) report("error", `Unknown weaponType "${it.weaponType}".`, i, "weaponType");
+          if (it.armorType) report("error", "Weapons use weaponType; armorType is ignored.", i, "armorType");
           if (Array.isArray(it.parts) && it.parts.length) report("warn", "Weapons ignore body parts; they fill the weapon slot.", i, "parts");
           if (!Number.isInteger(it.damage) || it.damage < 1) report("error", "Weapon damage must be a whole number of at least 1.", i, "damage");
           if (!Number.isInteger(it.strength) || it.strength < 1 || it.strength > 20) report("error", "Strength requirement must be a whole number from 1 to 20.", i, "strength");
@@ -443,6 +480,9 @@
             band(it.armorPiercing, rarity.armorPiercing, "Armor piercing", "armorPiercing");
           }
         } else {
+          if (!it.armorType) report("warn", "Give the armor an armorType; the first type is assumed.", i, "armorType");
+          else if (armorTypeByKey.size && !armorTypeByKey.has(it.armorType)) report("error", `Unknown armorType "${it.armorType}".`, i, "armorType");
+          if (it.weaponType) report("error", "Armor uses armorType; weaponType is ignored.", i, "weaponType");
           if (it.damage || it.armorPiercing) report("warn", "Armor does not use damage or armor piercing; they are ignored.", i, "damage");
           if (!Array.isArray(it.parts) || !it.parts.length) {
             report("error", "Target at least one body part.", i, "parts");

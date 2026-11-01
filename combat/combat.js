@@ -5,8 +5,9 @@
    combat:damage to their own slices, so the real characters keep the resulting HP.
 
    A snapshot carries personalCombat, strength, armor and an optional equipped weapon
-   ({ key, name, damage, strength, armorPiercing, rarity }). A weapon adds its damage and
-   its armor piercing only when the attacker's Strength meets weapon.strength; otherwise
+   ({ key, name, damage, strength, armorPiercing, rarity, weaponType? }). A weapon adds
+   its damage and its armor piercing only when the attacker's Strength meets
+   weapon.strength; otherwise
    it is "too heavy" and contributes nothing. Armor reduces every hit, and Defend doubles
    that reduction. See ENGINE_SPEC.md and combat/README.md. */
 (function (global) {
@@ -55,7 +56,8 @@
       damage,
       strength: clamp(Math.round(Number(raw.strength) || 1), 1, 20),
       armorPiercing: clamp(Math.round(Number(raw.armorPiercing) || 0), 0, 100),
-      rarity: String(raw.rarity || "")
+      rarity: String(raw.rarity || ""),
+      ...(raw.weaponType ? { weaponType: String(raw.weaponType) } : {})
     };
   }
 
