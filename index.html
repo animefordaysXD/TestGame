@@ -212,6 +212,8 @@
 <script src="travel/travel.js"></script>
 <script src="combat/data.js"></script>
 <script src="combat/combat.js"></script>
+<script src="encounters/data.js"></script>
+<script src="encounters/encounters.js"></script>
 <script src="save/gameSave.js"></script>
 <script>
   const $ = (id) => document.getElementById(id);
@@ -228,6 +230,7 @@
     e.register(createActionsModule());
     e.register(createTravelModule());
     e.register(createCombatModule());
+    e.register(createEncountersModule());
     // Add more modules here, e.g. e.register(createMarriageModule());
     return e;
   }
@@ -240,6 +243,7 @@
   const mapModule = engine.modules.get("map");
   const travelModule = engine.modules.get("travel");
   const combatModule = engine.modules.get("combat");
+  const encounterModule = engine.modules.get("encounters");
 
   const statDefs = CharacterStatsData.stats;
   function statDisplay(stats) {
@@ -315,8 +319,8 @@
 
     const current = s.currentId ? s.locations[s.currentId] : null;
     $("locVisitStatus").textContent = current
-      ? `Current location: ${current.name}.`
-      : "Visit a location to roll its biome events.";
+      ? `Current location: ${current.name} · level ${current.level ?? 1} · hostility ${current.hostility}/100 (${locationsModule.labelFor(current.hostility)}).`
+      : "Visit a location to roll its biome events and encounters.";
 
     const ul = $("locations");
     ul.innerHTML = "";
@@ -333,7 +337,7 @@
       const title = document.createElement("strong"); title.textContent = loc.name;
       const routes = Array.isArray(loc.connections) ? loc.connections : [];
       const sm = document.createElement("small");
-      sm.textContent = `${loc.kind ? loc.kind + " · " : ""}${loc.biome} · ${loc.weather} · hostility ${loc.hostility}/100 (${locationsModule.labelFor(loc.hostility)}) · ${routes.length} route${routes.length === 1 ? "" : "s"}${loc.id === s.currentId ? " · current" : ""}`;
+      sm.textContent = `${loc.kind ? loc.kind + " · " : ""}${loc.biome} · ${loc.weather} · level ${loc.level ?? 1} · hostility ${loc.hostility}/100 (${locationsModule.labelFor(loc.hostility)}) · ${routes.length} route${routes.length === 1 ? "" : "s"}${loc.id === s.currentId ? " · current" : ""}`;
       box.append(title, sm);
       li.append(box);
 
@@ -385,9 +389,13 @@
       const result = await locationsModule.visit(id);
       engine.flush();
       const names = result.events.map((event) => event.name);
-      $("locVisitStatus").textContent = names.length
+      const patrol = encounterModule ? encounterModule.lastVisit() : null;
+      const encounterText = patrol && patrol.triggered
+        ? ` ${patrol.count} hostile${patrol.count === 1 ? "" : "s"} appeared (${patrol.chancePercent}% chance at hostility ${patrol.hostility}).`
+        : patrol ? ` No encounter (${patrol.chancePercent}% chance at hostility ${patrol.hostility}).` : "";
+      $("locVisitStatus").textContent = (names.length
         ? `Visited ${result.location.name}. Triggered: ${names.join(", ")}.`
-        : `Visited ${result.location.name}. No biome events triggered.`;
+        : `Visited ${result.location.name}. No biome events triggered.`) + encounterText;
     } catch (error) {
       alert("Could not visit that location: " + error.message);
     } finally {
@@ -1098,7 +1106,8 @@
         const li = document.createElement("li"), box = document.createElement("div");
         box.textContent = `${c.name}, ${c.age}, ${c.gender}`;
         const sm = document.createElement("small");
-        sm.textContent = `${c.personality ? c.personality.name + " · " : ""}${c.traits.join(", ")}`;
+        const relation = chars.relationFor(c.relation && c.relation.value, c.relation && c.relation.type);
+        sm.textContent = `level ${c.level ?? 1} · ${relation.label} ${relation.value >= 0 ? "+" : ""}${relation.value} · ${c.personality ? c.personality.name + " · " : ""}${c.traits.join(", ")}`;
         sm.title = behaviorLine(c.behavior);
         box.append(sm);
         const st = document.createElement("small");

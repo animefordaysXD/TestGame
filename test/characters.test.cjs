@@ -30,6 +30,10 @@ for (const part of BODY_PARTS) {
 
 const PERSONALITIES = CharacterData.personalities;
 const AXES = CharacterData.behaviorAxes;
+const RELATIONS = CharacterData.relations;
+assert.equal(RELATIONS.bands.length, 6, "relation bands are defined");
+assert.ok(RELATIONS.types.some((type) => type.key === "neutral"), "a default relation type exists");
+assert.equal(CharacterData.levels.default, 1);
 assert.equal(PERSONALITIES.length, 30, "30 NPC personality archetypes are defined");
 assert.equal(new Set(PERSONALITIES.map((profile) => profile.id)).size, 30, "personality ids are unique");
 assert.equal(new Set(PERSONALITIES.map((profile) => profile.name)).size, 30, "personality names are unique");
@@ -116,6 +120,10 @@ function makeEngine(seed) {
   assertStats(first.stats, "NPC");
   assertBody(first.body, "NPC");
   assert.equal(first.stats.armor, 0, "armor starts at 0");
+  assert.deepEqual(first.relation, { value: 0, type: "neutral" }, "NPCs start with a neutral relation");
+  assert.equal(first.level, 1, "NPCs start at level 1");
+  assert.equal(spawnedEvents[0].data.level, 1);
+  assert.deepEqual(spawnedEvents[0].data.relation, { value: 0, type: "neutral" });
   assert.ok(JSON.stringify(first).length > 0, "NPC state is JSON-safe");
 
   const second = characters.spawn();
@@ -175,6 +183,8 @@ function makeEngine(seed) {
   delete oldNpc.personality;
   delete oldNpc.behavior;
   delete oldNpc.body;
+  delete oldNpc.relation;
+  delete oldNpc.level;
   legacyNamed.npc_9001 = oldNpc;
   legacyTemp.npc_9002 = {
     ...oldNpc, id: "npc_9002", name: "Old Timer",
@@ -202,6 +212,8 @@ function makeEngine(seed) {
   for (const axis of AXES) {
     assert.ok(Number.isInteger(migrated.behavior[axis.key]), `legacy NPC behavior has ${axis.key}`);
   }
+  assert.deepEqual(migrated.relation, { value: 0, type: "neutral" }, "legacy NPCs get the default relation");
+  assert.equal(migrated.level, 1, "legacy NPCs get the default level");
 
   const partialBody = loaded.engine.state.modules.characters.temp.npc_9002;
   assertBody(partialBody.body, "partial-body NPC", { head: "scarred" });

@@ -40,7 +40,15 @@ global.fetch = async (url) => {
   const snow = locations.eventsFor("tundra").find((event) => event.id === "tundra_snowfall");
   assert.equal(snow.chancePercent, 10);
   assert.equal(snow.chance, 0.1);
+  assert.equal(snow.hostilityModifier, 1, "snowfall is a bad event that gets likelier with hostility");
   assert.deepEqual(snow.effects, [{ stat: "stamina", delta: -10 }]);
+
+  assert.equal(locations.eventChance(snow, 50), 0.1, "hostility 50 is neutral");
+  assert.ok(Math.abs(locations.eventChance(snow, 60) - 0.12) < 1e-12, "hostility 60 raises a bad event to 12%");
+  assert.ok(Math.abs(locations.eventChance(snow, 100) - 0.2) < 1e-12, "hostility 100 doubles it");
+  assert.ok(locations.eventChance(snow, 1) < 0.01, "a very safe location nearly removes it");
+  assert.equal(locations.eventChance({ chance: 0.1, hostilityModifier: -1 }, 100), 0, "a good event can be removed by danger");
+  assert.equal(locations.eventChance({ chance: 0.1, hostilityModifier: 0 }, 100), 0.1, "no modifier means no change");
 
   const character = mainCharacter.save({ name: "Event Tester", gender: "female", age: 20 });
   engine.flush();
@@ -77,7 +85,10 @@ global.fetch = async (url) => {
   assert.equal(locationEvents.length, 1);
   assert.equal(locationEvents[0].depth, 1, "the triggered event is a follow-up");
   assert.equal(locationEvents[0].data.eventId, "tundra_snowfall");
-  assert.equal(locationEvents[0].data.chancePercent, 10);
+  assert.equal(locationEvents[0].data.chancePercent, 12, "the logged chance includes the hostility modifier");
+  assert.equal(locationEvents[0].data.baseChancePercent, 10);
+  assert.equal(locationEvents[0].data.hostility, 60);
+  assert.equal(locationEvents[0].data.hostilityModifier, 1);
   assert.equal(locationEvents[0].data.effects[0].stat, "stamina");
   assert.equal(locationEvents[0].data.effects[0].delta, -10);
 

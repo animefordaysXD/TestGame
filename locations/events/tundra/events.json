@@ -6,6 +6,7 @@
       "name": "Snowfall",
       "enabled": true,
       "chancePercent": 10,
+      "hostilityModifier": 1,
       "text": "Snow falls across the tundra, sapping your stamina.",
       "effects": [
         {
@@ -19,6 +20,7 @@
       "name": "Template event",
       "enabled": false,
       "chancePercent": 10,
+      "hostilityModifier": 0,
       "text": "Replace this with something that happens in the tundra.",
       "effects": []
     }

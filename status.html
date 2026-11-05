@@ -162,6 +162,7 @@
 <script src="actions/data.js"></script>
 <script src="travel/data.js"></script>
 <script src="combat/data.js"></script>
+<script src="encounters/data.js"></script>
 <!-- Read-only viewer. It registers no modules and never writes the save.
      The module/event branches are hand-maintained; update them with ENGINE_SPEC.md. -->
 <script>
@@ -175,6 +176,7 @@
   const TRD = window.TravelData || { events: [], minutesPerCheck: 5, chancePercent: 0 };
   const EQD = window.EquipmentData || { items: [] };
   const CBD = window.CombatData || { actions: [], attack: {}, defend: {} };
+  const END = window.EncounterData || { spawn: { bands: [] }, loot: { rarityBands: [] } };
   const CD = window.CharacterData || { traits: [], opposites: [], personalities: [], behaviorAxes: [] };
   const BD = window.CharacterBodyData || { parts: [], defaultStatus: "intact" };
   const MD = window.MapData || { landmarks: [], defaultLocationCount: 20, minLocationCount: 0, maxLocationCount: 100 };
@@ -212,6 +214,7 @@
           startedAtTick: null, startedAt: "", endedAtTick: null, endedAt: "", log: []
         },
         locations: { seed: 0, createdAt: "", nextId: 1, locations: {}, currentId: null },
+        encounters: { enemies: {}, lastVisit: null, lastLoot: null },
         map: { seed: 0, size: 0, total: 0, lastGeneratedTick: null, lastGeneratedAt: "", landmarks: {} },
         actions: { locationId: null, locationName: "", biomeKey: "", actions: [], lastAction: null },
         equipment: { nextId: 1, items: {}, equippedByPart: {}, equippedWeaponId: null },
@@ -263,6 +266,16 @@
     const value = Number(hostility);
     for (const band of bands) if (value <= Number(band.max)) return band.label;
     return "";
+  }
+
+  function relationLabel(relation) {
+    const data = CD.relations || {};
+    const value = Number(relation && relation.value);
+    if (!Number.isFinite(value)) return "no relation";
+    const band = (data.bands || []).find((entry) => value >= Number(entry.min) && value <= Number(entry.max));
+    const type = (data.types || []).find((entry) => entry.key === (relation && relation.type));
+    const label = band && band.typeSpecific ? ((type && type.highLabel) || band.label) : (band && band.label);
+    return `${label || value} (${value >= 0 ? "+" : ""}${value})`;
   }
 
   function statRows(stats, kind) {
@@ -363,9 +376,11 @@
       .join(" · ");
     const npcNode = (c) => node(
       c.name || c.id || "NPC",
-      `${c.gender || "?"} · age ${c.age ?? "?"} · ${c.personality ? c.personality.name : "no personality"} · ${(c.traits || []).slice(0, 4).join(", ")}${(c.traits || []).length > 4 ? "…" : ""}`,
+      `level ${c.level ?? 1} · ${relationLabel(c.relation)} · ${c.gender || "?"} · age ${c.age ?? "?"} · ${c.personality ? c.personality.name : "no personality"} · ${(c.traits || []).slice(0, 4).join(", ")}${(c.traits || []).length > 4 ? "…" : ""}`,
       "state",
       [
+        node("Relation", relationLabel(c.relation), "state"),
+        node("Level", String(c.level ?? 1), "state"),
         node("Personality", c.personality ? `${c.personality.name} (${c.personality.id})` : "not set", "state"),
         node("Behavior", axisLine(c.behavior), "state"),
         node("Resources", statLine(c.stats, "resource"), "state"),
@@ -376,10 +391,10 @@
     );
     const namedNode = group(`Named NPC (${named.length})`, named.length ? "" : "none saved", named.map(npcNode), "state");
     const tempNode = group(`Temporary Spawn (${temp.length})`, temp.length ? "cleared by location:changed" : "none", temp.map(npcNode), "state");
-    const chars = node("characters", `v0.5 · next id ${charState.nextId ?? "—"}`, "module", [
+    const chars = node("characters", `v0.6 · next id ${charState.nextId ?? "—"}`, "module", [
       namedNode,
       tempNode,
-      node("Rules", `${(CD.traits || []).length} traits · ${(CD.opposites || []).length} opposite pairs · ${(CD.personalities || []).length} personalities · ${(CD.behaviorAxes || []).length} behavior axes (0-100, data-only) · 5 traits per NPC · ${ST.stats.length} stats (10 base + armor)`, "content")
+      node("Rules", `${(CD.relations && CD.relations.bands || []).length} relation bands · ${(CD.relations && CD.relations.types || []).length} relation types · levels 1-100 · ${(CD.traits || []).length} traits · ${(CD.opposites || []).length} opposite pairs · ${(CD.personalities || []).length} personalities · ${(CD.behaviorAxes || []).length} behavior axes (0-100, data-only) · 5 traits per NPC · ${ST.stats.length} stats (10 base + armor)`, "content")
     ], "built");
 
     /* Main character ------------------------------------------------------ */
@@ -479,7 +494,7 @@
       const routes = Array.isArray(loc.connections) ? loc.connections : [];
       return node(
         loc.name || loc.id,
-        `${loc.id} · ${loc.kind ? loc.kind + " · " : ""}${loc.biome || "?"} · ${loc.weather || "?"} · hostility ${loc.hostility ?? "?"} (${bandFor(loc.hostility) || "?"}) · ${routes.length} route${routes.length === 1 ? "" : "s"}${loc.id === currentId ? " · current" : ""}`,
+        `${loc.id} · ${loc.kind ? loc.kind + " · " : ""}${loc.biome || "?"} · ${loc.weather || "?"} · level ${loc.level ?? 1} · hostility ${loc.hostility ?? "?"} (${bandFor(loc.hostility) || "?"}) · ${routes.length} route${routes.length === 1 ? "" : "s"}${loc.id === currentId ? " · current" : ""}`,
         "state",
         [],
         loc.id === currentId ? "current" : ""
@@ -491,12 +506,32 @@
       ? Math.round((routeDistances.reduce((sum, distance) => sum + distance, 0) / routeDistances.length) * 10) / 10
       : 0;
     const locationsNode = group(`Locations (${locations.length})`, locations.length ? "unique names · biome/weather pairs vary · linked by routes" : "none generated", locItems, "state");
-    const locationsBranch = node("locations", `v0.4 · map seed ${locState.seed ?? "—"} · ${locations.length} generated · ${routeEdges} route${routeEdges === 1 ? "" : "s"}`, "module", [
+    const locationsBranch = node("locations", `v0.5 · map seed ${locState.seed ?? "—"} · ${locations.length} generated · ${routeEdges} route${routeEdges === 1 ? "" : "s"}`, "module", [
       node("Map", `seed ${locState.seed ?? "—"} · created ${locState.createdAt || "—"} · next ${locState.nextId ?? "—"}`, "state"),
       node("Travel graph", `${routeEdges} route${routeEdges === 1 ? "" : "s"} · avg distance ${avgDistance} · ${(LOC.travelGraph && LOC.travelGraph.minutesPerDistance) || 15} min per league · links ${(LOC.travelGraph && LOC.travelGraph.links || []).join("–")}`, "state"),
       locationsNode,
-      node("Biome events on visit", "each enabled event rolls independently; base-stat effects apply", "state")
+      node("Biome events on visit", "each enabled event rolls independently; hostilityModifier shifts bad events toward danger; base-stat effects apply", "state")
     ], "built");
+
+    /* Encounters ---------------------------------------------------------- */
+    const encState = modules.encounters || {};
+    const encEnemies = Object.values(encState.enemies || {}).sort((a, b) => String(a.id).localeCompare(String(b.id)));
+    const encVisit = encState.lastVisit || null;
+    const encLoot = encState.lastLoot || null;
+    const encountersBranch = node("encounters", `v0.1 · ${encEnemies.length} active enem${encEnemies.length === 1 ? "y" : "ies"}`, "module", [
+      node("Last visit", encVisit
+        ? `${encVisit.locationName || encVisit.locationId} · hostility ${encVisit.hostility} · ${encVisit.chancePercent}% · roll ${encVisit.roll} · ${encVisit.triggered ? `${encVisit.count} spawned` : "no spawn"}`
+        : "no visit rolled yet", encVisit ? "state" : "warn"),
+      group(`Encounter enemies (${encEnemies.length})`, "cleared when the next location is visited", encEnemies.map((enemy) => node(
+        enemy.name || enemy.id,
+        `${enemy.id} · level ${enemy.level ?? 1} · hostility ${enemy.hostility ?? "?"} · relation ${enemy.relation ?? "?"} (${enemy.relationType || "bandit"})`,
+        "state"
+      )), "state"),
+      node("Last loot", encLoot
+        ? `${encLoot.enemyName || encLoot.enemyId} · ${encLoot.dropChancePercent}% · roll ${encLoot.roll} · ${encLoot.awarded ? `${encLoot.rarity} ${encLoot.kind}` : "nothing"}`
+        : "no combat loot yet", encLoot ? "state" : "warn"),
+      node("Rules", `${(END.spawn && END.spawn.bands || []).length} spawn bands · ${(END.loot && END.loot.rarityBands || []).length} loot bands · higher hostility means more enemies, lower relations and stronger loot · character:spawn → combat:ended → equipment:add`, "content")
+    ], encEnemies.length || encVisit ? "built" : "empty");
 
     /* Map spawner --------------------------------------------------------- */
     const mapState = modules.map || {};
@@ -560,9 +595,9 @@
       node("Rules", "UI advances 5-minute ticks · travel:event pauses · Continue resumes · completion calls locations.visit", "content")
     ], travelActive || travelDone ? "built" : "empty");
 
-    const modulesBranch = node("Modules", "8 registered · event-driven · one slice each", "state", [
-      chars, mainCharacter, equipmentBranch, combatBranch, locationsBranch, mapBranch, actionsBranch, travelBranch
-    ], "8");
+    const modulesBranch = node("Modules", "9 registered · event-driven · one slice each", "state", [
+      chars, mainCharacter, equipmentBranch, combatBranch, locationsBranch, encountersBranch, mapBranch, actionsBranch, travelBranch
+    ], "9");
 
     /* Content ------------------------------------------------------------- */
     const biomeNodes = biomes.map((biome) => {
@@ -577,17 +612,18 @@
       ? `${events.enabled} active / ${events.total} defined across ${biomes.length} biomes${events.errors ? ` · ${events.errors} load error(s)` : ""}`
       : "loading event files…";
     const contentBranch = node("Content data", "plain data files — no generation logic", "content", [
-      node("characters/data.js", `${givenNames} given names · ${(CD.surnames || []).length} surnames · ${(CD.traits || []).length} traits · ${(CD.opposites || []).length} opposite pairs · ${(CD.personalities || []).length} personalities · ${(CD.behaviorAxes || []).length} behavior axes · ages ${(CD.ageRange || []).join("–")}`, "content"),
+      node("characters/data.js", `${givenNames} given names · ${(CD.surnames || []).length} surnames · ${(CD.traits || []).length} traits · ${(CD.opposites || []).length} opposite pairs · ${(CD.personalities || []).length} personalities · ${(CD.behaviorAxes || []).length} behavior axes · ${(CD.relations && CD.relations.bands || []).length} relation bands · ${(CD.relations && CD.relations.types || []).length} relation types · ages ${(CD.ageRange || []).join("–")}`, "content"),
       node("characters/bodyData.js", `${bodyDefs().length} body parts · ${bodyDefs().filter((part) => part.vital).length} vital · default status ${BD.defaultStatus || "intact"} · equipment targets part keys`, "content"),
       node("map/data.js", `${(MD.landmarks || []).length} fixed landmarks · default ${MD.defaultLocationCount ?? 20} random · range ${MD.minLocationCount ?? 0}–${MD.maxLocationCount ?? 100}`, "content"),
       node("characters/statsData.js", `${ST.stats.length} stats · ${ST.stats.filter((d) => d.kind === "resource").length} resources · ${ST.stats.filter((d) => d.kind === "skill").length} skills · ${ST.stats.filter((d) => d.kind === "equipment").length} equipment`, "content"),
       node("mainCharacterData.js", `portrait ${MC.imageSize ?? 256}px · upload ≤ ${Math.round((MC.maxUploadBytes || 0) / 1048576)} MB · ${(MC.genders || []).length} genders`, "content"),
-      node("locations/data.js", `${biomes.length} biomes · ${weatherTotal} weather entries · ${(LOC.namePrefixes || []).length} prefixes · ${(LOC.nameSuffixes || []).length} suffixes · ${(LOC.namePatterns || []).length} name patterns · ${(LOC.travelGraph && LOC.travelGraph.minutesPerDistance) || 15} min per league`, "content"),
+      node("locations/data.js", `${biomes.length} biomes · ${weatherTotal} weather entries · default hostility ${LOC.defaultHostility ?? 50} · level ranges on every biome · ${(LOC.namePrefixes || []).length} prefixes · ${(LOC.nameSuffixes || []).length} suffixes · ${(LOC.namePatterns || []).length} name patterns · ${(LOC.travelGraph && LOC.travelGraph.minutesPerDistance) || 15} min per league`, "content"),
       node("actions/data.js", `${defaultActions.length} default actions · ${overrides.length} biome override(s) · ${defaultActions.reduce((sum, action) => sum + ((action.outcomes || []).length), 0)} outcomes`, "content"),
       node("travel/data.js", `${(TRD.events || []).length} travel events · ${TRD.chancePercent ?? 0}% per check · every ${TRD.minutesPerCheck ?? 5} min · ${Object.keys(TRD.chanceByBiome || {}).length} biome override(s)`, "content"),
       node("equipment/data.js", `${(EQD.items || []).filter((i) => i.kind !== "weapon").length} armor + ${(EQD.items || []).filter((i) => i.kind === "weapon").length} weapons · ${(EQD.rarities || []).length} rarities · ${bodyDefs().length} body parts · max armor ${EQD.maxArmor ?? 100} · auto-equip ${EQD.autoEquip === false ? "off" : "on"}`, "content"),
       node("combat/data.js", `${(CBD.actions || []).length} actions · attack ${(CBD.attack && CBD.attack.stat) || "personalCombat"} × ${(CBD.attack && CBD.attack.multiplier) || 1} · defend armor × ${(CBD.defend && CBD.defend.armorMultiplier) || 2}`, "content"),
-      node("editor/schemas.js", "content-editor model · 5 editable types · strict JSON round-trip · no state or events", "content"),
+      node("encounters/data.js", `${(END.spawn && END.spawn.bands || []).length} spawn bands · max ${END.spawn && END.spawn.maxPerVisit || 4} per visit · ${(END.loot && END.loot.rarityBands || []).length} loot rarity bands · drop ${END.loot && END.loot.dropChancePercent || 0}% + hostility`, "content"),
+      node("editor/schemas.js", "content-editor model · 7 editable types · strict JSON round-trip · no state or events", "content"),
       group(`Biome events (${biomes.length} files)`, eventsSummary, biomeNodes, "content"),
       node("Docs", "DESIGN.md · IDEAS.md · ENGINE_SPEC.md v1.5 · MODULES.md · HANDOFF.md · README.md · save/README.md · editor/README.md · actions/README.md · equipment/README.md · travel/README.md · combat/README.md · locations/README.md · map/README.md · locations/events/README.md · characters/mainChar/README.md", "content")
     ], "data");
@@ -595,9 +631,9 @@
     /* Events -------------------------------------------------------------- */
     const eventsBranch = node("Event catalog", "requests → module events → depth + 1 follow-ups", "event", [
       group("Request events", "fired by the UI (and future modules)", [
-        node("character:spawn", "UI → characters.spawn()", "event"),
+        node("character:spawn", "UI/encounters → characters.spawn() · data { source?, level?, relation?, locationId?, hostility? }", "event"),
         node("character:save", "UI → characters.save() · data { id }", "event"),
-        node("character:clearTemp", "UI → characters.clearTemp()", "event"),
+        node("character:clearTemp", "UI/encounters → characters.clearTemp() · data { source? }", "event"),
         node("location:add", "UI/map → locations.add() · data { count?, fixed?, batch? }", "event"),
         node("map:generate", "UI → map.generate() · data { count? }", "event"),
         node("location:changed", "UI → characters clears Temporary Spawn", "event"),
@@ -614,13 +650,14 @@
         node("combat:action", "UI → combat.action() · data { action: attack|defend }", "event")
       ], "event"),
       group("Module events", "emitted at depth + 1", [
-        node("character:spawned", "characters · { id }", "event"),
+        node("character:spawned", "characters · { id, name, source, level, relation, relationLabel, locationId?, hostility? }", "event"),
         node("character:saved", "characters · { id }", "event"),
-        node("character:tempCleared", "characters · { ids }", "event"),
-        node("location:added", "locations · { id, kind?, batch? }", "event"),
+        node("character:tempCleared", "characters · { ids, source? }", "event"),
+        node("character:relationChanged", "characters · { id, before, after, delta, relation, label, band }", "event"),
+        node("location:added", "locations · { id, level, hostility, kind?, batch? }", "event"),
         node("map:generated", "map · { batch, count, total, landmarks }", "event"),
-        node("location:visited", "locations · { id, name, biome, biomeKey, weather, hostility }", "event"),
-        node("location:event", "locations · event data + effects", "event"),
+        node("location:visited", "locations · { id, name, biome, biomeKey, weather, hostility, level }", "event"),
+        node("location:event", "locations · event data + effects, effective chancePercent and hostilityModifier", "event"),
         node("actions:loaded", "actions · five actions for the area", "event"),
         node("action:chosen", "actions · { actionId, name, locationId, locationName }", "event"),
         node("action:resolved", "actions · costs, effects, route time/distance, equipmentKey, travelTo", "event"),
@@ -643,24 +680,26 @@
         node("combat:defended", "combat · player brace, armor and reduction", "event"),
         node("combat:ended", "combat · winner, loser, rounds", "event")
       ], "event")
-    ], "43");
+    ], "44");
 
     /* Docs & tests -------------------------------------------------------- */
     const testsBranch = node("Tests", "Node only · npm test", "test", [
       node("locations.test.cjs", "generation · routes/graph · uniqueness · reset · save/load", "test"),
       node("locations-disk.test.cjs", "Locations folder mirror (in-memory mock)", "test"),
       node("map.test.cjs", "fixed landmarks · batch size · map:generated · save/load · reset", "test"),
-      node("characters.test.cjs", "personalities · traits/opposites · behavior · stats · generation · legacy load", "test"),
+      node("characters.test.cjs", "personalities · traits/opposites · behavior · stats · relations/levels · generation · legacy load", "test"),
+      node("relations.test.cjs", "relation bands/types · high label · adjustRelation · events", "test"),
+      node("encounters.test.cjs", "hostility spawn bands · enemy relation/level · source clearing · combat loot", "test"),
       node("main-character.test.cjs", "validation · image · base stats · effects · mirror", "test"),
-      node("biome-events.test.cjs", "JSON loading · visit rolls · stat effects · reset", "test"),
+      node("biome-events.test.cjs", "JSON loading · visit rolls · hostility modifiers · stat effects · reset", "test"),
       node("actions.test.cjs", "five actions · outcomes · costs · route time · travel · equipment", "test"),
       node("equipment.test.cjs", "body-part inventory · auto-equip · type/rarity filters · overlap swap · summed armor · combat · reset · save/load migration", "test"),
       node("travel.test.cjs", "5-minute checks · route distance · pause/resume · cancel · save/load", "test"),
       node("combat.test.cjs", "player-first turns · attack · defend/armor · death · reset · save/load", "test"),
       node("save.test.cjs", "capture · exact restore · v0 migration · unsafe paths · format guard", "test"),
-      node("editor.test.cjs", "formatter · byte-identical round-trip · schema checks · outcome ids", "test"),
+      node("editor.test.cjs", "formatter · byte-identical round-trip · schema checks · outcome ids · new data sections", "test"),
       node("serve.cjs", "static server on 127.0.0.1:8765", "test")
-    ], "12");
+    ], "14");
 
     const rootSub = live.state
       ? `${live.source} · ${clockText(time)} · tick ${time.tick}`

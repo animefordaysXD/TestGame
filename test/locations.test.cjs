@@ -48,6 +48,7 @@ for (const loc of firstFive) {
   assert.ok(loc.weather.length > 0);
   assert.ok(Number.isInteger(loc.hostility));
   assert.ok(loc.hostility >= 1 && loc.hostility <= 100, "hostility is 1-100");
+  assert.ok(Number.isInteger(loc.level) && loc.level >= 1, "every location has a level");
   assert.equal(loc.seed, s.seed);
   assert.equal(typeof loc.createdAtTick, "number");
   assert.equal(typeof loc.createdAt, "string");
@@ -116,7 +117,12 @@ for (const biome of LocationData.biomes) {
   assert.ok(Array.isArray(biome.weather) && biome.weather.length > 0);
   assert.ok(Array.isArray(biome.hostility));
   assert.ok(biome.hostility[0] >= 1 && biome.hostility[1] <= 100);
+  assert.ok(Array.isArray(biome.levelRange));
+  assert.ok(biome.levelRange[0] >= 1 && biome.levelRange[0] <= biome.levelRange[1], `${biome.key} has a level range`);
 }
+assert.equal(LocationData.defaultHostility, 50, "50 is the neutral hostility");
+assert.equal(LocationData.defaultLevel, 1);
+assert.ok(LocationData.hostilityBands.every((band) => band.key && band.label), "hostility bands have editor keys");
 
 // Save/load keeps the generated map, its routes and its seed.
 const saved = engine.serialize();

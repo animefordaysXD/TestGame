@@ -2,13 +2,14 @@
 
 **Repository:** <https://github.com/animefordaysXD/TestGame>
 
-**Last updated:** 2026-11-01
-**Current spec:** `ENGINE_SPEC.md` v1.7
+**Last updated:** 2026-11-02
+**Current spec:** `ENGINE_SPEC.md` v1.8
 **Status:** working test page with a procedural map spawner (configurable random locations
 plus fixed tavern/castle/shack landmarks), a travel graph of connected locations,
-procedural locations, biome events, a main-character creator with ten base stats plus
-armor and a ten-part body, NPCs with the same stats, bodies and 30 named personality
-archetypes, basic player-first
+procedural locations with hostility and levels, hostility-modified biome events,
+hostility-driven encounters and loot, a main-character creator with ten base stats plus
+armor and a ten-part body, NPCs with the same stats, bodies, 30 named personality
+archetypes, relations and levels, basic player-first
 combat (Attack/Defend), an equipment module with body-part armor plus a weapon slot
 (damage, Strength requirement, armor piercing), weapon/armor types and five rarity tiers,
 five area actions
@@ -64,12 +65,16 @@ Tests currently cover:
 - `test/map.test.cjs` — map batch size, fixed tavern/castle/shack landmarks, batch ids,
   `map:generated`, travel-graph linking, save/load and reset.
 - `test/characters.test.cjs` — 30 personality archetypes (unique ids/names, five valid
-  non-opposite traits, 0-100 behavior axes), NPC base stats, deterministic generation,
-  save/clear, reset, legacy saves without stats or personality/behavior.
+  non-opposite traits, 0-100 behavior axes), NPC base stats, relations/levels,
+  deterministic generation, save/clear, reset, legacy saves without stats or
+  personality/behavior/relation/level.
+- `test/relations.test.cjs` — relation bands and labels, type-specific high labels,
+  clamping, `setRelation`/`adjustRelation` events, level clamping, spawn metadata,
+  source-filtered clearing, legacy relation/level migration.
 - `test/main-character.test.cjs` — validation, image handling, base stats, effects,
   legacy stamina migration, save/load, reset, folder mirror.
-- `test/biome-events.test.cjs` — JSON loading, visit rolls, stat effects, reset,
-  save/load.
+- `test/biome-events.test.cjs` — JSON loading, visit rolls, hostility-modified chances,
+  stat effects, reset, save/load.
 - `test/actions.test.cjs` — five-action loading, biome overrides, weighted outcomes,
   stat costs, time, route time/distance override, travel through locations, equipment
   rewards, reset, save/load.
@@ -81,6 +86,8 @@ Tests currently cover:
   persistence, duration rounding, cancel, reset, save/load.
 - `test/combat.test.cjs` — player-first turns, attack damage, weapon damage and armor
   piercing, Strength gating, defend/armor, lethal hits, invalid actions, reset, save/load.
+- `test/encounters.test.cjs` — hostility spawn bands, relation/level scaling, source-tagged
+  clearing, winning vs losing loot, drop chance/rarity bands, reset, save/load.
 - `test/save.test.cjs` — capture, exact restore, JSON round-trip, legacy v0 migration,
   newer-format refusal, unsafe paths, `applyChanges`.
 - `test/editor.test.cjs` — editor formatter stability, byte-identical round-trips of every
@@ -119,11 +126,12 @@ Tests currently cover:
 
 | module | state slice | current behavior |
 |---|---|---|
-| `characters` | `nextId`, `named{}`, `temp{}` | NPC generator with personality, behavior and base stats; Named NPC / Temporary Spawn |
+| `characters` | `nextId`, `named{}`, `temp{}` | NPC generator with personality, behavior, relation, level and base stats; Named NPC / Temporary Spawn |
 | `mainCharacter` | `character` | one player character, profile image, base stats, JSON mirror |
 | `equipment` | `nextId`, `items{}`, `equippedByPart{}`, `equippedWeaponId` | main-character armor on body parts plus one weapon slot; rarity tiers; sums worn armor into the character stat |
 | `combat` | `active`, `round`, `turn`, `player`, `enemy`, `defending`, `winner*`, `log[]` | basic player-first duels; weapon damage, Strength gating and armor piercing; Attack/Defend |
-| `locations` | `seed`, `createdAt`, `nextId`, `locations{}` (with `connections[]`), `currentId` | procedural locations linked into a travel graph, visit rolls, JSON mirror |
+| `locations` | `seed`, `createdAt`, `nextId`, `locations{}` (with `connections[]`), `currentId` | procedural locations with hostility/level, travel graph, visit rolls, JSON mirror |
+| `encounters` | `enemies{}`, `lastVisit`, `lastLoot` | hostility-scaled hostile spawns on visit and hostility-scaled loot on a winning fight |
 | `map` | `seed`, `size`, `total`, `lastGeneratedTick`, `lastGeneratedAt`, `landmarks{}` | map spawner: fixed tavern/castle/shack plus a configurable batch of random locations |
 | `actions` | `locationId`, `locationName`, `biomeKey`, `actions[]`, `lastAction` | five area actions with costs, outcomes, time and route-aware Travel |
 | `travel` | `active`, `paused`, `distance`, route, `elapsedMinutes`, `durationMinutes`, `checks`, `eventCount`, `lastEvent`, `lastCompleted` | 5-minute journey checks, event pause/resume, arrival handoff |
@@ -177,7 +185,15 @@ directly; see the content-editor section below.
   valid personality id is kept, otherwise the nearest archetype by trait overlap is used.
   Missing traits and behavior axes fill from that archetype; behavior falls back to `50`.
 - The NPC card shows the personality name and lists the traits; hovering the trait line
-  shows the behavior values.
+  shows the behavior values. The card also shows the level and relation label/value.
+- Every NPC stores `relation: { value, type }` (-100..100) and `level` (1..100). Bands:
+  hostile ≤ -31, unfriendly -30..0, ambivalent 1..20, accepting 21..40, friendly
+  41..60, and 61+ uses the type label (Friendly/Loving/Protective/Trusted/Devoted/Bonded).
+  `relationFor`, `setRelation` and `adjustRelation` expose it; changes fire
+  `character:relationChanged`. Level is a framework: no rule derives stats from it yet.
+- `character:spawn` accepts `{ source, level, relation, locationId, hostility, encounter }`
+  and `character:spawned` echoes the metadata. `character:clearTemp { source }` clears
+  only that tag; a plain `character:clearTemp` or `location:changed` clears all temp NPCs.
 - `characters/statsData.js` owns the shared stat definitions. Add or tune a stat there;
   both the NPC and main-character modules iterate the list.
 
@@ -202,7 +218,9 @@ directly; see the content-editor section below.
 
 - Button-driven or map-driven generation: `location:add` request, then `location:added`.
 - Each location has `id`, `name`, `biome`, `biomeKey`, `kind`, `weather`, `hostility` 1-100,
-  `connections[]`, `seed`, `createdAtTick`, `createdAt`.
+  `level`, `connections[]`, `seed`, `createdAtTick`, `createdAt`.
+- Hostility 50 is neutral; biomes define a range. Level rolls from the biome `levelRange`.
+  `locations/data.js` also owns `defaultHostility` (50) and `defaultLevel` (1).
 - `kind` is empty for random locations or `tavern`/`castle`/`shack` for fixed landmarks.
   Landmarks use `biomeKey: "landmark"` and therefore roll no biome events.
 - Every new location links to the current area plus a random neighbour. A connection is
@@ -222,11 +240,34 @@ directly; see the content-editor section below.
   location (or any location when none is current). `visit()` itself stays permissive so
   travel arrival and tests can call it directly.- Biome event content lives in `locations/events/<biomeKey>/events.json` for all ten
   biomes. Each file has a disabled copy/paste template. `tundra/events.json` has a
-  working 10% Snowfall event that costs 10 stamina.
+  working 10% Snowfall event that costs 10 stamina and uses `hostilityModifier: 1`.
+- Each event's effective chance is
+  `baseChance * clamp(1 + hostilityModifier * ((hostility - 50) / 50), 0, 5)`. Positive
+  modifiers make bad events likelier in dangerous places; negative modifiers make good
+  events fade. The logged `location:event` data includes both the effective and base
+  chance plus the hostility and modifier.
 - `loadEvents(force)` fetches and caches events; `eventStatus()` reports load counts and
   errors; the UI has **Reload biome events**.
 - `Locations/<map seed>/seed.json` and `loc_XXXX.json` are written when the folder is
   connected. Reconnecting imports unknown `loc_*.json` files.
+
+### Encounters
+
+- `encounters/data.js` owns five spawn bands, `clearSource` (`"encounter"`),
+  `maxPerVisit` (4), the enemy relation curve, enemy level scaling, drop chance and five
+  loot rarity bands plus armor/weapon weights.
+- On `location:visited` the module fires `character:clearTemp { source: "encounter" }`,
+  rolls the band that covers the location's hostility, and fires one `character:spawn`
+  per enemy with the location id, hostility, level and a hostile relation. Higher
+  hostility means a higher chance, more enemies, lower relations and higher levels.
+- Spawned encounter ids map to `enemies{}` through `character:spawned`; clearing removes
+  them. Ordinary UI spawns have an empty source and survive.
+- On `combat:ended` with `winnerId: "main"`, a mapped loser leaves the map. The module
+  rolls the drop chance, then a kind and rarity band for that hostility, and fires
+  `equipment:add { kind, rarity, source: "loot", enemyId }`. Losing or fighting an
+  ordinary NPC awards nothing.
+- The UI Visit status reports the encounter chance/roll and spawn count; `status.html`
+  shows the last visit, active enemies and last loot.
 
 ### Map spawner
 
@@ -438,6 +479,17 @@ UI Import save file
 
 ## Recent work
 
+- Relations, levels and encounters: characters v0.6 stores `relation: { value, type }`
+  (-100..100 with data-driven bands and type-specific high labels) and a level, exposes
+  `relationFor`/`setRelation`/`adjustRelation`/`levelFor`, and supports spawn metadata and
+  source-filtered clearing. Locations v0.5 adds a per-biome `levelRange`, a location
+  `level`, and biome event `hostilityModifier` scaling by `((hostility - 50) / 50)`.
+  Encounters v0.1 spawns hostility-scaled hostile NPCs on `location:visited` and awards
+  hostility-scaled loot on a winning `combat:ended`. The UI/status show relations, levels
+  and encounters; the editor now edits `locations/data.js` and `encounters/data.js`
+  (biomes, hostility bands, levels, travel graph, relation bands/types, spawn and loot
+  bands). Reloaded biome JSON now carries `hostilityModifier` everywhere. All fourteen
+  Node test files pass.
 - Equipment v0.4: added data-driven weapon types (sword, spear, axe, mace) and armor
   types (cloth, leather, mail, plate, scale). Every item now carries `weaponType` or
   `armorType`; added a five-rarity axe family and typed all existing gear. `equipment:add`
@@ -583,7 +635,10 @@ UI Import save file
   chain and the layout is not geographic.
 - Base stats are stored, and location events/actions can change them. Combat uses Personal
   Combat, Strength, armor and a weapon, but there is no progression, training or
-  opposed-roll system yet.
+  opposed-roll system yet. NPC level is stored (and encounters scale it) but no rule levels
+  characters up or derives stats from level.
+- NPC relations are stored and encounter enemies start hostile, but no dialogue, faction or
+  reputation rule reads them yet; `setRelation`/`adjustRelation` are the future hook.
 - Combat is one-on-one and player-first. There is no flee, positioning, initiative, hit
   chance, damage variance or enemy AI; the enemy always attacks.
 - Equipment is main-character-only. Armor targets the ten body parts and one weapon can be
@@ -600,7 +655,11 @@ UI Import save file
   healing or equipment rule reads or changes the status yet. Equipment uses the part keys;
   the statuses are structure and UI only.
 - Biome events have no cooldowns, once-only flags, weather filters or requirements.
-  Every enabled event is an independent roll on each visit.
+  Every enabled event is an independent roll on each visit; hostility only shifts its
+  chance through `hostilityModifier`.
+- Encounters are automatic and one-sided: a hostile NPC appears on a visit, the player
+  still has to press **Fight**, and nothing resolves the fight automatically. Loot is
+  awarded only on a player win; there is no enemy inventory or drop table per enemy.
 - `location:changed` still only clears Temporary Spawn. The location graph now has
   connections and distances, but no coordinates; the travel module runs the in-between
   journey and the UI calls `locations.visit` on arrival, moving `currentId` along a direct
@@ -636,8 +695,8 @@ UI Import save file
 
 ## Suggested next steps
 
-1. Make hostility matter: scale travel/rest risk and event or encounter chance with the
-   location's hostility band, then add a hostile event that hands off to combat.
+1. Rework the map generator: keep the world map static and use the procedural generator
+   for terrain inside landmarks (and later for travel).
 2. Give travel interruptions choices (press on, turn back, fight) through new request/event
    pairs; keep travel resolution modular.
 3. Use stats in action and event checks (success/chance based on skill and difficulty)
@@ -649,9 +708,11 @@ UI Import save file
 6. Add event conditions (weather, time, once/cooldown) to the biome event schema.
 7. Expand combat: enemy AI, flee, multiple opponents, hit chance/damage variance, or
    initiative, depending on the desired feel.
-8. Decide how stats progress through training, actions and equipment.
-9. Consider IndexedDB autosave and named save slots on top of the file export/import.
-10. Manually verify both real folder pickers in Chrome/Edge.
+8. Decide how stats progress through training, actions and equipment, and how NPC/biome
+   levels unlock that progression.
+9. Add dialogue/faction reactions that read NPC relation bands.
+10. Consider IndexedDB autosave and named save slots on top of the file export/import.
+11. Manually verify both real folder pickers in Chrome/Edge.
 
 ## Quick prompt for a new AI
 
@@ -675,28 +736,33 @@ change, update ENGINE_SPEC.md, MODULES.md (including its update log), HANDOFF.md
 and the hand-maintained branches in status.html. Commit only when asked; do not push without
 explicit approval.
 
-Current build: core v0.2; characters v0.5; mainCharacter v0.6; equipment v0.4; locations v0.4;
-map v0.1; actions v0.3; travel v0.2; combat v0.2; save helper v0.1. Working: a procedural map
+Current build: core v0.2; characters v0.6; mainCharacter v0.6; equipment v0.4; locations v0.5;
+map v0.1; actions v0.3; travel v0.2; combat v0.2; encounters v0.1; save helper v0.1.
+Working: a procedural map
 spawner with a configurable random count and fixed tavern/castle/shack landmarks; a travel graph
-of connected locations with distances and route-based times; procedural locations; biome events
-(only tundra has a live event); shared stats (including Strength) and ten-part bodies; 30 named
-NPC personality archetypes with traits and behavior profiles (data-only, no AI reads them yet);
-body-part armor plus a weapon slot, weapon/armor types, five rarity tiers, and armor/weapon stats
-feeding combat; five area actions with time, costs and weighted outcomes; route-based
+of connected locations with distances and route-based times; procedural locations with
+hostility and levels; hostility-modified biome events; hostility-driven encounters with
+hostility-scaled enemies and loot; shared stats (including Strength) and ten-part bodies; 30
+named NPC personality archetypes with traits and behavior profiles (data-only, no AI reads
+them yet) plus relation bands and levels; body-part armor plus a weapon slot, weapon/armor
+types, five rarity tiers, and armor/weapon stats feeding combat; five area actions with time,
+costs and weighted outcomes; route-based
 timed travel with 5-minute checks, event pause/resume and arrival through locations; basic
 player-first combat with weapon damage, Strength gating and armor piercing; real JSON save files
 (seed + baseline + changes) with legacy migration and unsafe-path guards, alongside quick
 localStorage saves; a read-only status tree; and a form-based content editor (`editor.html`)
-that is a tool, not a module. Twelve Node test files are wired into npm test.
+that is a tool, not a module. Fourteen Node test files are wired into npm test.
 
 Known gaps: the map spawner is a placeholder (landmarks are ordinary locations with no interiors
 or layout rules); actions and events have no requirements or skill checks; travel events are
-stat-only scenes with no choices or combat handoff; hostility is display-only; the graph has no
-coordinates or map view; most biomes have no live event; NPCs cannot equip and carry no weapon; combat has no flee,
-enemy AI, hit chance or variance; personality and behavior do not drive behaviour yet; body
-part status is structural only and no rule injures, heals or equips it; the
-three-tier NPC model is only approximated by temp/named buckets.
+stat-only scenes with no choices or combat handoff; NPC relations and levels are stored but no
+dialogue/progression rule reads them; the graph has no coordinates or map view; most biomes have
+no live event; NPCs cannot equip and carry no weapon; combat has no flee, enemy AI, hit chance or
+variance; personality and behavior do not drive behaviour yet; body part status is structural
+only and no rule injures, heals or equips it; encounters depend on the player pressing Fight;
+the three-tier NPC model is only approximated by temp/named buckets.
 
-Suggested next step: make hostility matter (risk bands, travel/rest danger, a hostile event that
-hands off to combat). Ask what to build next; do not add unrequested scope.
+Suggested next step: rework the map generator so the world map is static and the procedural
+generator produces terrain inside landmarks (and later feeds travel). Ask what to build next;
+do not add unrequested scope.
 ```

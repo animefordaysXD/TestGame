@@ -8,10 +8,10 @@
 > game is and why, read [DESIGN.md](DESIGN.md); unapproved ideas live in
 > [IDEAS.md](IDEAS.md).
 
-Current build: core v0.2, characters v0.5, main character v0.6, equipment v0.4,
-locations v0.4, map v0.1, actions v0.3, travel v0.2, combat v0.2, save helper v0.1,
-plus the read-only status viewer and the content editor (`editor.html` — a tool, not a
-module, and never loaded by the game).
+Current build: core v0.2, characters v0.6, main character v0.6, equipment v0.4,
+locations v0.5, map v0.1, actions v0.3, travel v0.2, combat v0.2, encounters v0.1,
+save helper v0.1, plus the read-only status viewer and the content editor (`editor.html`
+— a tool, not a module, and never loaded by the game).
 
 ## Run
 
@@ -41,11 +41,11 @@ System Access API; it does not prove the real browser folder picker works.
 
 On Windows, if PowerShell blocks `npm.ps1`, use `npm.cmd test` or run the test files
 directly with `node test/locations.test.cjs`, `node test/locations-disk.test.cjs`,
-`node test/characters.test.cjs`, `node test/main-character.test.cjs`,
-`node test/biome-events.test.cjs`, `node test/actions.test.cjs`,
-`node test/equipment.test.cjs`, `node test/travel.test.cjs`,
-`node test/combat.test.cjs`, `node test/map.test.cjs`, `node test/save.test.cjs`, and
-`node test/editor.test.cjs`.
+`node test/characters.test.cjs`, `node test/relations.test.cjs`,
+`node test/main-character.test.cjs`, `node test/biome-events.test.cjs`,
+`node test/actions.test.cjs`, `node test/equipment.test.cjs`,
+`node test/travel.test.cjs`, `node test/combat.test.cjs`, `node test/encounters.test.cjs`,
+`node test/map.test.cjs`, `node test/save.test.cjs`, and `node test/editor.test.cjs`.
 
 ## Layout
 
@@ -53,7 +53,8 @@ directly with `node test/locations.test.cjs`, `node test/locations-disk.test.cjs
 - `characters/` — NPC generator, shared base stats, body data/helper, main character creator and storage
 - `equipment/` — armor and weapon catalogue, weapon/armor types, rarity tiers, main-character inventory (equip/unequip/destroy)
 - `combat/` — player-first duels with weapons, Strength gating and armor piercing (Attack/Defend)
-- `locations/` — procedural map locations linked into a travel graph
+- `locations/` — procedural locations with hostility and levels, linked into a travel graph
+- `encounters/` — hostility-driven hostile spawns on visit and hostility-scaled loot on a win
 - `map/` — map spawner: fixed tavern/castle/shack plus random location batches
 - `locations/events/` — per-biome event JSON (copy/paste templates and the tundra sample)
 - `actions/` — five area actions with costs/outcomes and optional biome overrides
@@ -144,6 +145,11 @@ them.
   `generosity`, `loyalty`, `curiosity`, `ambition`, each 0-100). The card shows the
   personality name; hover the trait line to see the behavior values. No AI reads the
   profile yet — it is the foundation for future dialogue, NPC events and combat behavior.
+- Every NPC also has a level and a relation to the player (-100..100). Relation bands are
+  hostile (≤ -31), unfriendly (-30..0), ambivalent (1..20), accepting (21..40), friendly
+  (41..60) and a type-specific 61+ label such as Loving or Protective. New NPCs start
+  neutral at level 1. `setRelation`/`adjustRelation` and `levelFor` are ready for future
+  dialogue and progression; encounters use them today.
 
 ## Combat
 
@@ -193,11 +199,13 @@ them.
 - **Add location** creates one location and links it into the travel graph.
 - **Add 5 locations** creates a starting batch. Each new location links to the current
   area plus a random neighbour.
-- Every location has `weather`, `biome`, `hostility` (integer 1-100) and bidirectional
-  `connections[]`. A connection stores the neighbour id and a distance in leagues (1-5).
-- **Visit** sets the current location and rolls every enabled event for its biome. It is
-  only available for the current location or a direct route from it; reach other places by
-  choosing Travel in the Actions panel.
+- Every location has `weather`, `biome`, `hostility` (integer 1-100; 50 is neutral, higher
+  is more dangerous), `level`, and bidirectional `connections[]`. A connection stores the
+  neighbour id and a distance in leagues (1-5). A biome's `levelRange` sets a location's
+  level; hostility sets event and encounter risk.
+- **Visit** sets the current location and rolls every enabled event for its biome plus a
+  hostility-scaled encounter. It is only available for the current location or a direct
+  route from it; reach other places by choosing Travel in the Actions panel.
 - **JSON** downloads one location as a JSON file.
 - **Connect Locations folder** writes `Locations/<map seed>/seed.json` and one
   `loc_XXXX.json` per location. Reconnecting imports unknown hand-edited `loc_*.json`
@@ -224,14 +232,33 @@ them.
 - Each biome has `locations/events/<biomeKey>/events.json`.
 - Every enabled event rolls its own `chancePercent` (0-100) on a visit. Multiple events
   can trigger on the same visit.
+- `hostilityModifier` (-1..1) shifts an event's chance as the location gets more dangerous:
+  `baseChance × clamp(1 + modifier × ((hostility - 50) / 50), 0, 5)`. Positive makes a bad
+  event likelier in dangerous places; negative makes a helpful event fade; 0 ignores
+  hostility.
 - `enabled: false` marks a copy/paste template; change it to `true` and edit the text.
-- The tundra file includes a working **Snowfall** event: 10% chance, -10 stamina.
+- The tundra file includes a working **Snowfall** event: 10% base chance, -10 stamina,
+  `hostilityModifier: 1`.
 - Effects support any base stat (`hp`, `stamina`, `mana`, `war`, `diplomacy`,
   `personalCombat`, `moneyManagement`, `intrigue`, `intelligence`); unknown stats are
   kept in the event data for future modules.
 - Use **Reload biome events** after editing a JSON file, or refresh the page. Event
   loading uses `fetch`, so serve the project over HTTP.
 - Full schema and a copy/paste template: `locations/events/README.md`.
+
+## Encounters
+
+- Visiting a location also rolls an encounter. Higher hostility means a higher chance, more
+  enemies, a lower relation and a higher enemy level; safe places rarely or never spawn a
+  hostile NPC.
+- Encounter enemies appear in Temporary Spawn like normal NPCs and are cleared when the
+  next location is visited. Ordinary spawns are not cleared.
+- Winning a fight against an encounter enemy rolls loot. Higher hostility raises the drop
+  chance and the gear rarity (common up to unique). Loot is added through the normal
+  equipment flow, so it appears in the Equipment panel.
+- Losing, or fighting an ordinary NPC, awards no encounter loot.
+- Tuning lives in `encounters/data.js`: spawn bands, enemy relation/level curve, drop chance
+  and loot rarity bands.
 
 ## Area actions
 
@@ -276,7 +303,9 @@ module: it owns no state, emits no events and is not registered in `buildEngine`
 
 - Run `npm run serve`, then open <http://127.0.0.1:8765/editor.html>.
 - It edits biome events, travel events and tuning, equipment items (armor, weapons, types,
-  rarity tiers) and settings, area actions and outcomes, and character names, traits and ages.
+  rarity tiers) and settings, area actions and outcomes, character names/traits/ages,
+  relation bands/types and levels, locations (biomes, hostility bands, level ranges, travel
+  graph) and encounters (spawn bands, enemy relation/level, loot rarity bands).
 - **Open game folder** (Chrome/Edge) writes changes straight into the files. Without a
   folder, **Save changes** downloads each changed file; downloads flatten the path
   (`travel/data.js` becomes `travel-data.js`), so put the file back at its real path.
@@ -286,12 +315,10 @@ module: it owns no state, emits no events and is not registered in `buildEngine`
   rewrites the object as strict JSON and warns that comments inside it are lost.
 - Nothing is saved until it passes validation; the page lists errors and warnings.
 - Read-only references (`characters/statsData.js`, `characters/bodyData.js`,
-  `combat/data.js`, `locations/data.js`) supply stat names, body parts, the armor
-  multiplier and the biome list. Armor items pick their body parts with a multi-select.
-- The editor does not yet cover `map/data.js`, `locations/data.js`, combat stats,
-  `CharacterData.behaviorAxes`, `CharacterData.personalities` or a form for
-  `characters/bodyData.js` itself. The body layout is shared content read by both character
-  modules and by the armor `parts` list, but it is not editable in `editor.html`. It also
+  `combat/data.js`) supply stat names, body parts and the armor multiplier. Armor items
+  pick their body parts with a multi-select.
+- The editor does not yet cover `map/data.js`, combat stats, or
+  `CharacterData.behaviorAxes` / `CharacterData.personalities`. It also
   cannot add a new biome: `editor/schemas.js` hardcodes the same biome order as
   `locations/data.js`.
 - Full usage, file formats and how to add a content type: `editor/README.md`.

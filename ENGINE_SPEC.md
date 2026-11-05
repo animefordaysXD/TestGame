@@ -1,4 +1,4 @@
-# Modular Text-RPG Engine — Spec v1.7
+# Modular Text-RPG Engine — Spec v1.8
 
 Plain JS/HTML, no build step, no dependencies. A small core runs the clock, event bus,
 RNG, state and save/load. All gameplay lives in modules that own one state slice and talk
@@ -125,18 +125,19 @@ Slices are JSON-safe. Never cache a slice object; `load()` replaces the whole st
 
 | type | emitted by | data |
 |---|---|---|
-| character:spawn (request) | UI, future location/action modules | none |
+| character:spawn (request) | UI, encounters, future location/action modules | `{ source?, level?, relation?, locationId?, hostility?, encounter? }` |
 | character:save (request) | UI | `{ id }` |
-| character:clearTemp (request) | UI | none |
-| character:spawned | characters | `{ id }` |
+| character:clearTemp (request) | UI, encounters | `{ source? }` (omit to clear all) |
+| character:spawned | characters | `{ id, name, source, level, relation, relationLabel, band, locationId?, hostility?, encounter? }` |
 | character:saved | characters | `{ id }` |
-| character:tempCleared | characters | `{ ids }` |
-| location:add (request) | UI, map module | `{ count?, fixed?, batch? }`; `fixed` is an array of `{ kind, name, biome?, biomeKey?, weather?, hostility? }` landmark definitions |
-| location:added | locations | `{ id, kind?, batch? }` |
+| character:tempCleared | characters | `{ ids, source? }` |
+| character:relationChanged | characters | `{ id, name, before, after, delta, relation, label, band, previousLabel, source }` |
+| location:add (request) | UI, map module | `{ count?, fixed?, batch? }`; `fixed` is an array of `{ kind, name, biome?, biomeKey?, weather?, hostility?, level? }` landmark definitions |
+| location:added | locations | `{ id, level, hostility, kind?, batch? }` |
 | map:generate (request) | UI | `{ count? }` (default and clamp from `MapData`) |
 | map:generated | map | `{ batch, count, total, landmarks: { tavern, castle, shack } }` |
-| location:visited | locations | `{ id, name, biome, biomeKey, weather, hostility }` |
-| location:event | locations | `{ locationId, locationName, biomeKey, eventId, name, chancePercent, roll, effects }` |
+| location:visited | locations | `{ id, name, biome, biomeKey, weather, hostility, level }` |
+| location:event | locations | `{ locationId, locationName, biomeKey, eventId, name, chancePercent, baseChancePercent, hostility, hostilityModifier, roll, effects }` |
 | location:changed | UI "Leave location", future movement | none (characters clears Temporary Spawn) |
 | action:choose (request) | UI, future action modules | `{ actionId, destinationId?, distance?, durationMinutes? }` |
 | actions:loaded | actions | `{ locationId, locationName, biomeKey, actions }` |
@@ -176,14 +177,15 @@ Slices are JSON-safe. Never cache a slice object; `load()` replaces the whole st
 | module | depends | slice | purpose |
 |---|---|---|---|
 | core | none | `time`, `eventLog` | clock, state, save/load, event checking |
-| characters | none | `nextId`, `named{}`, `temp{}` | NPC generator with personality, behavior, base stats and body; Named NPC / Temporary Spawn |
+| characters | none | `nextId`, `named{}`, `temp{}` | NPC generator with personality, behavior, relation, level, base stats and body; Named NPC / Temporary Spawn |
 | mainCharacter | none | `character` | player character; base stats, body; profile image; event/action/travel effects; JSON mirror |
 | combat | none | `active`, `round`, `turn`, `player`, `enemy`, `defending`, `winner*`, `log[]` | basic player-first duel; attack/defend |
-| locations | none | `seed`, `createdAt`, `nextId`, `locations{}`, `currentId` | procedural locations, routes, visit/event checker, JSON mirror |
+| locations | none | `seed`, `createdAt`, `nextId`, `locations{}`, `currentId` | procedural locations with hostility/level, routes, visit/event checker, JSON mirror |
 | map | locations | `seed`, `size`, `total`, `lastGeneratedTick`, `lastGeneratedAt`, `landmarks{}` | one map spawn request: fixed landmarks plus random locations through `location:add` |
 | actions | none | `locationId`, `locationName`, `biomeKey`, `actions[]`, `lastAction` | five area actions with costs, outcomes, time and route-based travel |
 | travel | none | `active`, `paused`, `distance`, route, `elapsedMinutes`, `durationMinutes`, `checks`, `eventCount`, `lastEvent`, `lastCompleted` | 5-minute journey checks; pause/resume on travel events |
 | equipment | none | `nextId`, `items{}`, `equippedByPart{}`, `equippedWeaponId` | main-character armor on body parts plus one weapon slot; weapon/armor types; mirrors summed armor into the character stat |
+| encounters | characters, equipment | `enemies{}`, `lastVisit`, `lastLoot` | hostility-driven hostile spawns on visit and hostility-scaled loot on a winning fight |
 
 `save/gameSave.js` is not a module and has no registry row: it owns no slice and emits no
 events. It captures, migrates and restores the whole state (see **Save files** above).
@@ -192,12 +194,12 @@ events. It captures, migrates and restores the whole state (see **Save files** a
 it owns no slice, emits no events and is not registered. It reads and writes the content
 files directly; see `editor/README.md`.
 
-## Characters module v0.5
+## Characters module v0.6
 
 - Files: `characters/statsData.js`, `characters/data.js`, `characters/bodyData.js`,
   `characters/body.js`, `characters/characters.js`.
-- Character shape: `{ id, gender, name, age, personality, traits[5], behavior, stats, body,
-  createdAtTick, createdAt }`.
+- Character shape: `{ id, gender, name, age, personality, traits[5], behavior, relation,
+  level, source, stats, body, createdAtTick, createdAt }`.
 - `personality` is `{ id, name }` from one of 30 archetypes in
   `CharacterData.personalities`. An archetype owns its five traits and its behavior
   profile.
@@ -209,15 +211,33 @@ files directly; see `editor/README.md`.
   rather than infer intent from the name or traits.
 - `stats` is shared by every character. See **Base stats** below.
 - `body` is shared by every character. See **Character body** below.
+- `relation` is `{ value, type }`. Value is an integer -100..100; type is a key from
+  `CharacterData.relations.types`. Bands and labels come from
+  `CharacterData.relations.bands`:
+  `hostile` (-100..-31), `unfriendly` (-30..0), `ambivalent` (1..20), `accepting`
+  (21..40), `friendly` (41..60) and `typeSpecific` (61..100). The last band uses the
+  type's `highLabel` (neutral Friendly, ally Loving, guardian Protective, merchant
+  Trusted, bandit Devoted, beast Bonded). `relationFor(value, type)` returns
+  `{ value, type, band, bandLabel, typeLabel, label }`.
+- `level` is an integer clamped to `CharacterData.levels` (default 1..100, default 1).
+  Nothing derives stats from it yet; it is the framework for later progression.
+- `source` is `""` for ordinary spawns or a caller tag such as `"encounter"`.
 - Spawned characters go to `temp`; saving moves them to `named`.
-- `character:clearTemp` or `location:changed` empties `temp`.
+- `character:clearTemp` empties `temp`; with `{ source }` it clears only that tag.
+  `location:changed` still clears all temporary spawns.
+- `character:spawn` accepts overrides `{ source, level, relation, locationId, hostility,
+  encounter }`. `character:spawned` echoes them plus `relationLabel` and `band`.
+- `setRelation(id, value, type)` and `adjustRelation(id, delta)` clamp to -100..100 and
+  emit `character:relationChanged` at `depth + 1` when the value changes.
 - New NPCs roll personality, then traits, then behavior, then stats with `engine.rng`.
   Skill rolls are bell-curved around the middle of their range. Armor rolls its `[0, 0]`
-  range, so it starts at 0. The body is deterministic: no RNG.
+  range, so it starts at 0. Relation defaults to `{ value: 0, type: "neutral" }`; level
+  defaults to 1; the body is deterministic. No RNG is used for these defaults.
 - Old NPC saves are migrated deterministically on load: a valid `personality.id` is kept,
   otherwise the archetype with the most trait overlap is chosen, then missing traits and
   behavior axes are filled from that archetype (behavior falls back to `50`). Old saves
-  without stats get the definition defaults, and missing body parts are rebuilt.
+  without stats get the definition defaults, missing body parts are rebuilt, and missing
+  relation/level fields become neutral/level 1.
 - `combat:damage` targeting an NPC lowers that NPC's HP, clamped to 0..`hpMax`. The
   combat module announces the hit; characters does not emit a second stat event.
 - Optional disk mirror: `characters/Named NPC/<id>.json`, `characters/Temporary Spawn/<id>.json`.
@@ -441,7 +461,7 @@ combat: {
   both HP totals, round/turn, **Attack** and **Defend**, and the last eight log lines.
   The player snapshot includes the equipped weapon and Strength from the equipment panel.
 
-## Locations module v0.4
+## Locations module v0.5
 
 - Files: `locations/data.js`, `locations/locations.js`; biome event content lives in
   `locations/events/<biomeKey>/events.json`.
@@ -470,6 +490,7 @@ locations: {
   "kind": "",
   "weather": "Sandstorm",
   "hostility": 75,
+  "level": 2,
   "seed": 1419639272,
   "createdAtTick": 0,
   "createdAt": "1000-01-01 06:00",
@@ -479,8 +500,12 @@ locations: {
 }
 ```
 
-- `hostility` is an integer 1-100. Biomes define a range; labels come from
+- `hostility` is an integer 1-100 (`defaultHostility` 50 is neutral; above it is more
+  dangerous and below is safer). Biomes define a range; labels come from
   `LocationData.hostilityBands` (`Peaceful`, `Watchful`, `Unsettled`, `Dangerous`, `Deadly`).
+- `level` is an integer of at least 1 rolled from the biome's `levelRange`
+  (`defaultLevel` 1 is the fallback). It is a framework for later progression; encounters
+  use it to scale enemy levels.
 - `connections` is the travel graph. Each route is `{ id, distance }`, stored on both
   endpoints and sharing one distance. `distance` is an abstract whole number; the module
   exposes `travelMinutes(distance)` (`distance × travelGraph.minutesPerDistance`, 15 min
@@ -512,9 +537,10 @@ locations: {
   any location when none is current). `visit(id)` itself stays permissive so arrival
   handoffs and tests can call it directly; the UI is what enforces the graph for manual
   movement.
-- `ATTRIBUTES` order controls generation: `biome`, `name`, `weather`, `hostility`.
+- `ATTRIBUTES` order controls generation: `biome`, `name`, `weather`, `hostility`, `level`.
   Each entry sees the location built so far. Add a field by adding one entry.
-- `locations/data.js` owns biomes, weather lists, place-nouns, name prefixes, suffixes,
+- `locations/data.js` owns `defaultHostility`, `defaultLevel`, biomes (including
+  `hostility` and `levelRange`), weather lists, place-nouns, name prefixes, suffixes,
   patterns and hostility bands. Add or edit entries without touching logic.
 - `labelFor(hostility)` returns the band label.
 - `toJSON(id)` returns one location as pretty JSON.
@@ -529,6 +555,7 @@ locations: {
   "name": "Snowfall",
   "enabled": true,
   "chancePercent": 10,
+  "hostilityModifier": 1,
   "text": "Snow falls across the tundra, sapping your stamina.",
   "effects": [{ "stat": "stamina", "delta": -10 }]
 }
@@ -537,10 +564,17 @@ locations: {
 - `chancePercent` is 0-100 (10 = 10%); `chance` is accepted as an alternative 0-1
   value. Each enabled event rolls independently on a visit, so more than one can trigger.
   `enabled: false` keeps a copy/paste template in the file without rolling it.
+- `hostilityModifier` is -1..1 (module clamp ±4). It scales the base chance:
+  `factor = clamp(1 + modifier * ((hostility - 50) / 50), 0, 5)`,
+  `chance = baseChance * factor`. Positive makes a bad event likelier as hostility rises;
+  negative makes a helpful event fade in dangerous places; `0` ignores hostility. The
+  effective chance is logged as `chancePercent`, with `baseChancePercent`, `hostility` and
+  `hostilityModifier` alongside it.
 - `visit(id, depth = 0)` is async: it sets `currentId`, fires `location:visited`, then
   `checkEvents` rolls each enabled event with `engine.rng.next()` and fires
   `location:event` at `depth + 1`. It returns `{ location, events }`. The UI calls
   `visit()` directly and then `engine.flush()`, matching the main-character save flow.
+  The encounters module listens to the same `location:visited` event.
 - `location:event` effects are applied by the main character module for any defined base
   stat (`hp`, `stamina`, `mana`, `war`, `diplomacy`, `personalCombat`,
   `moneyManagement`, `intrigue`, `intelligence`). `armor` is an equipment stat and is
@@ -560,6 +594,49 @@ locations: {
   **Add 5 locations**, **Connect Locations folder**, **Reload biome events**, a **Visit**
   button per location (direct routes only), a current-location marker, route counts, visit
   status, and a **JSON** download button per location.
+
+## Encounters module v0.1
+
+- Files: `encounters/data.js`, `encounters/encounters.js`.
+- Slice:
+
+```js
+encounters: {
+  enemies: {
+    "npc_0007": {
+      id: "npc_0007", name: "Mara Voss", locationId: "loc_0003",
+      hostility: 72, level: 3, relation: -81, relationType: "bandit", spawnedAtTick: 4
+    }
+  },
+  lastVisit: null,   // { locationId, locationName, hostility, level, band, chancePercent, roll, triggered, count }
+  lastLoot: null     // { enemyId, enemyName, locationId, hostility, level, dropChancePercent, roll, awarded, kind, rarity }
+}
+```
+
+- The module is event-driven and never reads another slice. It depends on `characters`
+  (spawns and clearing) and `equipment` (loot), so register those first.
+- On `location:visited` it fires `character:clearTemp { source: "encounter" }`, rolls the
+  spawn band that covers the location's hostility, then fires one `character:spawn` per
+  enemy with `{ source, locationId, hostility, level, relation }`.
+- Spawn bands (`encounters/data.js` `spawn.bands`) are checked from the top down; the
+  first band with `maxHostility` at or above the location hostility wins. Higher hostility
+  raises `chancePercent` and the enemy count (`minCount`..`maxCount`, capped by
+  `maxPerVisit`).
+- Enemy relation is `base + perHostility * hostility`, clamped to -100..100, with
+  `relations.type` (default `bandit`). The default curve is -31 - 0.69 × hostility, so
+  every encounter enemy is hostile and dangerous places are worse.
+- Enemy level is `location.level + floor(max(0, hostility - 50) / levels.hostilityPerLevel)`,
+  clamped to 1..100.
+- `character:spawned` events carrying the source tag are mapped into `enemies{}`.
+  `character:tempCleared` removes mapped ids.
+- On `combat:ended` with `winnerId: "main"` and a mapped `loserId`, the enemy leaves the
+  map. Drop chance is `dropChancePercent + chancePerHostility * (hostility - 50)`, capped
+  by `maxDropChancePercent`. On a hit it picks a `kind` by `loot.kindWeights` and a
+  `rarity` from the `loot.rarityBands` entry for that hostility, then fires
+  `equipment:add { kind, rarity, source: "loot", enemyId }`. Losing awards nothing.
+- `enemiesFor(locationId?)`, `lastVisit()` and `lastLoot()` are UI/status accessors.
+- UI on the test page: the Visit status line reports the encounter chance and spawn count;
+  the status page shows the last visit, active encounter enemies and the last loot.
 
 ## Map module v0.1
 
@@ -804,6 +881,9 @@ combat/
   combat.js
   data.js
   README.md
+encounters/
+  encounters.js
+  data.js
 characters/
   characters.js
   data.js
@@ -840,12 +920,14 @@ test/
   locations.test.cjs
   locations-disk.test.cjs
   characters.test.cjs
+  relations.test.cjs
   main-character.test.cjs
   biome-events.test.cjs
   actions.test.cjs
   travel.test.cjs
   equipment.test.cjs
   combat.test.cjs
+  encounters.test.cjs
   save.test.cjs
   editor.test.cjs
   serve.cjs
@@ -858,18 +940,21 @@ test/
 - `location:changed` still only clears Temporary Spawn; it does not move the party.
 - Locations have no coordinates, population or resources. The travel graph is an abstract
   link graph: each route has a distance but no drawn road, and a journey traverses one
-  route. Multi-hop route planning, route-specific encounters and weather/hostility effects
-  on travel are not built.
+  route. Multi-hop route planning, route-specific encounters and weather effects on travel
+  are not built. Hostility now drives biome event chance and encounters but not travel
+  risk directly.
 - The page's **Visit** button requires a direct route from the current location; the
   module's `visit()` remains permissive for tests and arrival handoffs.
 - Travel events are generic interruptions with stat effects. They do not start combat,
   offer choices or depend on route distance, weather or hostility. Each check is an
   independent roll.
 - Biome events have no cooldowns, once-only flags, weather filters or requirements.
-  Each enabled event is an independent roll on every visit.
+  Each enabled event is an independent roll on every visit; `hostilityModifier` is the
+  only environmental modifier.
 - Base stats are stored, and location events and area actions can change them. Combat uses
   Personal Combat and armor, but there is no progression, training or opposed-roll system
-  yet.
+  yet. NPCs have a level and relation, but nothing levels them up and no rule reacts to
+  relations outside encounters.
 - Combat is one-on-one and player-first. There is no flee, positioning, initiative, hit
   chance, damage variance or enemy AI; the enemy always attacks.
 - Armor comes from the equipment module, which is main-character-only and targets the ten

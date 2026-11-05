@@ -26,10 +26,33 @@ When you press **Visit** on a location, every **enabled** event in that biome's
 | `id` | Unique id inside this biome. |
 | `name` | Short name shown in the visit summary. |
 | `enabled` | `false` keeps a template in the file without rolling it. |
-| `chancePercent` | Chance per visit, `0`-`100` (`10` means 10%). |
+| `chancePercent` | Base chance per visit, `0`-`100` (`10` means 10%). |
 | `chance` | Alternative `0`-`1` chance (`0.1` also means 10%). `chancePercent` wins if both are present. |
+| `hostilityModifier` | How much the location's hostility shifts the chance, `-1` to `1`. Positive makes a bad event more likely in dangerous places; negative makes a helpful event less likely. `0` (default) ignores hostility. |
 | `text` | Event-log text. |
 | `effects` | Array of `{ "stat": "...", "delta": ... }`. |
+
+## Hostility modifier
+
+Every location has a hostility from `1` to `100`; `50` is neutral. The roll uses the
+effective chance:
+
+```
+factor = clamp(1 + hostilityModifier * ((hostility - 50) / 50), 0, 5)
+chance = baseChance * factor
+```
+
+- `hostilityModifier: 1` on a bad event: 10% at hostility 50, 12% at 60, 20% at 100.
+  Near hostility 1 the chance almost disappears.
+- `hostilityModifier: -1` on a good event works in reverse: it is most likely in safe
+  places and disappears at hostility 100.
+- `0` keeps the old fixed chance at every hostility.
+- Keep shipped modifiers between `-1` and `1`; the module accepts up to `±4` and clamps
+  the resulting factor to `0..5`.
+
+The effective chance is rounded in `location:event.data.chancePercent`;
+`baseChancePercent`, `hostility` and `hostilityModifier` are included so the log and
+future modules can see why it changed.
 
 The effect pipeline applies to the main character and supports every non-equipment base
 stat: `hp`, `stamina`, `mana`, `war`, `diplomacy`, `personalCombat`, `moneyManagement`,
@@ -49,6 +72,7 @@ Copy this object into a biome's `events` array, give it a unique `id`, set
   "name": "Event name",
   "enabled": true,
   "chancePercent": 10,
+  "hostilityModifier": 1,
   "text": "Describe what happens when this event triggers.",
   "effects": [
     { "stat": "stamina", "delta": -10 }
@@ -56,7 +80,8 @@ Copy this object into a biome's `events` array, give it a unique `id`, set
 }
 ```
 
-The tundra file includes a working 10% **Snowfall** example that costs 10 stamina.
+The tundra file includes a working 10% **Snowfall** example that costs 10 stamina and
+uses `hostilityModifier: 1`, so it becomes more likely in dangerous tundra.
 
 ## Editing
 

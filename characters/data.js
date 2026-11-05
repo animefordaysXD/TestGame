@@ -506,5 +506,28 @@ window.CharacterData = {
         "ambition": 50
       }
     }
-  ]
+  ],
+  "relations": {
+    "min": -100,
+    "max": 100,
+    "default": 0,
+    "defaultType": "neutral",
+    "bands": [
+      { "key": "hostile", "label": "Hostile", "min": -100, "max": -31 },
+      { "key": "unfriendly", "label": "Unfriendly", "min": -30, "max": 0 },
+      { "key": "ambivalent", "label": "Ambivalent", "min": 1, "max": 20 },
+      { "key": "accepting", "label": "Accepting", "min": 21, "max": 40 },
+      { "key": "friendly", "label": "Friendly", "min": 41, "max": 60 },
+      { "key": "devoted", "label": "Devoted", "min": 61, "max": 100, "typeSpecific": true }
+    ],
+    "types": [
+      { "key": "neutral", "label": "Neutral", "highLabel": "Friendly" },
+      { "key": "ally", "label": "Ally", "highLabel": "Loving" },
+      { "key": "guardian", "label": "Guardian", "highLabel": "Protective" },
+      { "key": "merchant", "label": "Merchant", "highLabel": "Trusted" },
+      { "key": "bandit", "label": "Bandit", "highLabel": "Devoted" },
+      { "key": "beast", "label": "Beast", "highLabel": "Bonded" }
+    ]
+  },
+  "levels": { "min": 1, "max": 100, "default": 1 }
 };

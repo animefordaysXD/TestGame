@@ -6,6 +6,7 @@
       "name": "Template event",
       "enabled": false,
       "chancePercent": 10,
+      "hostilityModifier": 0,
       "text": "Replace this with something that happens in the jungle.",
       "effects": []
     }

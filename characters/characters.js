@@ -1,8 +1,13 @@
-/* Characters module v0.5 — NPC generator + Named NPC / Temporary Spawn storage. See ENGINE_SPEC.md.
+/* Characters module v0.6 — NPC generator + Named NPC / Temporary Spawn storage. See ENGINE_SPEC.md.
    Add an attribute: push one { key, generate } entry into ATTRIBUTES. Order matters; each gets the character built so far.
    Base stats are defined once in characters/statsData.js and shared with the mainCharacter module.
    Every character owns a humanoid body built from characters/bodyData.js.
-   Personalities and behavior axes are data in characters/data.js; no rule reads behavior yet.
+   Personalities, behavior axes, relation bands/types and level bounds are data in
+   characters/data.js. Relations run -100..100 and store { value, type }; the band names
+   the value and a type supplies the 61+ label. NPCs also carry a level, which is a
+   framework for later progression (nothing reads it for stats yet).
+   character:spawn accepts overrides { source, level, relation, locationId, hostility };
+   character:spawned echoes that metadata so other modules can map the new NPC.
    The module also applies combat:damage to the NPC it names. */
 (function (global) {
   "use strict";
@@ -19,9 +24,31 @@
     throw new Error("characters/data.js must define CharacterData.personalities");
   if (!Array.isArray(D.behaviorAxes) || !D.behaviorAxes.length)
     throw new Error("characters/data.js must define CharacterData.behaviorAxes");
+  if (!D.relations || !Array.isArray(D.relations.bands) || !D.relations.bands.length)
+    throw new Error("characters/data.js must define CharacterData.relations.bands");
+  if (!Array.isArray(D.relations.types) || !D.relations.types.length)
+    throw new Error("characters/data.js must define CharacterData.relations.types");
   const STAT_DEFS = SD.stats;
   const BEHAVIOR_AXES = D.behaviorAxes;
   const PERSONALITIES = D.personalities;
+  const RELATIONS = D.relations;
+  const REL_BANDS = RELATIONS.bands;
+  const REL_TYPES = RELATIONS.types;
+  const REL_BY_TYPE = new Map(REL_TYPES.map((type) => [type.key, type]));
+  const REL_MIN = Number.isFinite(Number(RELATIONS.min)) ? Math.round(Number(RELATIONS.min)) : -100;
+  const REL_MAX = Number.isFinite(Number(RELATIONS.max)) ? Math.round(Number(RELATIONS.max)) : 100;
+  const REL_DEFAULT = clamp(
+    Number.isFinite(Number(RELATIONS.default)) ? Math.round(Number(RELATIONS.default)) : 0,
+    REL_MIN, REL_MAX
+  );
+  const REL_DEFAULT_TYPE = REL_BY_TYPE.has(RELATIONS.defaultType) ? RELATIONS.defaultType : REL_TYPES[0].key;
+  const LEVELS = D.levels || {};
+  const LEVEL_MIN = Number.isFinite(Number(LEVELS.min)) ? Math.round(Number(LEVELS.min)) : 1;
+  const LEVEL_MAX = Math.max(LEVEL_MIN, Number.isFinite(Number(LEVELS.max)) ? Math.round(Number(LEVELS.max)) : 100);
+  const LEVEL_DEFAULT = clamp(
+    Number.isFinite(Number(LEVELS.default)) ? Math.round(Number(LEVELS.default)) : LEVEL_MIN,
+    LEVEL_MIN, LEVEL_MAX
+  );
 
   // Roll one NPC stat. Bell-curved skills stay near the middle of their range.
   const rollStat = (rng, def) => {
@@ -101,6 +128,51 @@
     return character;
   };
 
+  const relationValue = (raw) => {
+    let value = REL_DEFAULT, type = REL_DEFAULT_TYPE;
+    if (raw && typeof raw === "object") {
+      const number = Number(raw.value);
+      if (Number.isFinite(number)) value = number;
+      if (typeof raw.type === "string" && REL_BY_TYPE.has(raw.type)) type = raw.type;
+    } else if (raw !== undefined && raw !== null && raw !== "") {
+      const number = Number(raw);
+      if (Number.isFinite(number)) value = number;
+    }
+    return { value: clamp(Math.round(value), REL_MIN, REL_MAX), type };
+  };
+
+  const relationInfo = (value, type) => {
+    const relation = relationValue({ value, type });
+    const band = REL_BANDS.find((entry) => relation.value >= Number(entry.min) && relation.value <= Number(entry.max))
+      || REL_BANDS[REL_BANDS.length - 1];
+    const typeDef = REL_BY_TYPE.get(relation.type) || REL_TYPES[0];
+    const label = band && band.typeSpecific
+      ? (typeDef.highLabel || band.label || typeDef.label)
+      : (band && band.label) || String(relation.value);
+    return {
+      ...relation,
+      band: band ? band.key : "",
+      bandLabel: band ? band.label : "",
+      typeLabel: typeDef.label || typeDef.key,
+      label
+    };
+  };
+
+  const normaliseRelation = (character) => {
+    character.relation = relationValue(character.relation);
+    return character;
+  };
+
+  const levelValue = (raw) => {
+    const value = Number(raw);
+    return clamp(Number.isFinite(value) ? Math.round(value) : LEVEL_DEFAULT, LEVEL_MIN, LEVEL_MAX);
+  };
+
+  const normaliseLevel = (character) => {
+    character.level = levelValue(character.level);
+    return character;
+  };
+
   const ATTRIBUTES = [
     { key: "gender", generate: ({ rng }) => pick(rng, ["male", "female"]) },
     { key: "name",   generate: ({ rng, char }) => `${pick(rng, D.firstNames[char.gender])} ${pick(rng, D.surnames)}` },
@@ -132,6 +204,8 @@
         normaliseStats(character);
         normalisePersonality(character);
         normaliseBody(character);
+        normaliseRelation(character);
+        normaliseLevel(character);
       }
     };
 
@@ -147,10 +221,10 @@
         engine.slice("characters", { nextId: 1, named: {}, temp: {} });
         normaliseAll();
         if (bound) return; bound = true;   // init runs again on reset: subscribe only once
-        engine.on("event:character:spawn", (e) => mod.spawn(e.depth + 1));
+        engine.on("event:character:spawn", (e) => mod.spawn(e.depth + 1, e.data || {}));
         engine.on("event:character:save", (e) => mod.save(e.data.id, e.depth + 1));
-        engine.on("event:character:clearTemp", (e) => mod.clearTemp(e.depth + 1));
-        engine.on("event:location:changed", (e) => mod.clearTemp(e.depth + 1)); // future location module
+        engine.on("event:character:clearTemp", (e) => mod.clearTemp(e.depth + 1, e.data || {}));
+        engine.on("event:location:changed", (e) => mod.clearTemp(e.depth + 1, e.data || {})); // future location module
         engine.on("event:combat:damage", (e) => mod.applyCombatDamage(e.data || {}));
       },
 
@@ -162,12 +236,32 @@
 
       generate(rng) { const char = {}; for (const a of ATTRIBUTES) char[a.key] = a.generate({ rng: rng, char, engine }); return char; },
 
-      spawn(depth = 0) {
+      spawn(depth = 0, overrides = {}) {
         const s = S(), n = engine.now;
-        const c = { id: "npc_" + String(s.nextId++).padStart(4, "0"), ...mod.generate(engine.rng), createdAtTick: n.tick, createdAt: n.text };
+        const options = overrides && typeof overrides === "object" ? overrides : {};
+        const c = {
+          id: "npc_" + String(s.nextId++).padStart(4, "0"),
+          ...mod.generate(engine.rng),
+          level: levelValue(options.level),
+          relation: relationValue(options.relation),
+          source: typeof options.source === "string" ? options.source : "",
+          createdAtTick: n.tick, createdAt: n.text
+        };
         s.temp[c.id] = c;
         if (disk) put(disk.temp, c);
-        engine.fire({ type: "character:spawned", text: `${c.name} (${c.age}, ${c.gender}, ${c.personality.name}) appears.`, data: { id: c.id } }, depth);
+        const info = relationInfo(c.relation.value, c.relation.type);
+        const data = {
+          id: c.id, name: c.name, source: c.source, level: c.level,
+          relation: { ...c.relation }, relationLabel: info.label, band: info.band
+        };
+        if (options.locationId !== undefined) data.locationId = options.locationId;
+        if (options.hostility !== undefined) data.hostility = Number(options.hostility);
+        if (options.encounter !== undefined) data.encounter = options.encounter;
+        engine.fire({
+          type: "character:spawned",
+          text: `${c.name} (${c.age}, ${c.gender}, ${c.personality.name}, level ${c.level}) appears.`,
+          data
+        }, depth);
         return c;
       },
 
@@ -191,11 +285,57 @@
         return c.stats.hp;
       },
 
-      clearTemp(depth = 0) {
-        const s = S(), ids = Object.keys(s.temp);
-        s.temp = {};
+      // Relations are stored as { value, type }. Relations are data; no rule acts on them yet.
+      relationFor(value, type) {
+        return relationInfo(value, type);
+      },
+
+      setRelation(id, value, type, depth = 0) {
+        const s = S(), c = s.named[id] || s.temp[id];
+        if (!c) return null;
+        const before = relationValue(c.relation).value;
+        const previous = relationInfo(before, c.relation && c.relation.type);
+        c.relation = relationValue({ value, type: type === undefined ? (c.relation && c.relation.type) : type });
+        const info = relationInfo(c.relation.value, c.relation.type);
+        if (info.value !== before)
+          engine.fire({
+            type: "character:relationChanged",
+            text: `${c.name} is now ${info.label.toLowerCase()} (${info.value}).`,
+            data: {
+              id: c.id, name: c.name, before, after: info.value, delta: info.value - before,
+              relation: { ...c.relation }, label: info.label, band: info.band,
+              previousLabel: previous.label, source: "set"
+            }
+          }, depth);
+        return info;
+      },
+
+      adjustRelation(id, delta, depth = 0) {
+        const s = S(), c = s.named[id] || s.temp[id];
+        if (!c) return null;
+        const before = relationValue(c.relation).value;
+        const amount = Number(delta);
+        if (!Number.isFinite(amount) || amount === 0) return relationInfo(before, c.relation && c.relation.type);
+        const info = mod.setRelation(id, before + amount, c.relation && c.relation.type, depth);
+        if (info) info.previousValue = before;
+        return info;
+      },
+
+      levelFor(character) {
+        return levelValue(character && character.level);
+      },
+
+      clearTemp(depth = 0, filter = {}) {
+        const s = S();
+        const source = filter && typeof filter.source === "string" && filter.source ? filter.source : "";
+        const ids = Object.keys(s.temp).filter((id) => !source || s.temp[id].source === source);
+        for (const id of ids) delete s.temp[id];
         if (disk) ids.forEach((id) => del(disk.temp, id));
-        if (ids.length) engine.fire({ type: "character:tempCleared", text: `${ids.length} temporary character(s) left behind.`, data: { ids } }, depth);
+        if (ids.length) {
+          const data = { ids };
+          if (source) data.source = source;
+          engine.fire({ type: "character:tempCleared", text: `${ids.length} temporary character(s) left behind.`, data }, depth);
+        }
       },
 
       async connectFolder() {   // pick the folder that contains index.html

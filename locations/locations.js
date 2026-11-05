@@ -1,12 +1,16 @@
-/* Locations module v0.4 — procedural map locations, routes and biome events.
+/* Locations module v0.5 — procedural map locations, routes, levels and biome events.
    Locations are generated when the UI or map module fires location:add. A request may
-   carry a fixed definition (name/kind/biome/weather/hostility) used for guaranteed map
-   landmarks; normal requests still roll from the content tables.
+   carry a fixed definition (name/kind/biome/weather/hostility/level) used for guaranteed
+   map landmarks; normal requests still roll from the content tables.
    Add a generated field: push one { key, generate } entry into ATTRIBUTES. Order matters;
    each entry sees the location built so far. Content belongs in data.js.
+   Every location has a hostility (1-100, 50 is neutral) and a level from its biome's
+   levelRange; both are stored as a framework for later progression.
    Each new location is linked to 1-2 existing locations (bidirectional connections with an
    abstract distance); route time is distance * travelGraph.minutesPerDistance.
-   Biome events live in locations/events/<biomeKey>/events.json and are fetched lazily. */
+   Biome events live in locations/events/<biomeKey>/events.json and are fetched lazily.
+   An event's hostilityModifier scales its chance: positive makes a bad event more likely at
+   high hostility, negative makes it less likely. See locations/events/README.md. */
 (function (global) {
   "use strict";
   const D = global.LocationData;
@@ -15,6 +19,10 @@
     throw new Error("locations/data.js must define LocationData.biomes with at least one biome");
 
   const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
+  const DEFAULT_HOSTILITY = clamp(
+    Math.round(Number(D.defaultHostility)) || 50, 1, 100
+  );
+  const DEFAULT_LEVEL = Math.max(1, Math.round(Number(D.defaultLevel)) || 1);
 
   const GRAPH = D.travelGraph && typeof D.travelGraph === "object" ? D.travelGraph : {};
   const distanceRange = Array.isArray(GRAPH.distanceRange) ? GRAPH.distanceRange : [1, 4];
@@ -69,11 +77,18 @@
   }
 
   function hostilityFor(rng, biome) {
-    const range = Array.isArray(biome.hostility) ? biome.hostility : [1, 100];
-    const lo = clamp(Math.round(Number(range[0]) || 1), 1, 100);
-    const hi = clamp(Math.round(Number(range[1]) || 100), 1, 100);
+    const range = Array.isArray(biome.hostility) ? biome.hostility : [DEFAULT_HOSTILITY, DEFAULT_HOSTILITY];
+    const lo = clamp(Math.round(Number(range[0]) || DEFAULT_HOSTILITY), 1, 100);
+    const hi = clamp(Math.round(Number(range[1]) || DEFAULT_HOSTILITY), 1, 100);
     const min = Math.min(lo, hi), max = Math.max(lo, hi);
     return min + Math.floor(rng.next() * (max - min + 1));
+  }
+
+  function levelFor(rng, biome) {
+    const range = Array.isArray(biome && biome.levelRange) ? biome.levelRange : [DEFAULT_LEVEL, DEFAULT_LEVEL];
+    const lo = Math.max(1, Math.round(Number(range[0]) || DEFAULT_LEVEL));
+    const hi = Math.max(lo, Math.round(Number(range[1]) || DEFAULT_LEVEL));
+    return lo + Math.floor(rng.next() * (hi - lo + 1));
   }
 
   function uniqueName(base, usedNames) {
@@ -92,8 +107,9 @@
     const biome = typeof raw.biome === "string" && raw.biome.trim() ? raw.biome.trim() : "Landmark";
     const biomeKey = typeof raw.biomeKey === "string" && raw.biomeKey.trim() ? raw.biomeKey.trim() : "landmark";
     const weather = typeof raw.weather === "string" && raw.weather.trim() ? raw.weather.trim() : "Clear";
-    const hostility = clamp(Math.round(Number(raw.hostility)) || 1, 1, 100);
-    return { kind, name, biome, biomeKey, weather, hostility };
+    const hostility = clamp(Math.round(Number(raw.hostility)) || DEFAULT_HOSTILITY, 1, 100);
+    const level = Math.max(1, Math.round(Number(raw.level)) || DEFAULT_LEVEL);
+    return { kind, name, biome, biomeKey, weather, hostility, level };
   }
 
   // Route distance is an abstract whole number. Duration is derived from it, so content
@@ -131,7 +147,8 @@
     { key: "biome", generate: ({ rng }) => weightedPick(rng, D.biomes) },
     { key: "name", generate: ({ rng, loc, usedNames }) => makeName(rng, loc.biome, usedNames) },
     { key: "weather", generate: ({ rng, loc }) => pick(rng, weatherList(loc.biome)) },
-    { key: "hostility", generate: ({ rng, loc }) => hostilityFor(rng, loc.biome) }
+    { key: "hostility", generate: ({ rng, loc }) => hostilityFor(rng, loc.biome) },
+    { key: "level", generate: ({ rng, loc }) => levelFor(rng, loc.biome) }
   ];
 
   function comboCount() {
@@ -146,10 +163,11 @@
     const name = typeof data.name === "string" ? data.name.trim() : "";
     const biome = typeof data.biome === "string" ? data.biome.trim() : "";
     const weather = typeof data.weather === "string" ? data.weather.trim() : "";
-    const hostility = Math.round(Number(data.hostility));
-    if (!name || !biome || !weather || !Number.isFinite(hostility)) return null;
+    const hostility = Number(data.hostility);
+    if (!name || !biome || !weather) return null;
 
     const knownBiome = D.biomes.find((b) => b.name === biome || b.key === data.biomeKey);
+    const level = Math.max(1, Math.round(Number(data.level)) || (knownBiome ? Number(knownBiome.levelRange && knownBiome.levelRange[0]) : DEFAULT_LEVEL) || DEFAULT_LEVEL);
     return {
       id,
       name,
@@ -157,7 +175,8 @@
       biomeKey: typeof data.biomeKey === "string" && data.biomeKey ? data.biomeKey : (knownBiome ? knownBiome.key : ""),
       kind: typeof data.kind === "string" ? data.kind.trim() : "",
       weather,
-      hostility: clamp(hostility, 1, 100),
+      hostility: Number.isFinite(hostility) ? clamp(hostility, 1, 100) : DEFAULT_HOSTILITY,
+      level,
       connections: cleanConnections(data.connections),
       seed: seed >>> 0,
       createdAtTick: Number.isFinite(Number(data.createdAtTick)) ? Number(data.createdAtTick) : 0,
@@ -175,6 +194,8 @@
     const hasPercent = raw.chancePercent !== undefined && raw.chancePercent !== null;
     const rawChance = hasPercent ? Number(raw.chancePercent) / 100 : Number(raw.chance);
     const chance = clamp(Number.isFinite(rawChance) ? rawChance : 0, 0, 1);
+    const rawModifier = Number(raw.hostilityModifier);
+    const hostilityModifier = clamp(Number.isFinite(rawModifier) ? rawModifier : 0, -4, 4);
 
     const effects = Array.isArray(raw.effects) ? raw.effects.map((effect) => {
       if (!effect || typeof effect !== "object") return null;
@@ -192,6 +213,7 @@
       enabled: raw.enabled !== false,
       chance,
       chancePercent: Math.round(chance * 1000) / 10,
+      hostilityModifier,
       effects
     };
   }
@@ -237,6 +259,10 @@
       const byId = new Map(locations.map((loc) => [loc.id, loc]));
 
       for (const loc of locations) {
+        if (!Number.isFinite(Number(loc.hostility))) loc.hostility = DEFAULT_HOSTILITY;
+        else loc.hostility = clamp(Math.round(Number(loc.hostility)), 1, 100);
+        if (!Number.isFinite(Number(loc.level))) loc.level = DEFAULT_LEVEL;
+        else loc.level = Math.max(1, Math.round(Number(loc.level)));
         loc.connections = cleanConnections(loc.connections)
           .filter((route) => route.id !== loc.id && byId.has(route.id));
       }
@@ -389,7 +415,8 @@
             biome: pair.biome,
             name: makeName(rng, pair.biome, usedNames),
             weather: pair.weather,
-            hostility: hostilityFor(rng, pair.biome)
+            hostility: hostilityFor(rng, pair.biome),
+            level: levelFor(rng, pair.biome)
           };
         }
         return candidate;
@@ -424,6 +451,7 @@
             kind: fixedDef.kind,
             weather: fixedDef.weather,
             hostility: fixedDef.hostility,
+            level: fixedDef.level,
             connections: [],
             seed: s.seed,
             createdAtTick: now.tick,
@@ -444,6 +472,7 @@
             kind: "",
             weather: raw.weather,
             hostility: raw.hostility,
+            level: raw.level,
             connections: [],
             seed: s.seed,
             createdAtTick: now.tick,
@@ -459,9 +488,9 @@
         const routes = loc.connections.length;
         const routeText = routes ? `, ${routes} route${routes === 1 ? "" : "s"}` : "";
         const text = loc.kind
-          ? `${loc.name} (${loc.kind}) is charted as a landmark: ${loc.biome.toLowerCase()}, ${loc.weather.toLowerCase()}, hostility ${loc.hostility}/100 (${label})${routeText}.`
-          : `${loc.name} is charted: ${loc.biome.toLowerCase()}, ${loc.weather.toLowerCase()}, hostility ${loc.hostility}/100 (${label})${routeText}.`;
-        const data = { id: loc.id };
+          ? `${loc.name} (${loc.kind}) is charted as a landmark: ${loc.biome.toLowerCase()}, ${loc.weather.toLowerCase()}, level ${loc.level}, hostility ${loc.hostility}/100 (${label})${routeText}.`
+          : `${loc.name} is charted: ${loc.biome.toLowerCase()}, ${loc.weather.toLowerCase()}, level ${loc.level}, hostility ${loc.hostility}/100 (${label})${routeText}.`;
+        const data = { id: loc.id, level: loc.level, hostility: loc.hostility };
         if (loc.kind) data.kind = loc.kind;
         if (batch) data.batch = batch;
 
@@ -493,6 +522,7 @@
             kind: target.kind || "",
             weather: target.weather,
             hostility: target.hostility,
+            level: target.level,
             distance,
             minutes: travelMinutes(distance)
           };
@@ -521,6 +551,18 @@
 
       eventStatus() {
         return { ...eventSummary, errors: eventSummary.errors.map((error) => ({ ...error })) };
+      },
+
+      // A bad event has a positive modifier: at hostility 100 its chance is doubled for
+      // modifier 1, while a safe location (hostility 0) removes it. A negative modifier
+      // does the reverse for helpful events. 50 is the neutral point.
+      eventChance(event, hostility) {
+        const base = clamp(Number(event && event.chance) || 0, 0, 1);
+        const modifier = clamp(Number(event && event.hostilityModifier) || 0, -4, 4);
+        const value = clamp(Number(hostility), 1, 100);
+        const level = Number.isFinite(value) ? value : DEFAULT_HOSTILITY;
+        const factor = clamp(1 + modifier * ((level - 50) / 50), 0, 5);
+        return clamp(base * factor, 0, 1);
       },
 
       // Content is JSON on disk so it can be edited without touching module code.
@@ -581,11 +623,13 @@
       checkEvents(loc, depth = 0) {
         const triggered = [];
         for (const event of mod.eventsFor(loc.biomeKey)) {
-          if (!event.enabled || event.chance <= 0) continue;
+          const chance = mod.eventChance(event, loc.hostility);
+          if (!event.enabled || chance <= 0) continue;
           const roll = engine.rng.next();
-          if (roll >= event.chance) continue;
+          if (roll >= chance) continue;
 
-          const record = { ...event, roll };
+          const chancePercent = Math.round(chance * 1000) / 10;
+          const record = { ...event, chance, chancePercent, roll };
           triggered.push(record);
           engine.fire({
             type: "location:event",
@@ -596,7 +640,10 @@
               biomeKey: loc.biomeKey,
               eventId: event.id,
               name: event.name,
-              chancePercent: event.chancePercent,
+              chancePercent,
+              baseChancePercent: event.chancePercent,
+              hostility: loc.hostility,
+              hostilityModifier: event.hostilityModifier,
               roll: Math.round(roll * 1000) / 1000,
               effects: event.effects
             }
@@ -619,7 +666,8 @@
           text: `You visit ${loc.name}.`,
           data: {
             id: loc.id, name: loc.name, biome: loc.biome,
-            biomeKey: loc.biomeKey, weather: loc.weather, hostility: loc.hostility
+            biomeKey: loc.biomeKey, weather: loc.weather, hostility: loc.hostility,
+            level: loc.level
           }
         }, depth);
 
