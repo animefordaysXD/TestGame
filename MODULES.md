@@ -12,7 +12,7 @@
 
 **Last updated:** 2026-11-02
 **Build:** core v0.2, characters v0.6, mainCharacter v0.6, equipment v0.4,
-locations v0.5, map v0.1, actions v0.3, travel v0.2, combat v0.2,
+locations v0.5, map v0.2, actions v0.3, travel v0.2, combat v0.2,
 encounters v0.1, save helper v0.1, status viewer and content editor (both tools, not modules).
 
 ---
@@ -44,6 +44,7 @@ Newest first. Keep entries short; details live in the module sections.
 
 | Date | Change | Files |
 |---|---|---|
+| 2026-11-05 | Map v0.2: the world is now static. `map/data.js` holds twelve authored sites and thirteen routes plus interior presets; `map:load` is idempotent and `map:generate` stays as an alias. Sites use `autoLink: false` and the new `location:link` request installs the authored graph. Landmarks generate a room-and-corridor interior on the first visit with `engine.rng`, store it in `map.terrain` and reuse it. The UI/status show the static map and terrain, and the editor now edits the map. | `map/*`, `locations/locations.js`, `editor/schemas.js`, `index.html`, `status.html`, `test/map.test.cjs`, docs |
 | 2026-11-02 | Characters v0.6 and encounters v0.1: NPCs store a relation `{ value, type }` (-100..100 with data-driven bands/labels) and a level; `relationFor`, `setRelation`, `adjustRelation` and `levelFor` expose them. Locations v0.5 add per-biome level ranges, a location `level`, and hostility-modified biome event chances. The new `encounters` module spawns hostility-scaled hostile NPCs on `location:visited` and awards hostility-scaled loot on `combat:ended`; source-tagged clearing keeps ordinary spawns. The UI/status show relations, levels and encounters, and the editor now edits locations and encounters. | `characters/*`, `locations/*`, `encounters/*`, `editor/schemas.js`, `index.html`, `status.html`, tests, docs |
 | 2026-11-01 | Equipment v0.4: added data-driven weapon types (`sword`, `spear`, `axe`, `mace`) and armor types (`cloth`, `leather`, `mail`, `plate`, `scale`). Every catalogue item now carries `weaponType` or `armorType`; added a five-rarity axe family; saves missing a type fall back to the catalogue definition. `equipment:add` accepts `weaponType`/`armorType` filters, module events and the UI/status views show type labels, and the editor validates type keys and wrong-kind fields. | `equipment/*`, `editor/schemas.js`, `index.html`, `combat/combat.js`, tests, docs, `status.html` |
 | 2026-10-31 | Equipment v0.3: swords, spears and maces fill one weapon slot with base damage, a Strength requirement and armor piercing. Added five rarity ranks (Common, Uncommon, Rare, Legendary, Unique) with strict stat bands, a shared `strength` stat, rarity/kind filtered random finds and `equipment:remove` destruction. Combat v0.2 adds weapon damage, Strength gating and armor piercing, and armor now reduces every hit while Defend doubles it. The game UI gains Find armor/Find weapon, rarity labels, a weapon slot, Strength-gated equipping and Destroy buttons; the editor validates kind, rarity and bands. | `characters/statsData.js`, `equipment/*`, `combat/*`, `index.html`, `editor/schemas.js`, tests, docs, `status.html` |
@@ -75,8 +76,8 @@ Newest first. Keep entries short; details live in the module sections.
 | characters | 0.6 | `nextId`, `named{}`, `temp{}` | `character:spawn/save/clearTemp`, `location:changed`, `combat:damage` | `character:spawned/saved/tempCleared/relationChanged` | NPC cards + body line | `characters.test.cjs`, `relations.test.cjs` |
 | mainCharacter | 0.6 | `character` | `location:event`, `action:resolved`, `travel:event`, `equipment:equipped/unequipped`, `combat:damage` | `mainCharacter:saved/statChanged/armorChanged` | Main character + body grid | `main-character.test.cjs` |
 | equipment | 0.4 | `nextId`, `items{}`, `equippedByPart{}`, `equippedWeaponId` | `equipment:add/equip/unequip/remove`, `action:resolved` | `equipment:added/equipped/unequipped/removed` | Equipment | `equipment.test.cjs` |
-| locations | 0.5 | `seed`, `createdAt`, `nextId`, `locations{}` (with `connections[]`), `currentId` | `location:add` | `location:added/visited/event` | Locations + biome events | `locations.test.cjs`, `locations-disk.test.cjs`, `biome-events.test.cjs` |
-| map | 0.1 | `seed`, `size`, `total`, `lastGeneratedTick`, `lastGeneratedAt`, `landmarks{}` | `map:generate`, `location:added` | `map:generated` | Locations panel (map status) | `map.test.cjs` |
+| locations | 0.5 | `seed`, `createdAt`, `nextId`, `locations{}` (with `connections[]`), `currentId` | `location:add`, `location:link` | `location:added/visited/event` | Locations + biome events | `locations.test.cjs`, `locations-disk.test.cjs`, `biome-events.test.cjs` |
+| map | 0.2 | `version`, `loaded`, `seed`, `total`, `lastGeneratedTick`, `lastGeneratedAt`, `sites{}`, `landmarks{}`, `terrain{}` | `map:load`, `map:generate`, `location:added`, `location:visited` | `location:add`, `location:link`, `map:generated`, `map:terrainGenerated` | Locations panel (map status + terrain) | `map.test.cjs` |
 | actions | 0.3 | `locationId`, `locationName`, `biomeKey`, `actions[]`, `lastAction` | `location:visited`, `action:choose` | `actions:loaded`, `action:chosen/resolved/blocked` | Actions | `actions.test.cjs` |
 | travel | 0.2 | `active`, `paused`, `distance`, route, `elapsedMinutes`, `durationMinutes`, `checks`, `eventCount`, `lastEvent`, `lastCompleted` | `travel:start/advance/continue/cancel` | `travel:started/progress/event/resumed/completed/cancelled` | Travel | `travel.test.cjs` |
 | combat | 0.2 | `active`, `round`, `turn`, snapshots, `log[]` | `combat:start/action` | `combat:started/damage/defended/ended` | Combat | `combat.test.cjs` |
@@ -567,12 +568,13 @@ abstract link graph (no coordinates), so it does not decide how a future map is 
 - `locations/locations.js` - generation, fixed landmarks, routes, visits, event cache,
   disk mirror.
 - Slice: `{ seed, createdAt, nextId, locations: { id: loc }, currentId }`.
-- Location: `{ id, name, biome, biomeKey, kind, weather, hostility, level, connections[],
-  seed, createdAtTick, createdAt }`.
+- Location: `{ id, key, name, biome, biomeKey, kind, weather, hostility, level,
+  connections[], seed, createdAtTick, createdAt }`.
 - Connection: `{ id, distance }`; the route is stored on both endpoints with the same
   distance.
-- `kind` is `""` for random locations or a landmark id (`tavern`, `castle`, `shack`) for a
-  fixed definition. Landmarks use `biomeKey: "landmark"`.
+- `key` is `""` for random locations or the authored content key for a static-map site.
+  `kind` is `""` for ordinary locations or a landmark id (`tavern`, `castle`, `shack`) for a
+  landmark definition. Landmarks use `biomeKey: "landmark"`.
 - `hostility` is 1-100 and `level` is an integer of at least 1; both are frameworks that
   encounters and later progression read.
 
@@ -586,7 +588,7 @@ abstract link graph (no coordinates), so it does not decide how a future map is 
 | `uniqueName(base, usedNames)` | Keeps fixed landmark names unique across repeated maps |
 | `hostilityFor(rng, biome)` | Integer roll inside the biome range |
 | `levelFor(rng, biome)` | Integer roll inside the biome `levelRange` |
-| `normalizeFixed(raw)` | Validates a fixed landmark definition from `location:add` |
+| `normalizeFixed(raw)` | Validates a fixed site from `location:add`; keeps `key` and `autoLink` |
 | `normalizeDistance` / `travelMinutes` / `rollDistance` | Route distance clamps, distance -> minutes, random distance |
 | `cleanConnections(raw)` | Validates loaded routes and de-duplicates ids |
 | `ATTRIBUTES` | Ordered generation: biome, name, weather, hostility, level |
@@ -596,6 +598,7 @@ abstract link graph (no coordinates), so it does not decide how a future map is 
 | `labelFor(hostility)` | Band label from `hostilityBands` |
 | `connectionsFor(id)` | UI-ready routes sorted by distance then name |
 | `routeBetween(fromId, toId)` | One route (`distance`, `minutes`) or `null` |
+| `link(data)` | Installs a static-map route from `{ fromId, toId, distance }`; unknown ids are ignored |
 | `addRoute` / `connectNew` / `normalizeGraph` | Internal: mutual edges, link a new location, repair a loaded/imported graph |
 | `loadEvents(force)` | Fetch + cache every biome file; records errors |
 | `eventStatus()` / `eventsFor(key)` | Load summary / normalized list |
@@ -606,8 +609,9 @@ abstract link graph (no coordinates), so it does not decide how a future map is 
 
 ### Events
 
-- Listens: `location:add` (`{ count?, fixed?, batch? }`).
-- Emits: `location:added` (`{ id, level, hostility, kind?, batch? }`), `location:visited`
+- Listens: `location:add` (`{ count?, fixed?, batch? }`), `location:link`
+  (`{ fromId, toId, distance }`).
+- Emits: `location:added` (`{ id, key?, level, hostility, kind?, batch? }`), `location:visited`
   (`{ id, name, biome, biomeKey, weather, hostility, level }`), `location:event`
   (`{ locationId, locationName, biomeKey, eventId, name, chancePercent,
   baseChancePercent, hostility, hostilityModifier, roll, effects }`).
@@ -756,61 +760,87 @@ hostility-scaled rarity band. It never reads another module's slice.
 
 ---
 
-## Map (`map/map.js` v0.1)
+## Map (`map/map.js` v0.2)
 
 ### Role
 
-The map-level spawner. It owns map metadata and asks the locations module to chart a
-batch: a configurable number of random locations plus the fixed tavern, castle and shack
-from `map/data.js`. It never reads or writes the locations slice; the request and results
-travel as events. This is a placeholder for a future layout/atlas system.
+Owns the authored world map and its procedural interiors. The world is **static**: every
+game loads the same sites and routes from `map/data.js`, so this module never charts random
+world locations. It asks the locations module to create the fixed sites through
+`location:add`, installs the authored routes through `location:link`, and generates a
+room-and-corridor interior for a landmark the first time it is visited. It never reads or
+writes the locations slice; requests and results travel as events. The terrain generator is
+self-contained so future travel terrain can reuse it.
 
 ### Files and state
 
-- `map/data.js` - `defaultLocationCount` (20), `minLocationCount` (0),
-  `maxLocationCount` (100), and the fixed `landmarks` list (`kind`, `name`, `biome`,
-  `biomeKey`, `weather`, `hostility`).
-- `map/map.js` - validation, the batch request, landmark id capture.
+- `map/data.js` - `world.name`, `world.locations` (twelve authored sites with `key`,
+  `kind`, `name`, `biome`, `biomeKey`, `weather`, `hostility`, `level`, optional
+  `interior`), `world.routes` (`{ id, from, to, distance }`), `terrain.tiles`,
+  `terrain.legend` and `terrain.interiors` presets.
+- `map/map.js` - validation, the idempotent load, route install, terrain generator and
+  accessors.
 - Slice:
-  `{ seed, size, total, lastGeneratedTick, lastGeneratedAt, landmarks: { kind: id } }`.
-- `size` is the random-location count; `total` includes the fixed landmarks.
+
+```js
+{
+  version: 2, loaded: false, seed: 0, total: 12,
+  lastGeneratedTick: null, lastGeneratedAt: "",
+  sites: { contentKey: locationId },
+  landmarks: { kind: locationId },
+  terrain: { locationId: generatedInterior }
+}
+```
+
+- `total` is the authored site count (`world.locations.length`), not a random batch size.
 
 ### Code map
 
 | Symbol | What it does |
 |---|---|
-| `validLandmarks()` | Filters `MapData.landmarks` to entries with a `kind` and `name` |
-| `generate(depth, data)` | Clamps the count, fires one `location:add` batch, stores map metadata |
-| `onLocationAdded(e)` | Records `kind -> id` and emits `map:generated` after the last batch event |
+| `validSites()` / `validRoutes()` | Drops malformed or duplicate sites/routes; routes must join two known sites |
+| `load(depth, data)` | Idempotent static load; fires one `location:add`, installed routes on completion |
+| `onLocationAdded(e)` | Records `key -> id` / `kind -> id`; after the last site fires `location:link` per route then `map:generated` |
+| `onLocationVisited(e)` | Generates the landmark interior once, when the site declares an `interior` |
+| `buildTerrain(preset, engine, id)` | Room-and-corridor generator; uses `engine.rng`, returns tile rows/counts |
+| `ensureTerrain(id)` / `terrainFor(id)` | Generate on demand / read the stored interior |
+| `siteForLocation(id)` / `siteFor(key)` | Authored site merged with its location id |
 | `status()` | Copy of the slice for the UI |
 
 ### Events
 
-- Listens: `map:generate` (`{ count? }`), `location:added`.
-- Emits: `map:generated` (`{ batch, count, total, landmarks }`) at `depth + 1` after the
-  batch is complete.
-- The module does not emit location events itself and has no tick generator.
+- Listens: `map:load` (`{}`), `map:generate` (legacy alias), `location:added`,
+  `location:visited`.
+- Emits: `location:add` (fixed sites), `location:link` (authored routes),
+  `map:generated` (`{ batch, total, sites, landmarks, routes, alreadyLoaded? }`) and
+  `map:terrainGenerated` (`{ locationId, locationName, interior, label, width, height,
+  rooms }`).
+- No tick generator. Terrain uses `engine.rng`, so a seed and the same first visit produce
+  the same layout.
 
 ### Adjust it
 
 | If you want to... | Change |
 |---|---|
-| Change the default map size | `map/data.js` `defaultLocationCount` |
-| Change the allowed range | `map/data.js` `minLocationCount` / `maxLocationCount` |
-| Add, remove or retune a fixed landmark | `map/data.js` `landmarks` (`kind` must stay unique per map) |
-| Change batch bookkeeping or events | `map/map.js` `generate()` / `onLocationAdded()` |
+| Add, remove or retune a site | `map/data.js` `world.locations` (`key` must be unique) |
+| Add or move a route | `map/data.js` `world.routes` (`from`/`to` are site keys) |
+| Change a landmark's interior | `map/data.js` `terrain.interiors` preset, then set the site's `interior` |
+| Change the tile symbols or legend | `map/data.js` `terrain.tiles` / `terrain.legend` |
+| Change generation behaviour | `map/map.js` `buildTerrain()` |
 | Change how locations are built | `locations/`; this module only requests them |
 
 ### Gotchas
 
-- `depends: ["locations"]`; register locations first. The dependency is event-based, not a
-  direct call.
-- `map:generated` waits for every `location:added` carrying the batch id. Keep the batch id
-  on `location:add`/`location:added` if you change the spawner.
-- Generating a second map appends to the existing map. Fixed names are made unique by the
-  locations module; `landmarks` is refreshed to the newest batch.
-- A batch with no locations emits `map:generated` immediately.
-- Reset clears the slice and any in-flight batch. Load adds an empty map slice to old saves.
+- `depends: ["locations"]`; register locations first. The dependency is event-based.
+- Sites are sent with `autoLink: false`, so the locations module adds no random routes; the
+  authored `world.routes` are the entire graph. If you add a site, add routes for it.
+- `map:load` is idempotent. A second call reports `alreadyLoaded: true` and creates no
+  locations; a save/load round trip keeps `loaded`, so reloading does not duplicate the map.
+- Interiors are generated once and stored in `map.terrain`; later visits reuse the grid.
+  They are display-only: no movement, collision, doors or loot yet.
+- Reset clears the slice and any in-flight batch. Load normalizes old saves without the new
+  fields (they gain `sites`/`terrain`/`version` and keep working with an empty map until
+  loaded).
 
 ---
 
@@ -1174,14 +1204,20 @@ Choose action
 ```
 
 ```text
-Generate map
-  map:generate { count }
-    -> map.generate() stores metadata and fires one location:add
-       { count, fixed: MapData.landmarks, batch }
-       -> locations.add() charts each fixed landmark then the random count
-          -> location:added { id, kind?, batch? } per location
-             -> map records landmark ids
-             -> after the last batch event: map:generated
+Load static map
+  map:load
+    -> map.load() is idempotent; stores metadata and fires one location:add
+       { count: 0, fixed: authored sites (autoLink: false), batch }
+       -> locations.add() charts each fixed site
+          -> location:added { id, key?, kind?, batch? } per site
+             -> map records key -> id and kind -> id
+       -> after the last site: location:link { fromId, toId, distance } per authored route
+       -> map:generated { total, sites, landmarks, routes }
+
+Visit a landmark
+  location:visited
+    -> map generates the interior once with engine.rng, stores it in map.terrain[id]
+       -> map:terrainGenerated { locationId, interior, width, height, rooms }
 ```
 
 ```text

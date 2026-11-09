@@ -97,19 +97,22 @@
     return name;
   }
 
-  // Fixed definitions come from the map module (guaranteed landmarks). They still go
-  // through spawn(), connections and location:added like any other location.
+  // Fixed definitions come from the map module (static world sites and guaranteed
+  // landmarks). They still go through spawn(), connections and location:added like any
+  // other location. A `key` gives the caller a stable content id, and `autoLink: false`
+  // lets the map module install its own fixed routes instead of random links.
   function normalizeFixed(raw) {
     if (!raw || typeof raw !== "object") return null;
     const kind = typeof raw.kind === "string" ? raw.kind.trim() : "";
     const name = typeof raw.name === "string" ? raw.name.trim() : "";
-    if (!kind || !name) return null;
+    const key = typeof raw.key === "string" ? raw.key.trim() : "";
+    if (!name || (!kind && !key)) return null;
     const biome = typeof raw.biome === "string" && raw.biome.trim() ? raw.biome.trim() : "Landmark";
     const biomeKey = typeof raw.biomeKey === "string" && raw.biomeKey.trim() ? raw.biomeKey.trim() : "landmark";
     const weather = typeof raw.weather === "string" && raw.weather.trim() ? raw.weather.trim() : "Clear";
     const hostility = clamp(Math.round(Number(raw.hostility)) || DEFAULT_HOSTILITY, 1, 100);
     const level = Math.max(1, Math.round(Number(raw.level)) || DEFAULT_LEVEL);
-    return { kind, name, biome, biomeKey, weather, hostility, level };
+    return { key, kind, name, biome, biomeKey, weather, hostility, level, autoLink: raw.autoLink !== false };
   }
 
   // Route distance is an abstract whole number. Duration is derived from it, so content
@@ -170,6 +173,7 @@
     const level = Math.max(1, Math.round(Number(data.level)) || (knownBiome ? Number(knownBiome.levelRange && knownBiome.levelRange[0]) : DEFAULT_LEVEL) || DEFAULT_LEVEL);
     return {
       id,
+      key: typeof data.key === "string" ? data.key.trim() : "",
       name,
       biome,
       biomeKey: typeof data.biomeKey === "string" && data.biomeKey ? data.biomeKey : (knownBiome ? knownBiome.key : ""),
@@ -372,6 +376,7 @@
           e.data && e.data.fixed,
           e.data && e.data.batch
         ));
+        engine.on("event:location:link", (e) => mod.link(e.data));
       },
 
       onLoad(eng) {
@@ -445,6 +450,7 @@
         if (fixedDef) {
           loc = {
             id: "loc_" + String(s.nextId++).padStart(4, "0"),
+            key: fixedDef.key,
             name: uniqueName(fixedDef.name, usedNames),
             biome: fixedDef.biome,
             biomeKey: fixedDef.biomeKey,
@@ -481,7 +487,9 @@
         }
 
         s.locations[loc.id] = loc;
-        connectNew(loc);
+        // The static map installs its own routes through location:link. Random locations
+        // and legacy fixed definitions keep the automatic links.
+        if (!fixedDef || fixedDef.autoLink !== false) connectNew(loc);
         if (disk) queueDisk(() => mod.writeLocation(loc));
 
         const label = mod.labelFor(loc.hostility);
@@ -491,6 +499,7 @@
           ? `${loc.name} (${loc.kind}) is charted as a landmark: ${loc.biome.toLowerCase()}, ${loc.weather.toLowerCase()}, level ${loc.level}, hostility ${loc.hostility}/100 (${label})${routeText}.`
           : `${loc.name} is charted: ${loc.biome.toLowerCase()}, ${loc.weather.toLowerCase()}, level ${loc.level}, hostility ${loc.hostility}/100 (${label})${routeText}.`;
         const data = { id: loc.id, level: loc.level, hostility: loc.hostility };
+        if (loc.key) data.key = loc.key;
         if (loc.kind) data.kind = loc.kind;
         if (batch) data.batch = batch;
 
@@ -536,6 +545,15 @@
         if (!route) return null;
         const distance = normalizeDistance(route.distance);
         return { fromId, toId, distance, minutes: travelMinutes(distance) };
+      },
+
+      // Used by the static map to install its authored route graph. Unknown ids are
+      // ignored; addRoute clamps the distance and stores the edge on both endpoints.
+      link(data = {}) {
+        const fromId = typeof data.fromId === "string" ? data.fromId.trim() : "";
+        const toId = typeof data.toId === "string" ? data.toId.trim() : "";
+        if (!S().locations[fromId] || !S().locations[toId] || fromId === toId) return null;
+        return addRoute(fromId, toId, data.distance);
       },
 
       travelMinutes,

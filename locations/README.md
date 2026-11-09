@@ -25,8 +25,8 @@ Locations/
   files without `connections` are repaired deterministically on load.
 - **Visit** only allows the current location or a direct route from it. Travel along the
   graph from the Actions panel to reach a farther place.
-- Locations are added when you press **Add location**, **Add 5 locations**, or **Generate
-  map**. The map spawner always includes the fixed tavern, castle and shack landmarks.
+- Locations are added when you press **Add location**, **Add 5 locations**, or **Load static
+  map**. The static map always charts the same authored sites and routes from `map/data.js`.
 - Reconnecting the folder imports any unknown `loc_*.json` files from the current
   seed folder. Existing ids in the game state win.
 - The game state is the source of truth; the folder is a readable, editable mirror.

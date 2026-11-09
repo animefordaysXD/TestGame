@@ -17,6 +17,7 @@
     { id: "actions", path: "actions/data.js", format: "js", global: "LocationActionsData" },
     { id: "characters", path: "characters/data.js", format: "js", global: "CharacterData" },
     { id: "locations", path: "locations/data.js", format: "js", global: "LocationData" },
+    { id: "map", path: "map/data.js", format: "js", global: "MapData" },
     { id: "encounters", path: "encounters/data.js", format: "js", global: "EncounterData" },
     ...BIOMES.map((b) => ({ id: "biome:" + b, path: `locations/events/${b}/events.json`, format: "json" }))
   ];
@@ -124,6 +125,34 @@
     { key: "maxHostility", label: "Up to hostility", type: "number", min: 1, max: 100, step: 1 },
     { key: "rarities", label: "Allowed rarities", type: "multiselect", source: "rarities", help: "One of these is picked for a drop in this hostility band." }
   ];
+  const mapSiteFields = [
+    { key: "key", label: "Key", type: "text", mono: true, help: "Stable content id; routes and the map state refer to it." },
+    { key: "kind", label: "Kind", type: "text", help: "Landmark id such as tavern, castle or shack. Leave blank for a wild site." },
+    { key: "name", label: "Name", type: "text" },
+    { key: "biome", label: "Biome label", type: "text" },
+    { key: "biomeKey", label: "Biome key", type: "text", mono: true, help: "Uses the location event file for this key. Landmarks use landmark." },
+    { key: "weather", label: "Weather", type: "text" },
+    { key: "hostility", label: "Hostility", type: "number", min: 1, max: 100, step: 1 },
+    { key: "level", label: "Level", type: "number", min: 1, max: 100, step: 1 },
+    { key: "interior", label: "Interior preset", type: "select", source: "interiors", allowEmpty: true, omitIfEmpty: true, help: "Generates procedural terrain on the first visit. Wild sites leave it blank." }
+  ];
+  const mapRouteFields = [
+    { key: "id", label: "Id", type: "text", mono: true },
+    { key: "from", label: "From", type: "select", source: "mapSites" },
+    { key: "to", label: "To", type: "select", source: "mapSites" },
+    { key: "distance", label: "Distance", type: "number", min: 1, max: 100, step: 1, help: "Abstract leagues; the locations module turns it into travel minutes." }
+  ];
+  const mapInteriorFields = [
+    { key: "key", label: "Key", type: "text", mono: true },
+    { key: "label", label: "Label", type: "text" },
+    { key: "width", label: "Grid width", type: "number", min: 9, max: 61, step: 1 },
+    { key: "height", label: "Grid height", type: "number", min: 7, max: 41, step: 1 },
+    { key: "roomAttempts", label: "Room attempts", type: "number", min: 1, max: 40, step: 1 },
+    { key: "roomWidth", label: "Room width range", type: "range", min: 2, max: 59 },
+    { key: "roomHeight", label: "Room height range", type: "range", min: 2, max: 39 },
+    { key: "rubbleChance", label: "Rubble chance", type: "number", min: 0, max: 1, step: 0.01 },
+    { key: "waterChance", label: "Water chance", type: "number", min: 0, max: 1, step: 0.01 }
+  ];
 
   const pct = (n) => (Math.round(n * 10) / 10) + "%";
   const signed = (n) => (n > 0 ? "+" : "−") + Math.abs(n);
@@ -229,6 +258,93 @@
       preview(_, ctx, data) {
         const g = data.locations.travelGraph || {};
         return { notes: [`A route of distance 1 takes ${g.minutesPerDistance ?? 15} minutes; distance ${(g.distanceRange || [1, 4])[1]} takes ${(Number(g.minutesPerDistance) || 15) * Number((g.distanceRange || [1, 4])[1])} minutes.`] };
+      }
+    },
+    {
+      id: "map-world", group: "Map", title: "World settings", file: "map", kind: "form", at: ["world"],
+      fields: [
+        { key: "name", label: "World name", type: "text", help: "Display name only; the map's sites and routes live below." }
+      ],
+      preview(_, ctx, data) {
+        const world = data.map.world || {};
+        const sites = Array.isArray(world.locations) ? world.locations : [];
+        const routes = Array.isArray(world.routes) ? world.routes : [];
+        const landmarks = sites.filter((site) => site.kind);
+        return { notes: [
+          `${world.name || "Unnamed world"} has ${sites.length} static sites and ${routes.length} authored routes.`,
+          `${landmarks.length} landmark${landmarks.length === 1 ? "" : "s"} generate procedural interiors.`,
+          "Loading the map is idempotent: it never charts a second copy."
+        ] };
+      }
+    },
+    {
+      id: "map-sites", group: "Map", title: "Static sites", file: "map", kind: "list", at: ["world", "locations"],
+      fields: mapSiteFields, label: (site) => site.name || site.key || "(unnamed)",
+      sub: (site) => `${site.kind || "wilds"} · ${site.biome || "?"} · hostility ${site.hostility ?? "?"}${site.interior ? ` · interior ${site.interior}` : ""}`,
+      newItem: (ctx, list) => ({
+        key: C.uniqueId(list.map((site) => site.key), "new_site"), kind: "", name: "New site",
+        biome: "Grassland", biomeKey: "grassland", weather: "Clear", hostility: 50, level: 1
+      }),
+      preview(site, ctx, data) {
+        const routes = ((data.map.world && data.map.world.routes) || []).filter((route) => route.from === site.key || route.to === site.key);
+        const interior = ((data.map.terrain && data.map.terrain.interiors) || []).find((preset) => preset.key === site.interior);
+        const notes = [
+          `${site.kind ? `Landmark kind ${site.kind}` : "Wild site"} in ${site.biome || "unknown terrain"} (event key ${site.biomeKey || "none"}).`,
+          `${routes.length} authored route${routes.length === 1 ? "" : "s"}; the static map never adds random links.`,
+          interior ? `First visit generates a ${interior.width}×${interior.height} ${interior.label || interior.key}.` : "No interior: visiting only rolls biome events and encounters."
+        ];
+        return { chips: [{ text: `Hostility ${site.hostility ?? "?"}`, tone: Number(site.hostility) >= 50 ? "neg" : "flat" }, { text: `Level ${site.level ?? 1}`, tone: "flat" }], notes };
+      }
+    },
+    {
+      id: "map-routes", group: "Map", title: "Authored routes", file: "map", kind: "list", at: ["world", "routes"],
+      fields: mapRouteFields, label: (route) => route.id || `${route.from}–${route.to}`,
+      sub: (route) => `${route.from} ↔ ${route.to} · ${route.distance} league${route.distance === 1 ? "" : "s"}`,
+      newItem: (ctx, list) => {
+        const sites = (ctx.mapSiteKeys || []);
+        return {
+          id: C.uniqueId(list.map((route) => route.id), "new_route"),
+          from: sites[0] || "", to: sites[1] || sites[0] || "", distance: 1
+        };
+      },
+      preview(route) {
+        const distance = Number(route.distance) || 0;
+        return { notes: [
+          `A journey from ${route.from || "?"} to ${route.to || "?"} takes ${distance * 15} minutes at the default 15 minutes per league.`,
+          "Routes are stored on both endpoints with the same distance."
+        ] };
+      }
+    },
+    {
+      id: "map-interiors", group: "Map", title: "Interior presets", file: "map", kind: "list", at: ["terrain", "interiors"],
+      fields: mapInteriorFields, label: (preset) => preset.label || preset.key || "(unnamed)",
+      sub: (preset) => `${preset.width}×${preset.height} · ${preset.roomAttempts} attempts · rooms ${(preset.roomWidth || []).join("–")}×${(preset.roomHeight || []).join("–")}`,
+      newItem: (ctx, list) => ({
+        key: C.uniqueId(list.map((preset) => preset.key), "new_interior"), label: "New interior",
+        width: 21, height: 11, roomAttempts: 7, roomWidth: [3, 6], roomHeight: [3, 4],
+        rubbleChance: 0.05, waterChance: 0
+      }),
+      preview(preset) {
+        return { notes: [
+          `${preset.width}×${preset.height} grid with up to ${preset.roomAttempts} room attempts.`,
+          `Rooms ${(preset.roomWidth || []).join("–")} wide and ${(preset.roomHeight || []).join("–")} tall.`,
+          `Rubble ${Math.round((Number(preset.rubbleChance) || 0) * 100)}%, water ${Math.round((Number(preset.waterChance) || 0) * 100)}% of room floor tiles.`,
+          "Layouts are generated once per landmark and stored in the save."
+        ] };
+      }
+    },
+    {
+      id: "map-tiles", group: "Map", title: "Terrain tiles", file: "map", kind: "form", at: ["terrain", "tiles"],
+      fields: [
+        { key: "wall", label: "Wall tile", type: "text", mono: true },
+        { key: "floor", label: "Floor tile", type: "text", mono: true },
+        { key: "entrance", label: "Entrance tile", type: "text", mono: true },
+        { key: "rubble", label: "Rubble tile", type: "text", mono: true },
+        { key: "water", label: "Water tile", type: "text", mono: true }
+      ],
+      preview(_, ctx, data) {
+        const tiles = (data.map.terrain && data.map.terrain.tiles) || {};
+        return { notes: [`Rendered map characters: wall ${tiles.wall || "#"}, floor ${tiles.floor || "."}, entrance ${tiles.entrance || "<"}, rubble ${tiles.rubble || "*"}, water ${tiles.water || "~"}.`] };
       }
     },
     {
@@ -554,6 +670,9 @@
     const weaponTypeDefs = Array.isArray(equipment.weaponTypes) ? equipment.weaponTypes : [];
     const armorTypeDefs = Array.isArray(equipment.armorTypes) ? equipment.armorTypes : [];
     const relationTypeDefs = Array.isArray(relationDefs.types) ? relationDefs.types : [];
+    const map = data.map || {};
+    const mapSites = Array.isArray(map.world && map.world.locations) ? map.world.locations : [];
+    const mapInteriors = Array.isArray(map.terrain && map.terrain.interiors) ? map.terrain.interiors : [];
     return {
       statDefs,
       statKeys: statDefs.filter((d) => d.kind !== "equipment").map((d) => d.key),
@@ -572,6 +691,8 @@
       traits: data.characters && Array.isArray(data.characters.traits) ? data.characters.traits : [],
       relationTypeDefs,
       relationTypes: relationTypeDefs.map((t) => t.key),
+      mapSiteKeys: mapSites.map((site) => site && site.key).filter(Boolean),
+      mapInteriorKeys: mapInteriors.map((preset) => preset && preset.key).filter(Boolean),
       outcomeIds: outcomeIds(data),
       armorMultiplier: (refs.combat && refs.combat.defend && refs.combat.defend.armorMultiplier) || 2
     };
@@ -585,6 +706,8 @@
     if (source === "weaponTypes") return (ctx.weaponTypeDefs || []).map((t) => ({ value: t.key, label: t.label || t.key }));
     if (source === "armorTypes") return (ctx.armorTypeDefs || []).map((t) => ({ value: t.key, label: t.label || t.key }));
     if (source === "relationTypes") return (ctx.relationTypeDefs || []).map((t) => ({ value: t.key, label: t.label || t.key }));
+    if (source === "mapSites") return (ctx.mapSiteKeys || []).map((key) => ({ value: key, label: key }));
+    if (source === "interiors") return (ctx.mapInteriorKeys || []).map((key) => ({ value: key, label: key }));
     const list = { equipmentKeys: ctx.equipmentKeys, biomes: ctx.biomes, traits: ctx.traits }[source] || [];
     return list.map((v) => ({ value: v, label: v }));
   }
@@ -797,6 +920,105 @@
           graph("error", "Minutes per distance must be a whole number of at least 1.", null, "minutesPerDistance");
         if (!Number.isInteger(g.legacyDistance) || g.legacyDistance < 1)
           graph("error", "Legacy distance must be a whole number of at least 1.", null, "legacyDistance");
+      }
+    },
+    map(file, d, ctx, out) {
+      const world = makeReporter(out, "map-world");
+      const sites = makeReporter(out, "map-sites");
+      const routes = makeReporter(out, "map-routes");
+      const interiors = makeReporter(out, "map-interiors");
+      const tiles = makeReporter(out, "map-tiles");
+      const worldData = d.world;
+      const terrain = d.terrain;
+
+      if (!worldData || typeof worldData !== "object") world("error", "The file needs a world object.", null, "world");
+      else {
+        if (typeof worldData.name !== "string" || !worldData.name.trim()) world("warn", "Give the world a name.", null, "name");
+
+        if (!Array.isArray(worldData.locations) || !worldData.locations.length) {
+          sites("error", "The world needs a non-empty locations list.", null, "locations");
+        } else {
+          checkIds(worldData.locations, "key", sites, "Site");
+          const siteKeys = new Set(worldData.locations.map((site) => site && site.key).filter(Boolean));
+          worldData.locations.forEach((site, i) => {
+            if (!site || typeof site !== "object") return sites("error", `Site #${i + 1} is not an object.`, i);
+            if (typeof site.name !== "string" || !site.name.trim()) sites("warn", "Give the site a name.", i, "name");
+            if (typeof site.biome !== "string" || !site.biome.trim()) sites("warn", "Give the site a biome label.", i, "biome");
+            if (typeof site.biomeKey !== "string" || !site.biomeKey.trim()) sites("warn", "Give the site a biome key.", i, "biomeKey");
+            if (typeof site.weather !== "string" || !site.weather.trim()) sites("warn", "Give the site weather.", i, "weather");
+            if (!Number.isInteger(site.hostility) || site.hostility < 1 || site.hostility > 100)
+              sites("error", "Hostility must be a whole number from 1 to 100.", i, "hostility");
+            if (!Number.isInteger(site.level) || site.level < 1)
+              sites("error", "Level must be a whole number of at least 1.", i, "level");
+            if (site.interior && !ctx.mapInteriorKeys.includes(site.interior))
+              sites("error", `Unknown interior preset "${site.interior}".`, i, "interior");
+          });
+
+          if (!Array.isArray(worldData.routes)) routes("error", "The world needs a routes list.", null, "routes");
+          else {
+            checkIds(worldData.routes, "id", routes, "Route");
+            const seen = new Set();
+            worldData.routes.forEach((route, i) => {
+              if (!route || typeof route !== "object") return routes("error", `Route #${i + 1} is not an object.`, i);
+              if (!siteKeys.has(route.from)) routes("error", `Route from "${route.from}" is not a site.`, i, "from");
+              if (!siteKeys.has(route.to)) routes("error", `Route to "${route.to}" is not a site.`, i, "to");
+              if (route.from === route.to) routes("error", "A route must join two different sites.", i, "to");
+              if (!Number.isInteger(route.distance) || route.distance < 1)
+                routes("error", "Route distance must be a whole number of at least 1.", i, "distance");
+              const pair = [route.from, route.to].sort().join("|");
+              if (seen.has(pair)) routes("warn", "This pair of sites already has a route.", i);
+              else seen.add(pair);
+            });
+          }
+        }
+      }
+
+      if (!terrain || typeof terrain !== "object") {
+        interiors("error", "The file needs a terrain object.", null, "terrain");
+      } else {
+        if (!Array.isArray(terrain.interiors) || !terrain.interiors.length)
+          interiors("error", "Terrain needs a non-empty interiors list.", null, "interiors");
+        else {
+          checkIds(terrain.interiors, "key", interiors, "Interior");
+          terrain.interiors.forEach((preset, i) => {
+            if (!preset || typeof preset !== "object") return interiors("error", `Interior #${i + 1} is not an object.`, i);
+            if (typeof preset.label !== "string" || !preset.label.trim()) interiors("warn", "Give the interior a label.", i, "label");
+            const width = preset.width, height = preset.height;
+            if (!Number.isInteger(width) || width < 9 || width > 61)
+              interiors("error", "Width must be a whole number from 9 to 61.", i, "width");
+            if (!Number.isInteger(height) || height < 7 || height > 41)
+              interiors("error", "Height must be a whole number from 7 to 41.", i, "height");
+            if (!Number.isInteger(preset.roomAttempts) || preset.roomAttempts < 1 || preset.roomAttempts > 40)
+              interiors("error", "Room attempts must be a whole number from 1 to 40.", i, "roomAttempts");
+            const badRange = (value, max, field, label) => {
+              if (!Array.isArray(value) || value.length !== 2 || !value.every(Number.isInteger) || value[0] < 2 || value[1] > max || value[0] > value[1]) {
+                interiors("error", `${label} needs two whole numbers from 2 to ${max}, low to high.`, i, field);
+                return true;
+              }
+              return false;
+            };
+            if (Number.isInteger(width)) badRange(preset.roomWidth, width - 2, "roomWidth", "Room width range");
+            if (Number.isInteger(height)) badRange(preset.roomHeight, height - 2, "roomHeight", "Room height range");
+            for (const field of ["rubbleChance", "waterChance"]) {
+              if (!num(preset[field]) || preset[field] < 0 || preset[field] > 1)
+                interiors("error", `${cap(field)} must be between 0 and 1.`, i, field);
+            }
+          });
+        }
+
+        const tileSet = terrain.tiles;
+        if (!tileSet || typeof tileSet !== "object") tiles("error", "Terrain needs a tiles object.", null, "tiles");
+        else {
+          const seen = new Map();
+          for (const key of ["wall", "floor", "entrance", "rubble", "water"]) {
+            const value = tileSet[key];
+            if (typeof value !== "string" || value.length !== 1)
+              tiles("error", `The ${key} tile must be exactly one character.`, null, key);
+            else if (seen.has(value))
+              tiles("warn", `The ${key} tile repeats the ${seen.get(value)} tile.`, null, key);
+            else seen.set(value, key);
+          }
+        }
       }
     },
     encounters(file, d, ctx, out) {

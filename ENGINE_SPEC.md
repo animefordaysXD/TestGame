@@ -1,4 +1,4 @@
-# Modular Text-RPG Engine — Spec v1.8
+# Modular Text-RPG Engine — Spec v1.9
 
 Plain JS/HTML, no build step, no dependencies. A small core runs the clock, event bus,
 RNG, state and save/load. All gameplay lives in modules that own one state slice and talk
@@ -132,10 +132,13 @@ Slices are JSON-safe. Never cache a slice object; `load()` replaces the whole st
 | character:saved | characters | `{ id }` |
 | character:tempCleared | characters | `{ ids, source? }` |
 | character:relationChanged | characters | `{ id, name, before, after, delta, relation, label, band, previousLabel, source }` |
-| location:add (request) | UI, map module | `{ count?, fixed?, batch? }`; `fixed` is an array of `{ kind, name, biome?, biomeKey?, weather?, hostility?, level? }` landmark definitions |
-| location:added | locations | `{ id, level, hostility, kind?, batch? }` |
-| map:generate (request) | UI | `{ count? }` (default and clamp from `MapData`) |
-| map:generated | map | `{ batch, count, total, landmarks: { tavern, castle, shack } }` |
+| location:add (request) | UI, map module | `{ count?, fixed?, batch? }`; `fixed` is an array of `{ key?, kind?, name, biome?, biomeKey?, weather?, hostility?, level?, autoLink? }` site definitions |
+| location:link (request) | map module | `{ fromId, toId, distance }`; links two existing locations as a two-way route |
+| location:added | locations | `{ id, key?, level, hostility, kind?, batch? }` |
+| map:load (request) | UI | loads the authored static map; idempotent |
+| map:generate (request) | legacy callers | alias for `map:load` |
+| map:generated | map | `{ batch, total, sites, landmarks, routes, alreadyLoaded? }` |
+| map:terrainGenerated | map | `{ locationId, locationName, interior, label, width, height, rooms }` |
 | location:visited | locations | `{ id, name, biome, biomeKey, weather, hostility, level }` |
 | location:event | locations | `{ locationId, locationName, biomeKey, eventId, name, chancePercent, baseChancePercent, hostility, hostilityModifier, roll, effects }` |
 | location:changed | UI "Leave location", future movement | none (characters clears Temporary Spawn) |
@@ -181,7 +184,7 @@ Slices are JSON-safe. Never cache a slice object; `load()` replaces the whole st
 | mainCharacter | none | `character` | player character; base stats, body; profile image; event/action/travel effects; JSON mirror |
 | combat | none | `active`, `round`, `turn`, `player`, `enemy`, `defending`, `winner*`, `log[]` | basic player-first duel; attack/defend |
 | locations | none | `seed`, `createdAt`, `nextId`, `locations{}`, `currentId` | procedural locations with hostility/level, routes, visit/event checker, JSON mirror |
-| map | locations | `seed`, `size`, `total`, `lastGeneratedTick`, `lastGeneratedAt`, `landmarks{}` | one map spawn request: fixed landmarks plus random locations through `location:add` |
+| map | locations | `version`, `loaded`, `seed`, `total`, `lastGeneratedTick`, `lastGeneratedAt`, `sites{}`, `landmarks{}`, `terrain{}` | loads the authored static world once and generates procedural terrain inside landmarks |
 | actions | none | `locationId`, `locationName`, `biomeKey`, `actions[]`, `lastAction` | five area actions with costs, outcomes, time and route-based travel |
 | travel | none | `active`, `paused`, `distance`, route, `elapsedMinutes`, `durationMinutes`, `checks`, `eventCount`, `lastEvent`, `lastCompleted` | 5-minute journey checks; pause/resume on travel events |
 | equipment | none | `nextId`, `items{}`, `equippedByPart{}`, `equippedWeaponId` | main-character armor on body parts plus one weapon slot; weapon/armor types; mirrors summed armor into the character stat |
@@ -484,6 +487,7 @@ locations: {
 ```json
 {
   "id": "loc_0001",
+  "key": "",
   "name": "The Shadow Oasis",
   "biome": "Desert",
   "biomeKey": "desert",
@@ -517,9 +521,10 @@ locations: {
 - `connectionsFor(id)` returns UI-ready routes (`id`, `name`, `biome`, `biomeKey`,
   `kind`, `weather`, `hostility`, `distance`, `minutes`), sorted by distance then name.
   `routeBetween(fromId, toId)` returns one route or `null`.
-- `kind` is `""` for ordinary random locations and a landmark id such as `tavern`,
-  `castle` or `shack` for a fixed definition. Landmarks use the synthetic
-  `biomeKey: "landmark"` so biome event files do not roll on them.
+- `key` is `""` for random locations or a stable content id for an authored site.
+  `kind` is `""` for ordinary locations and a landmark id such as `tavern`, `castle` or
+  `shack` for a landmark definition. Landmarks use the synthetic `biomeKey: "landmark"`
+  so biome event files do not roll on them.
 - On load/import, dangling and self routes are dropped, one-way routes are made mutual,
   duplicates collapse to the shortest distance, and isolated legacy locations are linked
   deterministically with `travelGraph.legacyDistance`. This repair uses no RNG.
@@ -527,9 +532,13 @@ locations: {
   nothing on tick. A new world creates a new map seed in `init()`; no locations are
   created until `location:add` arrives. The UI and the map module both use that request.
 - `location:add` accepts `{ count, fixed, batch }`. `fixed` entries bypass the random
-  rolls and keep their supplied name/kind/biome/weather/hostility; they still get an id,
-  route links and a `location:added` event like any other location. Fixed names are made
-  unique if a map is generated twice.
+  rolls and keep their supplied key/name/kind/biome/weather/hostility/level; they still
+  get an id and a `location:added` event. `autoLink: false` skips the automatic random
+  route links so the static map can install its authored graph. Fixed names are made
+  unique if the same definition is added twice.
+- `location:link` accepts `{ fromId, toId, distance }` and installs a two-way route
+  between two existing locations. Unknown ids and self-links are ignored; the distance is
+  clamped to `travelGraph.distanceRange`.
 - Randomness comes from `engine.rng`. Names are unique. New locations try to avoid
   repeating an existing biome + weather pair until the data is exhausted. Route targets
   and distances also use `engine.rng`.
@@ -590,10 +599,11 @@ locations: {
     folder. Existing ids in state win. Hand-edited JSON can be loaded this way.
 - Browser folder access needs Chrome or Edge (File System Access API). Serving the
   folder over localhost is the fallback; `file://` may block the picker.
-- UI on the test page: **Generate map** with a random-location count, **Add location**,
-  **Add 5 locations**, **Connect Locations folder**, **Reload biome events**, a **Visit**
-  button per location (direct routes only), a current-location marker, route counts, visit
-  status, and a **JSON** download button per location.
+- UI on the test page: **Load static map**, **Add location**, **Add 5 locations**, **Connect
+  Locations folder** and **Reload biome events**. The map status shows the authored site
+  count and landmark ids; a visited landmark renders its generated tile grid and legend.
+  Each location also has a **Visit** button (direct routes only), a current-location marker,
+  route counts, visit status, and a **JSON** download button.
 
 ## Encounters module v0.1
 
@@ -638,37 +648,43 @@ encounters: {
 - UI on the test page: the Visit status line reports the encounter chance and spawn count;
   the status page shows the last visit, active encounter enemies and the last loot.
 
-## Map module v0.1
+## Map module v0.2
 
-- Files: `map/data.js`, `map/map.js`.
+- Files: `map/data.js`, `map/map.js`; notes in `map/README.md`.
 - Slice:
 
 ```js
 map: {
-  seed: 0,                 // world/map seed copied when a map is generated
-  size: 0,                 // random locations requested (excluding landmarks)
-  total: 0,                // size + fixed landmarks
+  version: 2,
+  loaded: false,           // true once the authored map has been charted
+  seed: 0,                 // world/map seed copied at load time
+  total: 0,                // authored site count
   lastGeneratedTick: null,
   lastGeneratedAt: "",
-  landmarks: {}            // kind -> location id, e.g. { tavern: "loc_0001", ... }
+  sites: {},               // content key -> location id, e.g. { broken_wheel: "loc_0001" }
+  landmarks: {},           // landmark kind -> location id, e.g. { tavern: "loc_0001" }
+  terrain: {}              // location id -> generated interior
 }
 ```
 
-- `map/data.js` owns `defaultLocationCount` (20), `minLocationCount` (0),
-  `maxLocationCount` (100) and the fixed `landmarks` list. The current placeholders are a
-  tavern (`The Broken Wheel`), a castle (`Greywatch Castle`) and a shack
-  (`Abandoned Shack`). They are intentionally simple and can change without code.
-- `map:generate { count? }` clamps the count and fires **one** `location:add` request with
-  `{ count, fixed: landmarks, batch }`. It does not create locations or read the locations
-  slice itself.
-- `location:added` events carrying that `batch` are counted. When the last one arrives,
-  the module emits `map:generated` at `depth + 1` and records the fixed landmark ids.
-  A batch of 0 (landmarks only, or nothing) emits immediately.
-- `map` declares `depends: ["locations"]` so it is registered after the module it drives.
-  It has no RNG and registers no generator. Reset clears the slice and the in-flight batch;
-  load normalizes old saves without map metadata.
-- Future maps can add more landmarks or per-map layout rules in `map/data.js`; nothing
-  outside the map and locations modules reads the slice yet.
+- The world is **static**: `map/data.js` owns `world.locations` (key, kind, name, biome,
+  biomeKey, weather, hostility, level, optional interior), `world.routes` (id, from, to,
+  distance) and `terrain` (tile symbols, legend, interior presets). Every game loads the
+  same sites and routes; there is no random world-location count.
+- `map:load` is idempotent. On the first call it stores metadata and fires **one**
+  `location:add { count: 0, fixed, batch }`. Sites carry `autoLink: false`, so the
+  locations module does not add random routes. `location:added` events carrying the batch
+  are counted; after the last one the map fires one `location:link { fromId, toId,
+  distance }` per authored route, then `map:generated`. A second call reports
+  `alreadyLoaded: true` and creates nothing.
+- Landmarks declare an `interior` preset. On `location:visited` the map generates a
+  room-and-corridor grid once with `engine.rng`, stores it under `terrain[locationId]` and
+  emits `map:terrainGenerated`. Later visits reuse the stored grid; saves keep it. The
+  algorithm is self-contained so future travel terrain can call the same generator.
+- Accessors: `terrainFor(id)`, `ensureTerrain(id)`, `siteForLocation(id)`, `siteFor(key)`
+  and `status()`.
+- `map` declares `depends: ["locations"]`. It has no tick generator. Reset clears the
+  slice and any in-flight batch; load normalizes saves without the new fields.
 
 ## Actions module v0.3
 
@@ -896,6 +912,10 @@ characters/
     profile.webp     (written on folder connect/save; or .png/.jpg/.svg)
   Named NPC/          (created on folder connect)
   Temporary Spawn/    (created on folder connect)
+map/
+  data.js
+  map.js
+  README.md
 locations/
   data.js
   locations.js
@@ -919,6 +939,7 @@ Locations/
 test/
   locations.test.cjs
   locations-disk.test.cjs
+  map.test.cjs
   characters.test.cjs
   relations.test.cjs
   main-character.test.cjs
@@ -943,6 +964,10 @@ test/
   route. Multi-hop route planning, route-specific encounters and weather effects on travel
   are not built. Hostility now drives biome event chance and encounters but not travel
   risk directly.
+- The world map is static, but it is still only a list of sites and routes: there is no
+  drawn atlas, site coordinates or overworld movement. Landmark interiors are a rendered
+  tile grid with no movement, collision, doors or loot; the generator can be reused for
+  travel terrain later.
 - The page's **Visit** button requires a direct route from the current location; the
   module's `visit()` remains permissive for tests and arrival handoffs.
 - Travel events are generic interruptions with stat effects. They do not start combat,

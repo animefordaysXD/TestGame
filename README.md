@@ -9,7 +9,7 @@
 > [IDEAS.md](IDEAS.md).
 
 Current build: core v0.2, characters v0.6, main character v0.6, equipment v0.4,
-locations v0.5, map v0.1, actions v0.3, travel v0.2, combat v0.2, encounters v0.1,
+locations v0.5, map v0.2, actions v0.3, travel v0.2, combat v0.2, encounters v0.1,
 save helper v0.1, plus the read-only status viewer and the content editor (`editor.html`
 — a tool, not a module, and never loaded by the game).
 
@@ -55,7 +55,7 @@ directly with `node test/locations.test.cjs`, `node test/locations-disk.test.cjs
 - `combat/` — player-first duels with weapons, Strength gating and armor piercing (Attack/Defend)
 - `locations/` — procedural locations with hostility and levels, linked into a travel graph
 - `encounters/` — hostility-driven hostile spawns on visit and hostility-scaled loot on a win
-- `map/` — map spawner: fixed tavern/castle/shack plus random location batches
+- `map/` — static world map with authored sites and routes, plus procedural landmark interiors
 - `locations/events/` — per-biome event JSON (copy/paste templates and the tundra sample)
 - `actions/` — five area actions with costs/outcomes and optional biome overrides
 - `travel/` — route-based journeys with 5-minute interruption checks and pause/resume
@@ -79,8 +79,8 @@ same `localStorage` slot (`save1`) as the game and shows:
 - every module and its live state slice: NPCs with personality archetypes, traits, behavior
   profiles, stats and ten-part bodies, the
   main character with HP/Stamina/Mana, armor, skills and body parts, the equipment inventory, the
-  current combat and its log, locations with their routes and the current marker, the map
-  spawner's batch metadata and fixed landmark ids, the five
+  current combat and its log, locations with their routes and the current marker, the static
+  map's site keys, landmarks and generated interiors, the five
   loaded actions plus the last resolution, and the current journey with its distance,
   checks and last interruption;
 - content data counts and the enabled/total events in each biome file;
@@ -194,15 +194,12 @@ them.
 
 ## Locations module
 
-- **Generate map** spawns a configurable number of random locations plus the fixed tavern,
-  castle and shack landmarks. See the map spawner below.
-- **Add location** creates one location and links it into the travel graph.
-- **Add 5 locations** creates a starting batch. Each new location links to the current
-  area plus a random neighbour.
+- **Load static map** charts the authored world from `map/data.js`: every game gets the
+  same sites and routes. See the static map below.
 - Every location has `weather`, `biome`, `hostility` (integer 1-100; 50 is neutral, higher
   is more dangerous), `level`, and bidirectional `connections[]`. A connection stores the
-  neighbour id and a distance in leagues (1-5). A biome's `levelRange` sets a location's
-  level; hostility sets event and encounter risk.
+  neighbour id and a distance in leagues (1-5). A biome's `levelRange` sets a generated
+  location's level; hostility sets event and encounter risk.
 - **Visit** sets the current location and rolls every enabled event for its biome plus a
   hostility-scaled encounter. It is only available for the current location or a direct
   route from it; reach other places by choosing Travel in the Actions panel.
@@ -214,18 +211,22 @@ them.
   `locations/data.js`. Generation order, graph repair and extra attributes live in
   `locations/locations.js`.
 
-## Map spawner
+## Static map
 
-- **Generate map** reads the random-location count, then asks the locations module for one
-  batch. Every map therefore has the same fixed tavern, castle and shack plus the requested
-  number of random locations.
-- The fixed landmarks and default count live in `map/data.js`. They are placeholders: a
-  tavern, a castle and a shack with no interiors or special actions yet.
+- The world lives in `map/data.js`: twelve authored sites (the tavern, castle and shack plus
+  nine wild sites) and thirteen authored routes. Every game loads the same map; there is no
+  random location count.
+- **Load static map** is idempotent. It charts the sites once, then installs the authored
+  routes; pressing it again reports that the map is already loaded and creates nothing.
 - `map` is a separate module. It never creates locations directly; it sends
-  `location:add` with the fixed definitions and records the resulting landmark ids.
+  `location:add` for the fixed sites and `location:link` for each authored route, then
+  emits `map:generated`.
 - Landmarks use the synthetic `Landmark` biome, so visiting one does not roll biome events.
   They are linked into the travel graph like any other location.
-- Generating again appends another batch; it does not replace the existing map.
+- The tavern, castle and shack declare an interior preset. The first visit generates a
+  room-and-corridor tile grid with the seeded RNG, stores it in the save and shows it under
+  the Locations panel. Later visits reuse the same layout.
+- Full content guide and terrain algorithm: `map/README.md`.
 
 ## Biome events
 

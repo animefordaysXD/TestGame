@@ -2,20 +2,18 @@
 
 **Repository:** <https://github.com/animefordaysXD/TestGame>
 
-**Last updated:** 2026-11-02
-**Current spec:** `ENGINE_SPEC.md` v1.8
-**Status:** working test page with a procedural map spawner (configurable random locations
-plus fixed tavern/castle/shack landmarks), a travel graph of connected locations,
-procedural locations with hostility and levels, hostility-modified biome events,
-hostility-driven encounters and loot, a main-character creator with ten base stats plus
-armor and a ten-part body, NPCs with the same stats, bodies, 30 named personality
-archetypes, relations and levels, basic player-first
-combat (Attack/Defend), an equipment module with body-part armor plus a weapon slot
-(damage, Strength requirement, armor piercing), weapon/armor types and five rarity tiers,
-five area actions
-with costs/outcomes/time, route-based timed travel with 5-minute event checks and
-pause/resume, real JSON save files (seed + baseline + changes) alongside the quick local
-save, and a live node-tree status page.
+**Last updated:** 2026-11-05
+**Current spec:** `ENGINE_SPEC.md` v1.9
+**Status:** working test page with a static authored world map (twelve sites, thirteen
+routes) plus procedural landmark interiors generated on first visit, a travel graph of
+connected locations, procedural locations with hostility and levels, hostility-modified biome
+events, hostility-driven encounters and loot, a main-character creator with ten base stats
+plus armor and a ten-part body, NPCs with the same stats, bodies, 30 named personality
+archetypes, relations and levels, basic player-first combat (Attack/Defend), an equipment
+module with body-part armor plus a weapon slot (damage, Strength requirement, armor piercing),
+weapon/armor types and five rarity tiers, five area actions with costs/outcomes/time,
+route-based timed travel with 5-minute event checks and pause/resume, real JSON save files
+(seed + baseline + changes) alongside the quick local save, and a live node-tree status page.
 
 This file is the starting point for a new AI session. Read it first, then `README.md`,
 `DESIGN.md` (what the game is and why), `ENGINE_SPEC.md` and `MODULES.md` (the per-module
@@ -62,8 +60,8 @@ Tests currently cover:
 - `test/locations.test.cjs` — location generation, uniqueness, bidirectional routes,
   graph invariants, legacy graph repair, reset, save/load.
 - `test/locations-disk.test.cjs` — Locations folder mirror using an in-memory mock.
-- `test/map.test.cjs` — map batch size, fixed tavern/castle/shack landmarks, batch ids,
-  `map:generated`, travel-graph linking, save/load and reset.
+- `test/map.test.cjs` — static sites and authored routes, idempotent `map:load`,
+  `map:generated`, procedural landmark interiors, seed determinism, save/load and reset.
 - `test/characters.test.cjs` — 30 personality archetypes (unique ids/names, five valid
   non-opposite traits, 0-100 behavior axes), NPC base stats, relations/levels,
   deterministic generation, save/clear, reset, legacy saves without stats or
@@ -132,7 +130,7 @@ Tests currently cover:
 | `combat` | `active`, `round`, `turn`, `player`, `enemy`, `defending`, `winner*`, `log[]` | basic player-first duels; weapon damage, Strength gating and armor piercing; Attack/Defend |
 | `locations` | `seed`, `createdAt`, `nextId`, `locations{}` (with `connections[]`), `currentId` | procedural locations with hostility/level, travel graph, visit rolls, JSON mirror |
 | `encounters` | `enemies{}`, `lastVisit`, `lastLoot` | hostility-scaled hostile spawns on visit and hostility-scaled loot on a winning fight |
-| `map` | `seed`, `size`, `total`, `lastGeneratedTick`, `lastGeneratedAt`, `landmarks{}` | map spawner: fixed tavern/castle/shack plus a configurable batch of random locations |
+| `map` | `version`, `loaded`, `seed`, `total`, `lastGeneratedTick`, `lastGeneratedAt`, `sites{}`, `landmarks{}`, `terrain{}` | static authored world: loads sites/routes once and generates procedural landmark interiors on first visit |
 | `actions` | `locationId`, `locationName`, `biomeKey`, `actions[]`, `lastAction` | five area actions with costs, outcomes, time and route-aware Travel |
 | `travel` | `active`, `paused`, `distance`, route, `elapsedMinutes`, `durationMinutes`, `checks`, `eventCount`, `lastEvent`, `lastCompleted` | 5-minute journey checks, event pause/resume, arrival handoff |
 
@@ -221,8 +219,8 @@ directly; see the content-editor section below.
   `level`, `connections[]`, `seed`, `createdAtTick`, `createdAt`.
 - Hostility 50 is neutral; biomes define a range. Level rolls from the biome `levelRange`.
   `locations/data.js` also owns `defaultHostility` (50) and `defaultLevel` (1).
-- `kind` is empty for random locations or `tavern`/`castle`/`shack` for fixed landmarks.
-  Landmarks use `biomeKey: "landmark"` and therefore roll no biome events.
+- `kind` is empty for ordinary locations or `tavern`/`castle`/`shack` for authored
+  landmarks. Landmarks use `biomeKey: "landmark"` and therefore roll no biome events.
 - Every new location links to the current area plus a random neighbour. A connection is
   `{ id, distance }` and is stored on both endpoints with the same distance; distance is
   1-5 leagues. `travelGraph.minutesPerDistance` (15) turns distance into journey minutes.
@@ -269,20 +267,26 @@ directly; see the content-editor section below.
 - The UI Visit status reports the encounter chance/roll and spawn count; `status.html`
   shows the last visit, active enemies and last loot.
 
-### Map spawner
+### Static map and interiors
 
-- `map/data.js` owns `defaultLocationCount` (20), the 0-100 range and the fixed landmarks:
-  a tavern (`The Broken Wheel`), a castle (`Greywatch Castle`) and a shack
-  (`Abandoned Shack`). These are placeholders and change freely.
-- `map:generate { count? }` clamps the count and fires one `location:add` with
-  `{ count, fixed, batch }`. The map module does not create locations itself.
-- Locations charts the fixed landmarks first, then the random count. Every map therefore
-  has exactly one tavern, castle and shack, linked into the same travel graph as the rest.
-- `map:generated` fires after the last `location:added` in the batch and reports the
-  landmark ids. The map slice stores `seed`, `size`, `total`, generation time and
-  `landmarks`.
-- The UI adds **Generate map** with a random-location count next to the manual **Add
-  location** buttons. Generating another map appends to the existing map.
+- `map/data.js` owns the whole world: `world.locations` (twelve authored sites with `key`,
+  `kind`, `name`, `biome`, `biomeKey`, `weather`, `hostility`, `level`, optional
+  `interior`), `world.routes` (`{ id, from, to, distance }`), `terrain.tiles`,
+  `terrain.legend` and `terrain.interiors` presets. The tavern, castle and shack are
+  landmarks; the other nine sites are wilds.
+- `map:load` is idempotent. It fires one `location:add { count: 0, fixed, batch }`; sites
+  carry `autoLink: false`, so the locations module adds no random routes. After the last
+  `location:added` the map fires `location:link` per authored route, then `map:generated`.
+  A second load reports `alreadyLoaded: true`. `map:generate` remains an alias.
+- The map slice stores `loaded`, `total`, `sites` (key -> location id), `landmarks`
+  (kind -> id) and `terrain` (location id -> generated interior). Save/load keeps all of it,
+  so reloading a save never duplicates the world.
+- On a landmark's first `location:visited`, the map builds a room-and-corridor grid with
+  `engine.rng`, stores the tile rows/counts/entrance and emits `map:terrainGenerated`.
+  Later visits reuse the stored grid. Terrain is display-only today: no movement, collision,
+  doors or loot.
+- The UI adds **Load static map**, a map status line, a terrain text grid and its legend.
+  `status.html` shows sites, landmarks, generated interiors and the map event catalog.
 
 ### Actions
 
@@ -479,6 +483,14 @@ UI Import save file
 
 ## Recent work
 
+- Static map and interiors: the world is now authored in `map/data.js` (twelve sites,
+  thirteen routes) and `map:load` is idempotent; `map:generate` is a legacy alias. Sites
+  use `autoLink: false` and the new `location:link` request installs the authored graph.
+  Landmarks generate a room-and-corridor interior on the first visit with `engine.rng`,
+  store it in `map.terrain` and reuse it across visits and saves. The UI gains **Load static
+  map**, a terrain grid and legend; `status.html` shows sites/landmarks/interiors; the editor
+  now edits the map (`world`, sites, routes, interior presets, tiles). All fourteen Node
+  test files pass.
 - Relations, levels and encounters: characters v0.6 stores `relation: { value, type }`
   (-100..100 with data-driven bands and type-specific high labels) and a level, exposes
   `relationFor`/`setRelation`/`adjustRelation`/`levelFor`, and supports spawn metadata and
@@ -619,9 +631,10 @@ UI Import save file
 
 ## Known limitations and quirks
 
-- The map spawner is a placeholder: fixed landmarks are ordinary locations with a
-  synthetic `Landmark` biome, no interior, no unique actions and no layout rules. It
-  appends on repeat generation rather than replacing the map.
+- The static map is authored content, not a placeholder: `map/data.js` fixes the sites and
+  routes for every game. Landmarks generate a room-and-corridor interior on first visit,
+  stored in the save; interiors are display-only (no movement, collision, doors or loot)
+  and there is no drawn atlas yet. Loading the map twice does not duplicate it.
 - Area actions resolve costs, one weighted outcome, time and travel, but have no
   requirements or skill checks yet. Travel follows direct routes in the location graph;
   a journey spends its route time in 5-minute checks.
@@ -666,11 +679,11 @@ UI Import save file
   route.
 - The real OS folder pickers are untested in a browser. The disk tests use an in-memory
   File System Access API mock. Chrome/Edge is required.
-- The content editor covers biome events, travel, armor, actions and character
-  names/traits/ages only. It cannot edit `map/data.js`, `locations/data.js`,
+- The content editor covers biome events, travel, equipment, actions, characters,
+  locations, encounters and the static map (`map/data.js`). It cannot edit
   `characters/statsData.js`, `characters/bodyData.js`, `combat/data.js`, `behaviorAxes`
-  or `personalities`, and it
-  cannot create a new biome without a matching `BIOMES` change in `editor/schemas.js`.
+  or `personalities`, and it cannot create a new biome without a matching `BIOMES` change
+  in `editor/schemas.js`.
 - The editor saves strict JSON. Opening a file with older JavaScript syntax works, but
   saving rewrites the object and drops comments inside it (the header comment is kept).
 - The editor's folder picker was tested with a mocked File System Access API; the real OS
@@ -695,8 +708,8 @@ UI Import save file
 
 ## Suggested next steps
 
-1. Rework the map generator: keep the world map static and use the procedural generator
-   for terrain inside landmarks (and later for travel).
+1. Turn the static map into visual terrain: movement and collision inside landmarks, or a
+   drawn route graph/atlas that uses the existing site keys and distances.
 2. Give travel interruptions choices (press on, turn back, fight) through new request/event
    pairs; keep travel resolution modular.
 3. Use stats in action and event checks (success/chance based on skill and difficulty)
@@ -737,32 +750,32 @@ and the hand-maintained branches in status.html. Commit only when asked; do not 
 explicit approval.
 
 Current build: core v0.2; characters v0.6; mainCharacter v0.6; equipment v0.4; locations v0.5;
-map v0.1; actions v0.3; travel v0.2; combat v0.2; encounters v0.1; save helper v0.1.
-Working: a procedural map
-spawner with a configurable random count and fixed tavern/castle/shack landmarks; a travel graph
-of connected locations with distances and route-based times; procedural locations with
-hostility and levels; hostility-modified biome events; hostility-driven encounters with
-hostility-scaled enemies and loot; shared stats (including Strength) and ten-part bodies; 30
-named NPC personality archetypes with traits and behavior profiles (data-only, no AI reads
-them yet) plus relation bands and levels; body-part armor plus a weapon slot, weapon/armor
-types, five rarity tiers, and armor/weapon stats feeding combat; five area actions with time,
-costs and weighted outcomes; route-based
-timed travel with 5-minute checks, event pause/resume and arrival through locations; basic
-player-first combat with weapon damage, Strength gating and armor piercing; real JSON save files
-(seed + baseline + changes) with legacy migration and unsafe-path guards, alongside quick
-localStorage saves; a read-only status tree; and a form-based content editor (`editor.html`)
-that is a tool, not a module. Fourteen Node test files are wired into npm test.
+map v0.2; actions v0.3; travel v0.2; combat v0.2; encounters v0.1; save helper v0.1.
+Working: a static authored world map (twelve sites, thirteen routes) with procedural
+landmark interiors generated on first visit; a travel graph of connected locations with
+distances and route-based times; procedural locations with hostility and levels;
+hostility-modified biome events; hostility-driven encounters with hostility-scaled enemies
+and loot; shared stats (including Strength) and ten-part bodies; 30 named NPC personality
+archetypes with traits and behavior profiles (data-only, no AI reads them yet) plus relation
+bands and levels; body-part armor plus a weapon slot, weapon/armor types, five rarity tiers,
+and armor/weapon stats feeding combat; five area actions with time, costs and weighted
+outcomes; route-based timed travel with 5-minute checks, event pause/resume and arrival
+through locations; basic player-first combat with weapon damage, Strength gating and armor
+piercing; real JSON save files (seed + baseline + changes) with legacy migration and
+unsafe-path guards, alongside quick localStorage saves; a read-only status tree; and a
+form-based content editor (`editor.html`) that is a tool, not a module. Fourteen Node test
+files are wired into npm test.
 
-Known gaps: the map spawner is a placeholder (landmarks are ordinary locations with no interiors
-or layout rules); actions and events have no requirements or skill checks; travel events are
-stat-only scenes with no choices or combat handoff; NPC relations and levels are stored but no
-dialogue/progression rule reads them; the graph has no coordinates or map view; most biomes have
-no live event; NPCs cannot equip and carry no weapon; combat has no flee, enemy AI, hit chance or
+Known gaps: landmark interiors are display-only (no movement, collision, doors or loot) and
+the world map has no drawn atlas; actions and events have no requirements or skill checks;
+travel events are stat-only scenes with no choices or combat handoff; NPC relations and
+levels are stored but no dialogue/progression rule reads them; most biomes have no live
+event; NPCs cannot equip and carry no weapon; combat has no flee, enemy AI, hit chance or
 variance; personality and behavior do not drive behaviour yet; body part status is structural
 only and no rule injures, heals or equips it; encounters depend on the player pressing Fight;
 the three-tier NPC model is only approximated by temp/named buckets.
 
-Suggested next step: rework the map generator so the world map is static and the procedural
-generator produces terrain inside landmarks (and later feeds travel). Ask what to build next;
-do not add unrequested scope.
+Suggested next step: give the generated interiors movement/collision (or draw the route
+graph) and reuse the terrain generator for travel. Ask what to build next; do not add
+unrequested scope.
 ```

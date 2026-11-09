@@ -43,6 +43,7 @@
   .stat-value { font-variant-numeric:tabular-nums; }
   .chars small.stats-line { font-family:"Segoe UI", system-ui, sans-serif; font-size:.72rem; font-variant-numeric:tabular-nums; margin-top:2px; }
   .chars small.body-line { font-family:"Segoe UI", system-ui, sans-serif; font-size:.72rem; margin-top:2px; }
+  .terrain { display:block; overflow:auto; margin:0 0 8px; padding:10px; border:1px solid var(--line); border-radius:6px; background:color-mix(in srgb, var(--line) 18%, transparent); font:12px/1.15 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:.08em; white-space:pre; }
   .combat { border:1px solid var(--line); border-radius:6px; padding:12px; margin-bottom:12px; }
   .combatants { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
   .combatant { display:flex; justify-content:space-between; gap:8px; padding:6px 8px; border:1px solid var(--line); border-radius:4px; font:600 .82rem/1.4 "Segoe UI", system-ui, sans-serif; font-variant-numeric:tabular-nums; }
@@ -156,22 +157,21 @@
 
   <h2>Locations <span class="seed" id="locSeed"></span></h2>
   <div class="bar">
-    <button class="primary" id="generateMap">Generate map</button>
-    <label for="mapSize">random locations</label>
-    <input type="number" id="mapSize" min="0" max="100" step="1" value="20">
-    <button id="addLocation">Add location</button>
-    <button id="addFiveLocations">Add 5 locations</button>
+    <button class="primary" id="loadMap">Load static map</button>
     <button id="locDisk">Connect Locations folder</button>
     <button id="reloadBiomeEvents">Reload biome events</button>
   </div>
-  <p class="meta" id="mapStatus">Map: not generated.</p>
-  <p class="meta">A generated map always includes the fixed tavern, castle and shack landmarks. Generate map uses a fresh batch; Add location stays a manual single spawn.</p>
+  <p class="meta" id="mapStatus">Map: not loaded.</p>
+  <p class="meta">The world map is fixed content in <code>map/data.js</code>: the same sites and routes every game. Loading it again never duplicates sites.</p>
+  <p class="meta">The tavern, castle and shack generate their interiors procedurally the first time you visit them; the layout is then kept in the save.</p>
   <p class="meta">JSON goes to <code>Locations/&lt;map seed&gt;/loc_0001.json</code> when the folder is connected.</p>
-  <p class="meta">Each charted location links to 1–2 others. A route's distance sets the journey time; the Travel action only offers linked destinations.</p>
+  <p class="meta">Authored routes set the travel graph. A route's distance sets the journey time; the Travel action only offers linked destinations.</p>
   <p class="meta">Biome events live in <code>locations/events/&lt;biome&gt;/events.json</code>. Each enabled event rolls its own chance on a visit.</p>
   <p class="meta" id="locEventStatus">Biome events: loading…</p>
   <ul class="chars" id="locations"></ul>
   <p class="meta" id="locVisitStatus">Visit a location to roll its biome events.</p>
+  <p class="meta" id="terrainStatus" hidden></p>
+  <pre class="terrain" id="mapTerrain" hidden></pre>
 
   <h2>Actions <span class="seed" id="actionArea"></span></h2>
   <p class="meta" id="actionStatus">Visit a location to load five actions.</p>
@@ -312,15 +312,32 @@
     $("locSeed").textContent = `map seed ${s.seed}`;
 
     const mapS = mapModule.status();
+    const siteIds = Object.entries(mapS.sites || {});
     const landmarkIds = Object.entries(mapS.landmarks || {});
-    $("mapStatus").textContent = mapS.lastGeneratedAt
-      ? `Map: ${mapS.size} random location${mapS.size === 1 ? "" : "s"} + ${landmarkIds.length} fixed landmark${landmarkIds.length === 1 ? "" : "s"} (${landmarkIds.map(([kind, id]) => `${kind} ${id}`).join(", ")}) · generated ${mapS.lastGeneratedAt}.`
-      : "Map: not generated. Set the random count and press Generate map.";
+    $("mapStatus").textContent = mapS.loaded
+      ? `Map: ${mapS.total} static site${mapS.total === 1 ? "" : "s"} · ${siteIds.length} charted · ${landmarkIds.length} landmark${landmarkIds.length === 1 ? "" : "s"} (${landmarkIds.map(([kind, id]) => `${kind} ${id}`).join(", ")}) · loaded ${mapS.lastGeneratedAt}.`
+      : "Map: not loaded. Press Load static map.";
 
     const current = s.currentId ? s.locations[s.currentId] : null;
     $("locVisitStatus").textContent = current
       ? `Current location: ${current.name} · level ${current.level ?? 1} · hostility ${current.hostility}/100 (${locationsModule.labelFor(current.hostility)}).`
       : "Visit a location to roll its biome events and encounters.";
+
+    const terrain = current ? mapModule.terrainFor(current.id) : null;
+    const terrainEl = $("mapTerrain"), terrainStatus = $("terrainStatus");
+    if (terrain) {
+      const legend = ((MapData.terrain && MapData.terrain.legend) || [])
+        .map((entry) => `${entry.tile} ${entry.label}`).join(" · ");
+      terrainStatus.textContent = `${terrain.label} · ${terrain.rooms} room${terrain.rooms === 1 ? "" : "s"} · ${terrain.width}×${terrain.height} · generated ${terrain.generatedAt}${legend ? " · " + legend : ""}`;
+      terrainStatus.hidden = false;
+      terrainEl.textContent = terrain.tiles.join("\n");
+      terrainEl.hidden = false;
+    } else {
+      terrainStatus.hidden = true;
+      terrainStatus.textContent = "";
+      terrainEl.hidden = true;
+      terrainEl.textContent = "";
+    }
 
     const ul = $("locations");
     ul.innerHTML = "";
@@ -954,6 +971,8 @@
   }));
   engine.on("event:location:added", renderLocations);
   engine.on("event:location:visited", renderLocations);
+  engine.on("event:map:generated", renderLocations);
+  engine.on("event:map:terrainGenerated", renderLocations);
 
   $("step").onclick = () => engine.step();
   $("play").onclick = () => engine.running ? engine.pause() : engine.run(300);
@@ -1150,11 +1169,7 @@
   renderChars();
 
   // ----- Locations panel -----
-  $("mapSize").value = String(MapData.defaultLocationCount);
-  $("mapSize").max = String(MapData.maxLocationCount);
-  $("generateMap").onclick = () => act("map:generate", { count: Number($("mapSize").value) });
-  $("addLocation").onclick = () => act("location:add");
-  $("addFiveLocations").onclick = () => act("location:add", { count: 5 });
+  $("loadMap").onclick = () => act("map:load");
   $("locDisk").onclick = async () => {
     try {
       const info = await locationsModule.connectFolder();

@@ -179,7 +179,7 @@
   const END = window.EncounterData || { spawn: { bands: [] }, loot: { rarityBands: [] } };
   const CD = window.CharacterData || { traits: [], opposites: [], personalities: [], behaviorAxes: [] };
   const BD = window.CharacterBodyData || { parts: [], defaultStatus: "intact" };
-  const MD = window.MapData || { landmarks: [], defaultLocationCount: 20, minLocationCount: 0, maxLocationCount: 100 };
+  const MD = window.MapData || { world: { locations: [], routes: [] }, terrain: { interiors: [], legend: [] } };
 
   const $ = (id) => document.getElementById(id);
   const svg = $("tree");
@@ -215,7 +215,7 @@
         },
         locations: { seed: 0, createdAt: "", nextId: 1, locations: {}, currentId: null },
         encounters: { enemies: {}, lastVisit: null, lastLoot: null },
-        map: { seed: 0, size: 0, total: 0, lastGeneratedTick: null, lastGeneratedAt: "", landmarks: {} },
+        map: { version: 2, loaded: false, seed: 0, total: 0, lastGeneratedTick: null, lastGeneratedAt: "", sites: {}, landmarks: {}, terrain: {} },
         actions: { locationId: null, locationName: "", biomeKey: "", actions: [], lastAction: null },
         equipment: { nextId: 1, items: {}, equippedByPart: {}, equippedWeaponId: null },
         travel: {
@@ -533,18 +533,36 @@
       node("Rules", `${(END.spawn && END.spawn.bands || []).length} spawn bands · ${(END.loot && END.loot.rarityBands || []).length} loot bands · higher hostility means more enemies, lower relations and stronger loot · character:spawn → combat:ended → equipment:add`, "content")
     ], encEnemies.length || encVisit ? "built" : "empty");
 
-    /* Map spawner --------------------------------------------------------- */
+    /* Map ------------------------------------------------------------------ */
     const mapState = modules.map || {};
+    const mapSites = mapState.sites || {};
     const mapLandmarks = mapState.landmarks || {};
+    const mapTerrain = mapState.terrain || {};
+    const mapSiteItems = Object.entries(mapSites).map(([key, id]) => {
+      const loc = locations.find((entry) => entry.id === id);
+      const site = (MD.world && MD.world.locations || []).find((entry) => entry.key === key);
+      return node(
+        loc ? loc.name : key,
+        `${id} · ${key}${site && site.interior ? ` · interior ${site.interior}` : ""}${loc ? ` · ${loc.biome} · hostility ${loc.hostility}` : ""}`,
+        loc ? "state" : "warn"
+      );
+    });
     const mapLandmarkItems = Object.entries(mapLandmarks).map(([kind, id]) => {
       const loc = locations.find((entry) => entry.id === id);
       return node(kind, `${id}${loc ? " · " + loc.name : ""}`, loc ? "state" : "warn");
     });
-    const mapBranch = node("map", `v0.1 · ${mapState.size ? `${mapState.size} random + ${mapLandmarkItems.length} fixed` : "not generated"}`, "module", [
-      node("Last batch", mapState.lastGeneratedAt ? `${mapState.size} random · ${mapState.total} total · ${mapState.lastGeneratedAt}` : "no map generated yet", mapState.lastGeneratedAt ? "state" : "warn"),
-      group(`Fixed landmarks (${mapLandmarkItems.length})`, "tavern, castle and shack are guaranteed on every map", mapLandmarkItems, "state"),
-      node("Rules", `${(MD.landmarks || []).length} fixed landmark definition(s) · default ${MD.defaultLocationCount ?? 20} random · range ${MD.minLocationCount ?? 0}–${MD.maxLocationCount ?? 100}`, "content")
-    ], mapState.lastGeneratedAt ? "built" : "empty");
+    const mapTerrainItems = Object.values(mapTerrain).map((terrain) => node(
+      terrain.label || terrain.interior || terrain.locationId,
+      `${terrain.locationId} · ${terrain.width}×${terrain.height} · ${terrain.rooms} room${terrain.rooms === 1 ? "" : "s"} · generated ${terrain.generatedAt || "—"}`,
+      "state"
+    ));
+    const mapBranch = node("map", `v0.2 · ${mapState.loaded ? `${mapState.total} static sites` : "not loaded"}`, "module", [
+      node("Static world", mapState.loaded ? `${mapState.total} sites · ${Object.keys(mapLandmarks).length} landmarks · loaded ${mapState.lastGeneratedAt || "—"}` : "no static map loaded yet", mapState.loaded ? "state" : "warn"),
+      group(`Sites (${mapSiteItems.length})`, "authored in map/data.js · fixed routes replace random links", mapSiteItems, "state"),
+      group(`Landmarks (${mapLandmarkItems.length})`, "tavern, castle and shack generate interiors on visit", mapLandmarkItems, "state"),
+      group(`Generated interiors (${mapTerrainItems.length})`, "procedural room-and-corridor terrain, stored in the save", mapTerrainItems, "state"),
+      node("Rules", `${(MD.world && MD.world.locations || []).length} authored site(s) · ${(MD.world && MD.world.routes || []).length} authored route(s) · ${(MD.terrain && MD.terrain.interiors || []).length} interior preset(s) · map:load → location:add → location:link → map:terrainGenerated`, "content")
+    ], mapState.loaded ? "built" : "empty");
 
     /* Actions ------------------------------------------------------------- */
     const actionState = modules.actions || {};
@@ -614,7 +632,7 @@
     const contentBranch = node("Content data", "plain data files — no generation logic", "content", [
       node("characters/data.js", `${givenNames} given names · ${(CD.surnames || []).length} surnames · ${(CD.traits || []).length} traits · ${(CD.opposites || []).length} opposite pairs · ${(CD.personalities || []).length} personalities · ${(CD.behaviorAxes || []).length} behavior axes · ${(CD.relations && CD.relations.bands || []).length} relation bands · ${(CD.relations && CD.relations.types || []).length} relation types · ages ${(CD.ageRange || []).join("–")}`, "content"),
       node("characters/bodyData.js", `${bodyDefs().length} body parts · ${bodyDefs().filter((part) => part.vital).length} vital · default status ${BD.defaultStatus || "intact"} · equipment targets part keys`, "content"),
-      node("map/data.js", `${(MD.landmarks || []).length} fixed landmarks · default ${MD.defaultLocationCount ?? 20} random · range ${MD.minLocationCount ?? 0}–${MD.maxLocationCount ?? 100}`, "content"),
+      node("map/data.js", `${(MD.world && MD.world.locations || []).length} static sites · ${(MD.world && MD.world.routes || []).length} authored routes · ${(MD.terrain && MD.terrain.interiors || []).length} interior presets · procedural landmarks`, "content"),
       node("characters/statsData.js", `${ST.stats.length} stats · ${ST.stats.filter((d) => d.kind === "resource").length} resources · ${ST.stats.filter((d) => d.kind === "skill").length} skills · ${ST.stats.filter((d) => d.kind === "equipment").length} equipment`, "content"),
       node("mainCharacterData.js", `portrait ${MC.imageSize ?? 256}px · upload ≤ ${Math.round((MC.maxUploadBytes || 0) / 1048576)} MB · ${(MC.genders || []).length} genders`, "content"),
       node("locations/data.js", `${biomes.length} biomes · ${weatherTotal} weather entries · default hostility ${LOC.defaultHostility ?? 50} · level ranges on every biome · ${(LOC.namePrefixes || []).length} prefixes · ${(LOC.nameSuffixes || []).length} suffixes · ${(LOC.namePatterns || []).length} name patterns · ${(LOC.travelGraph && LOC.travelGraph.minutesPerDistance) || 15} min per league`, "content"),
@@ -635,7 +653,9 @@
         node("character:save", "UI → characters.save() · data { id }", "event"),
         node("character:clearTemp", "UI/encounters → characters.clearTemp() · data { source? }", "event"),
         node("location:add", "UI/map → locations.add() · data { count?, fixed?, batch? }", "event"),
-        node("map:generate", "UI → map.generate() · data { count? }", "event"),
+        node("location:link", "map → locations.link() · data { fromId, toId, distance }", "event"),
+        node("map:load", "UI → map.load() · loads the authored static map once", "event"),
+        node("map:generate", "legacy alias for map:load", "event"),
         node("location:changed", "UI → characters clears Temporary Spawn", "event"),
         node("action:choose", "UI → actions.choose() · data { actionId, destinationId?, distance?, durationMinutes? }", "event"),
         node("travel:start", "UI → travel.start() · destination, distance and duration snapshot", "event"),
@@ -654,8 +674,9 @@
         node("character:saved", "characters · { id }", "event"),
         node("character:tempCleared", "characters · { ids, source? }", "event"),
         node("character:relationChanged", "characters · { id, before, after, delta, relation, label, band }", "event"),
-        node("location:added", "locations · { id, level, hostility, kind?, batch? }", "event"),
-        node("map:generated", "map · { batch, count, total, landmarks }", "event"),
+        node("location:added", "locations · { id, level, hostility, key?, kind?, batch? }", "event"),
+        node("map:generated", "map · { batch, total, sites, landmarks, routes, alreadyLoaded? }", "event"),
+        node("map:terrainGenerated", "map · { locationId, locationName, interior, label, width, height, rooms }", "event"),
         node("location:visited", "locations · { id, name, biome, biomeKey, weather, hostility, level }", "event"),
         node("location:event", "locations · event data + effects, effective chancePercent and hostilityModifier", "event"),
         node("actions:loaded", "actions · five actions for the area", "event"),
@@ -686,7 +707,7 @@
     const testsBranch = node("Tests", "Node only · npm test", "test", [
       node("locations.test.cjs", "generation · routes/graph · uniqueness · reset · save/load", "test"),
       node("locations-disk.test.cjs", "Locations folder mirror (in-memory mock)", "test"),
-      node("map.test.cjs", "fixed landmarks · batch size · map:generated · save/load · reset", "test"),
+      node("map.test.cjs", "static sites/routes · map:generated · procedural interiors · determinism · save/load · reset", "test"),
       node("characters.test.cjs", "personalities · traits/opposites · behavior · stats · relations/levels · generation · legacy load", "test"),
       node("relations.test.cjs", "relation bands/types · high label · adjustRelation · events", "test"),
       node("encounters.test.cjs", "hostility spawn bands · enemy relation/level · source clearing · combat loot", "test"),

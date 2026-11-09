@@ -312,11 +312,12 @@ Build playable slices, not systems in isolation. Each slice is a game you can pl
 
 **Progress:** slice 1 is mostly built. The travel graph (connections, distances and
 distance-based times), five area actions with time, costs and weighted outcomes, timed travel
-with interruption checks, and biome rolls on arrival exist. A placeholder map spawner now
-creates a configurable batch of random locations plus fixed tavern/castle/shack landmarks;
-real layouts and atlas slots are still missing. Hostility-driven risk and events
-for most biomes are still missing. Slice 2 is partly built: body-part armor, one weapon slot and
-five item rarities exist with the armor bridge, but money, companions and beasts do not.
+with interruption checks, and biome rolls on arrival exist. The world map is now static:
+`map/data.js` authors twelve sites and thirteen routes, and the tavern, castle and shack
+generate procedural interiors on first visit. Drawn layouts and atlas slots are still
+missing. Hostility-driven risk and events for most biomes are still missing. Slice 2 is
+partly built: body-part armor, one weapon slot and five item rarities exist with the armor
+bridge, but money, companions and beasts do not.
 
 ## 5. Status snapshot
 
@@ -328,16 +329,16 @@ five item rarities exist with the armor bridge, but money, companions and beasts
 | equipment v0.4: body-part armor, one weapon slot (swords/spears/axes/maces), weapon and armor types, five rarity tiers, inventory, equip/unequip/destroy | working |
 | actions v0.3: five area actions with time, costs, outcomes, route-aware Travel | working |
 | travel v0.2: 5-minute checks, event pause/resume, arrival handoff | working |
-| locations v0.4: procedural locations and a travel graph with distances; fixed `kind` landmarks | working |
-| map v0.1: placeholder map spawner with a configurable random batch and fixed tavern/castle/shack | working |
+| locations v0.5: procedural locations and a travel graph with distances; fixed `kind` landmarks and authored static sites | working |
+| map v0.2: static authored world (sites + routes) and procedural landmark interiors generated on first visit | working |
 | combat v0.2: weapon damage, Strength gating and armor piercing; armor reduces every hit | working |
 | biome events | 1 of 10 biomes has a live event |
 | **save files v0.1 (seed + changes, JSON export/import)** | working |
-| **content editor v0.1 (`editor.html`, tool — not a module)** | working for biome events, travel, equipment (armor, weapons, types, rarity bands), actions, character names/traits/ages |
+| **content editor v0.2 (`editor.html`, tool — not a module)** | working for biome events, travel, equipment (armor, weapons, types, rarity bands), actions, character names/traits/ages, locations, encounters, and the static map (sites, routes, interiors, tiles) |
 | character injury, healing and body-part effects | not started (body shape + status field exist) |
 | atlas, slots, keyed RNG, founding/razing | not started |
 | family, inheritance, courts, dialogue, NPC event checker | not started |
-| map rendering | not started |
+| map rendering | interiors render as a tile grid; no drawn atlas or overworld movement |
 
 ## 6. Open questions
 

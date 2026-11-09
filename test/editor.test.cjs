@@ -101,6 +101,12 @@ assert.ok(ctx.bodyPartKeys.includes("torso") && ctx.bodyPartKeys.includes("leftH
 assert.ok(ctx.equipmentKeys.includes("leather_cuirass"));
 assert.ok(ctx.equipmentKeys.includes("iron_shortsword"), "the editor knows weapon keys");
 assert.ok(ctx.rarities.includes("unique"));
+assert.ok(ctx.mapSiteKeys.includes("broken_wheel"), "the editor knows the static map sites");
+assert.ok(ctx.mapInteriorKeys.includes("tavern"), "the editor knows the interior presets");
+assert.deepEqual(S.optionsFor("mapSites", ctx)[0], { value: "broken_wheel", label: "broken_wheel" },
+  "map-site options use their keys");
+assert.deepEqual(S.optionsFor("interiors", ctx).find((o) => o.value === "castle"),
+  { value: "castle", label: "castle" }, "interior options use their keys");
 assert.deepEqual(ctx.weaponTypes, ["sword", "spear", "axe", "mace"], "the editor knows the weapon types");
 assert.deepEqual(ctx.armorTypes, ["cloth", "leather", "mail", "plate", "scale"], "the editor knows the armor types");
 assert.deepEqual(S.optionsFor("rarities", ctx).find((o) => o.value === "common"),
@@ -238,6 +244,14 @@ const has = (list, level, re) => list.some((i) => i.level === level && re.test(i
   assert.ok(has(problems((d) => { d.characters.opposites.push(["Brave", "Brave"]); }), "error", /twice/));
   assert.ok(has(problems((d) => { d.characters.ageRange = [50, 20]; }), "error", /Age range/));
   assert.ok(has(problems((d) => { d.characters.traits = ["A", "B"]; d.characters.opposites = []; }), "error", /at least five/));
+  assert.ok(has(problems((d) => { d.map.world.locations.push({ ...d.map.world.locations[0] }); }), "error", /used twice/), "site keys are unique");
+  assert.ok(has(problems((d) => { d.map.world.locations[0].interior = "tower"; }), "error", /Unknown interior preset/), "sites use known interiors");
+  assert.ok(has(problems((d) => { d.map.world.routes[0].to = "nowhere"; }), "error", /not a site/), "routes join existing sites");
+  assert.ok(has(problems((d) => { d.map.world.routes[0].distance = 0; }), "error", /at least 1/), "route distance is positive");
+  assert.ok(has(problems((d) => { d.map.terrain.interiors[0].width = 4; }), "error", /9 to 61/), "interior width stays in range");
+  assert.ok(has(problems((d) => { d.map.terrain.tiles.wall = "##"; }), "error", /exactly one character/), "tiles are single characters");
+  const brokenMap = problems((d) => { delete d.map.world; });
+  assert.ok(has(brokenMap, "error", /needs a world object/), "a broken map is reported, not thrown");
   const bad = problems((d) => { d["biome:forest"] = { biome: "forest" }; });
   assert.ok(has(bad, "error", /"events" list/), "a broken file is reported, not thrown");
   // issues point at the entry so the page can show them next to it
