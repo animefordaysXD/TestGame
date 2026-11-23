@@ -236,9 +236,12 @@ directly; see the content-editor section below.
   `depth + 1`.
 - The **Visit** button and `visitLocation()` only allow a direct route from the current
   location (or any location when none is current). `visit()` itself stays permissive so
-  travel arrival and tests can call it directly.- Biome event content lives in `locations/events/<biomeKey>/events.json` for all ten
-  biomes. Each file has a disabled copy/paste template. `tundra/events.json` has a
-  working 10% Snowfall event that costs 10 stamina and uses `hostilityModifier: 1`.
+  travel arrival and tests can call it directly.
+- Biome event content lives in `locations/events/<biomeKey>/events.json` for all ten
+  biomes. Each file has a disabled copy/paste template. Working examples exist in tundra
+  (**Snowfall**), forest (**Wolf Pack**), grassland (**Wild Berries**), hills
+  (**Old Cairn**), coast (**Washed-Up Crate**), desert (**Heat Haze**) and swamp
+  (**Miasma**), covering both positive and negative modifiers.
 - Each event's effective chance is
   `baseChance * clamp(1 + hostilityModifier * ((hostility - 50) / 50), 0, 5)`. Positive
   modifiers make bad events likelier in dangerous places; negative modifiers make good
@@ -483,6 +486,10 @@ UI Import save file
 
 ## Recent work
 
+- Biome events: added working events to six more biomes — forest **Wolf Pack**, grassland
+  **Wild Berries**, hills **Old Cairn**, coast **Washed-Up Crate**, desert **Heat Haze**
+  and swamp **Miasma** — joining tundra **Snowfall**. They mix positive and negative
+  effects and modifiers; jungle, mountains and wasteland still hold only templates.
 - Static map and interiors: the world is now authored in `map/data.js` (twelve sites,
   thirteen routes) and `map:load` is idempotent; `map:generate` is a legacy alias. Sites
   use `autoLink: false` and the new `location:link` request installs the authored graph.
@@ -769,8 +776,8 @@ files are wired into npm test.
 Known gaps: landmark interiors are display-only (no movement, collision, doors or loot) and
 the world map has no drawn atlas; actions and events have no requirements or skill checks;
 travel events are stat-only scenes with no choices or combat handoff; NPC relations and
-levels are stored but no dialogue/progression rule reads them; most biomes have no live
-event; NPCs cannot equip and carry no weapon; combat has no flee, enemy AI, hit chance or
+levels are stored but no dialogue/progression rule reads them; jungle, mountains and
+wasteland still have only event templates; NPCs cannot equip and carry no weapon; combat has no flee, enemy AI, hit chance or
 variance; personality and behavior do not drive behaviour yet; body part status is structural
 only and no rule injures, heals or equips it; encounters depend on the player pressing Fight;
 the three-tier NPC model is only approximated by temp/named buckets.

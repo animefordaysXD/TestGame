@@ -80,8 +80,9 @@ Copy this object into a biome's `events` array, give it a unique `id`, set
 }
 ```
 
-The tundra file includes a working 10% **Snowfall** example that costs 10 stamina and
-uses `hostilityModifier: 1`, so it becomes more likely in dangerous tundra.
+Several biome files include working examples: tundra **Snowfall**, forest **Wolf Pack**,
+grassland **Wild Berries**, hills **Old Cairn**, coast **Washed-Up Crate**, desert
+**Heat Haze** and swamp **Miasma**. They show both positive and negative modifiers.
 
 ## Editing
 

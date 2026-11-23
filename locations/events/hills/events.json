@@ -2,6 +2,24 @@
   "biome": "hills",
   "events": [
     {
+      "id": "hills_old_cairn",
+      "name": "Old Cairn",
+      "enabled": true,
+      "chancePercent": 8,
+      "hostilityModifier": 0,
+      "text": "A weathered cairn marks an old boundary. You pause to study the faint carvings and leave with a clearer mind.",
+      "effects": [
+        {
+          "stat": "intelligence",
+          "delta": 1
+        },
+        {
+          "stat": "mana",
+          "delta": 2
+        }
+      ]
+    },
+    {
       "id": "hills_template",
       "name": "Template event",
       "enabled": false,

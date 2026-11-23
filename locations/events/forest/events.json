@@ -2,6 +2,24 @@
   "biome": "forest",
   "events": [
     {
+      "id": "forest_wolf_pack",
+      "name": "Wolf Pack",
+      "enabled": true,
+      "chancePercent": 10,
+      "hostilityModifier": 1,
+      "text": "A wolf pack shadows you through the trees. You lose them, but not before a hard run leaves you bruised and breathless.",
+      "effects": [
+        {
+          "stat": "stamina",
+          "delta": -8
+        },
+        {
+          "stat": "hp",
+          "delta": -4
+        }
+      ]
+    },
+    {
       "id": "forest_template",
       "name": "Template event",
       "enabled": false,

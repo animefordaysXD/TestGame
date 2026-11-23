@@ -60,7 +60,7 @@ global.fetch = async (url) => {
     weather: "Snow", hostility: 60, seed: s.seed, createdAtTick: 0, createdAt: engine.now.text
   };
   s.locations.loc_9002 = {
-    id: "loc_9002", name: "Quiet Woods", biome: "Forest", biomeKey: "forest",
+    id: "loc_9002", name: "Quiet Jungle", biome: "Jungle", biomeKey: "jungle",
     weather: "Clear", hostility: 20, seed: s.seed, createdAtTick: 0, createdAt: engine.now.text
   };
 
@@ -108,7 +108,7 @@ global.fetch = async (url) => {
   assert.equal(locationEvents.length, 1);
   assert.equal(statEvents.length, 1);
 
-  // The forest file contains only a disabled template.
+  // The jungle file still contains only a disabled template.
   engine.rng.next = () => 0.0;
   const forestVisit = await locations.visit("loc_9002");
   engine.flush();

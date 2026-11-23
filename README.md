@@ -238,8 +238,9 @@ them.
   event likelier in dangerous places; negative makes a helpful event fade; 0 ignores
   hostility.
 - `enabled: false` marks a copy/paste template; change it to `true` and edit the text.
-- The tundra file includes a working **Snowfall** event: 10% base chance, -10 stamina,
-  `hostilityModifier: 1`.
+- Several biome files include working examples: tundra **Snowfall**, forest **Wolf Pack**,
+  grassland **Wild Berries**, hills **Old Cairn**, coast **Washed-Up Crate**, desert
+  **Heat Haze** and swamp **Miasma**. Each uses `hostilityModifier` to swing with danger.
 - Effects support any base stat (`hp`, `stamina`, `mana`, `war`, `diplomacy`,
   `personalCombat`, `moneyManagement`, `intrigue`, `intelligence`); unknown stats are
   kept in the event data for future modules.

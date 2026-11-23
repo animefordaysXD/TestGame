@@ -2,12 +2,30 @@
   "biome": "coast",
   "events": [
     {
+      "id": "coast_washed_up_crate",
+      "name": "Washed-Up Crate",
+      "enabled": true,
+      "chancePercent": 7,
+      "hostilityModifier": -0.5,
+      "text": "A cracked crate lies half-buried in the sand. Inside you find a few coins and a dry length of rope.",
+      "effects": [
+        {
+          "stat": "moneyManagement",
+          "delta": 1
+        },
+        {
+          "stat": "stamina",
+          "delta": 2
+        }
+      ]
+    },
+    {
       "id": "coast_template",
       "name": "Template event",
       "enabled": false,
       "chancePercent": 10,
       "hostilityModifier": 0,
-      "text": "Replace this with something that happens in the coast.",
+      "text": "Replace this with something that happens on the coast.",
       "effects": []
     }
   ]

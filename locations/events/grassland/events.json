@@ -2,6 +2,24 @@
   "biome": "grassland",
   "events": [
     {
+      "id": "grassland_wild_berries",
+      "name": "Wild Berries",
+      "enabled": true,
+      "chancePercent": 12,
+      "hostilityModifier": -1,
+      "text": "A thicket of ripe berries grows beside the path. You eat your fill and pocket a handful for later.",
+      "effects": [
+        {
+          "stat": "stamina",
+          "delta": 8
+        },
+        {
+          "stat": "hp",
+          "delta": 2
+        }
+      ]
+    },
+    {
       "id": "grassland_template",
       "name": "Template event",
       "enabled": false,

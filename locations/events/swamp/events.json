@@ -2,6 +2,24 @@
   "biome": "swamp",
   "events": [
     {
+      "id": "swamp_miasma",
+      "name": "Miasma",
+      "enabled": true,
+      "chancePercent": 12,
+      "hostilityModifier": 1,
+      "text": "A pocket of foul air hangs over the water. You cover your mouth and hurry through, but the stench lingers.",
+      "effects": [
+        {
+          "stat": "hp",
+          "delta": -6
+        },
+        {
+          "stat": "stamina",
+          "delta": -4
+        }
+      ]
+    },
+    {
       "id": "swamp_template",
       "name": "Template event",
       "enabled": false,

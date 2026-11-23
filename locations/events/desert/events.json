@@ -2,6 +2,24 @@
   "biome": "desert",
   "events": [
     {
+      "id": "desert_heat_haze",
+      "name": "Heat Haze",
+      "enabled": true,
+      "chancePercent": 10,
+      "hostilityModifier": 1,
+      "text": "The air shimmers and the horizon doubles. You press on through the heat, but the sun takes its toll.",
+      "effects": [
+        {
+          "stat": "stamina",
+          "delta": -10
+        },
+        {
+          "stat": "hp",
+          "delta": -3
+        }
+      ]
+    },
+    {
       "id": "desert_template",
       "name": "Template event",
       "enabled": false,

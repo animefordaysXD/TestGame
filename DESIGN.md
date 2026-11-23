@@ -332,7 +332,7 @@ bridge, but money, companions and beasts do not.
 | locations v0.5: procedural locations and a travel graph with distances; fixed `kind` landmarks and authored static sites | working |
 | map v0.2: static authored world (sites + routes) and procedural landmark interiors generated on first visit | working |
 | combat v0.2: weapon damage, Strength gating and armor piercing; armor reduces every hit | working |
-| biome events | 1 of 10 biomes has a live event |
+| biome events | 7 of 10 biomes have a live event |
 | **save files v0.1 (seed + changes, JSON export/import)** | working |
 | **content editor v0.2 (`editor.html`, tool — not a module)** | working for biome events, travel, equipment (armor, weapons, types, rarity bands), actions, character names/traits/ages, locations, encounters, and the static map (sites, routes, interiors, tiles) |
 | character injury, healing and body-part effects | not started (body shape + status field exist) |
