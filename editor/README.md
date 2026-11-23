@@ -2,7 +2,8 @@
 
 `editor.html` is a form-based editor for the game's content: biome events, travel events and
 tuning, equipment items (armor, weapons, types, rarity tiers), area actions, NPC names and
-traits, locations and encounters, and the static world map. It replaces hand-editing data files and asking an AI to write each entry. It is a tool,
+traits, character creation (backgrounds, origins, focuses), locations and encounters, and the
+static world map. It replaces hand-editing data files and asking an AI to write each entry. It is a tool,
 not a game module: it owns no state and the game does not load it.
 
 ## Using it

@@ -156,6 +156,7 @@
 <script src="characters/data.js"></script>
 <script src="characters/bodyData.js"></script>
 <script src="characters/mainCharacterData.js"></script>
+<script src="characters/creatorData.js"></script>
 <script src="equipment/data.js"></script>
 <script src="locations/data.js"></script>
 <script src="map/data.js"></script>
@@ -170,6 +171,7 @@
   "use strict";
 
   const MC = window.MainCharacterData || {};
+  const CRD = window.CharacterCreatorData || { settings: {}, backgrounds: [], origins: [], focuses: [] };
   const ST = window.CharacterStatsData || { stats: [] };
   const LOC = window.LocationData || { biomes: [] };
   const ACT = window.LocationActionsData || { default: [], biomes: {} };
@@ -214,6 +216,7 @@
           startedAtTick: null, startedAt: "", endedAtTick: null, endedAt: "", log: []
         },
         locations: { seed: 0, createdAt: "", nextId: 1, locations: {}, currentId: null },
+        creator: { lastCreated: null },
         encounters: { enemies: {}, lastVisit: null, lastLoot: null },
         map: { version: 2, loaded: false, seed: 0, total: 0, lastGeneratedTick: null, lastGeneratedAt: "", sites: {}, landmarks: {}, terrain: {} },
         actions: { locationId: null, locationName: "", biomeKey: "", actions: [], lastAction: null },
@@ -406,6 +409,8 @@
     const mcChildren = [];
     if (mc) {
       mcChildren.push(node(mc.name || "(unnamed)", `${mc.gender || "?"} · age ${mc.age ?? "?"} · id ${mc.id || "main"}`, "state"));
+      if (mc.creator) mcChildren.push(node("Starting build",
+        `${mc.creator.backgroundName || mc.creator.background || "?"} / ${mc.creator.originName || mc.creator.origin || "?"} / ${mc.creator.focusName || mc.creator.focus || "?"} · ${(mc.creator.equipment || []).length} starting item(s)`, "state"));
       mcChildren.push(group("Stats", statLine(mcStats), mcRows.map(({ def, value, max }) =>
         node(def.label, value === null ? "not set" : `${value}/${max}`, "state")
       ), "state"));
@@ -421,7 +426,20 @@
     const mcSummary = mc && hpRow && staRow
       ? `HP ${hpRow.value ?? "—"}/${hpRow.max} · Stamina ${staRow.value ?? "—"}/${staRow.max}`
       : "not created";
-    const mainCharacter = node("mainCharacter", `v0.6 · ${mcSummary}`, "module", mcChildren, mc ? "built" : "empty");
+    const mainCharacter = node("mainCharacter", `v0.7 · ${mcSummary}`, "module", mcChildren, mc ? "built" : "empty");
+
+    /* Character creator ---------------------------------------------------- */
+    const creatorState = modules.creator || {};
+    const created = creatorState.lastCreated || null;
+    const creatorBranch = node("creator", `v0.1 · ${created ? created.name : "no build yet"}`, "module", [
+      node("Last build", created
+        ? `${created.name} · ${created.backgroundName || created.background} / ${created.originName || created.origin} / ${created.focusName || created.focus}`
+        : "no character created through the builder", created ? "state" : "warn"),
+      node("Starting stats", created && created.stats ? statLine(created.stats) : "—", "state"),
+      group(`Starting equipment (${created ? (created.equipment || []).length : 0})`, created ? "auto-equipped when free" : "none",
+        created ? (created.equipment || []).map((key) => node(key, "granted through equipment:add", "state")) : [], "state"),
+      node("Rules", `${(CRD.backgrounds || []).length} backgrounds · ${(CRD.origins || []).length} origins · ${(CRD.focuses || []).length} focuses · resources start at ${(CRD.settings && CRD.settings.resourceStartPercent) ?? 80}% · max ${(CRD.settings && CRD.settings.maxStartingItems) ?? 6} items · creator:create → mainCharacter:create + equipment:add`, "content")
+    ], created ? "built" : "empty");
 
     /* Equipment ----------------------------------------------------------- */
     const equipState = modules.equipment || {};
@@ -613,9 +631,9 @@
       node("Rules", "UI advances 5-minute ticks · travel:event pauses · Continue resumes · completion calls locations.visit", "content")
     ], travelActive || travelDone ? "built" : "empty");
 
-    const modulesBranch = node("Modules", "9 registered · event-driven · one slice each", "state", [
-      chars, mainCharacter, equipmentBranch, combatBranch, locationsBranch, encountersBranch, mapBranch, actionsBranch, travelBranch
-    ], "9");
+    const modulesBranch = node("Modules", "10 registered · event-driven · one slice each", "state", [
+      chars, mainCharacter, creatorBranch, equipmentBranch, combatBranch, locationsBranch, encountersBranch, mapBranch, actionsBranch, travelBranch
+    ], "10");
 
     /* Content ------------------------------------------------------------- */
     const biomeNodes = biomes.map((biome) => {
@@ -635,15 +653,16 @@
       node("map/data.js", `${(MD.world && MD.world.locations || []).length} static sites · ${(MD.world && MD.world.routes || []).length} authored routes · ${(MD.terrain && MD.terrain.interiors || []).length} interior presets · procedural landmarks`, "content"),
       node("characters/statsData.js", `${ST.stats.length} stats · ${ST.stats.filter((d) => d.kind === "resource").length} resources · ${ST.stats.filter((d) => d.kind === "skill").length} skills · ${ST.stats.filter((d) => d.kind === "equipment").length} equipment`, "content"),
       node("mainCharacterData.js", `portrait ${MC.imageSize ?? 256}px · upload ≤ ${Math.round((MC.maxUploadBytes || 0) / 1048576)} MB · ${(MC.genders || []).length} genders`, "content"),
+      node("characters/creatorData.js", `${(CRD.backgrounds || []).length} backgrounds · ${(CRD.origins || []).length} origins · ${(CRD.focuses || []).length} focuses · resources ${(CRD.settings && CRD.settings.resourceStartPercent) ?? 80}% · max ${(CRD.settings && CRD.settings.maxStartingItems) ?? 6} starting items`, "content"),
       node("locations/data.js", `${biomes.length} biomes · ${weatherTotal} weather entries · default hostility ${LOC.defaultHostility ?? 50} · level ranges on every biome · ${(LOC.namePrefixes || []).length} prefixes · ${(LOC.nameSuffixes || []).length} suffixes · ${(LOC.namePatterns || []).length} name patterns · ${(LOC.travelGraph && LOC.travelGraph.minutesPerDistance) || 15} min per league`, "content"),
       node("actions/data.js", `${defaultActions.length} default actions · ${overrides.length} biome override(s) · ${defaultActions.reduce((sum, action) => sum + ((action.outcomes || []).length), 0)} outcomes`, "content"),
       node("travel/data.js", `${(TRD.events || []).length} travel events · ${TRD.chancePercent ?? 0}% per check · every ${TRD.minutesPerCheck ?? 5} min · ${Object.keys(TRD.chanceByBiome || {}).length} biome override(s)`, "content"),
       node("equipment/data.js", `${(EQD.items || []).filter((i) => i.kind !== "weapon").length} armor + ${(EQD.items || []).filter((i) => i.kind === "weapon").length} weapons · ${(EQD.rarities || []).length} rarities · ${bodyDefs().length} body parts · max armor ${EQD.maxArmor ?? 100} · auto-equip ${EQD.autoEquip === false ? "off" : "on"}`, "content"),
       node("combat/data.js", `${(CBD.actions || []).length} actions · attack ${(CBD.attack && CBD.attack.stat) || "personalCombat"} × ${(CBD.attack && CBD.attack.multiplier) || 1} · defend armor × ${(CBD.defend && CBD.defend.armorMultiplier) || 2}`, "content"),
       node("encounters/data.js", `${(END.spawn && END.spawn.bands || []).length} spawn bands · max ${END.spawn && END.spawn.maxPerVisit || 4} per visit · ${(END.loot && END.loot.rarityBands || []).length} loot rarity bands · drop ${END.loot && END.loot.dropChancePercent || 0}% + hostility`, "content"),
-      node("editor/schemas.js", "content-editor model · 7 editable types · strict JSON round-trip · no state or events", "content"),
+      node("editor/schemas.js", "content-editor model · 8 editable types · strict JSON round-trip · no state or events", "content"),
       group(`Biome events (${biomes.length} files)`, eventsSummary, biomeNodes, "content"),
-      node("Docs", "DESIGN.md · IDEAS.md · ENGINE_SPEC.md v1.5 · MODULES.md · HANDOFF.md · README.md · save/README.md · editor/README.md · actions/README.md · equipment/README.md · travel/README.md · combat/README.md · locations/README.md · map/README.md · locations/events/README.md · characters/mainChar/README.md", "content")
+      node("Docs", "DESIGN.md · IDEAS.md · ENGINE_SPEC.md v1.10 · MODULES.md · HANDOFF.md · README.md · save/README.md · editor/README.md · actions/README.md · equipment/README.md · travel/README.md · combat/README.md · locations/README.md · map/README.md · locations/events/README.md · characters/mainChar/README.md", "content")
     ], "data");
 
     /* Events -------------------------------------------------------------- */
@@ -651,6 +670,8 @@
       group("Request events", "fired by the UI (and future modules)", [
         node("character:spawn", "UI/encounters → characters.spawn() · data { source?, level?, relation?, locationId?, hostility? }", "event"),
         node("character:save", "UI → characters.save() · data { id }", "event"),
+        node("creator:create", "UI → creator.create() · data { draft } validates background, origin, focus and profile", "event"),
+        node("mainCharacter:create", "creator → mainCharacter.save() · data { name, gender, age, stats, creator }", "event"),
         node("character:clearTemp", "UI/encounters → characters.clearTemp() · data { source? }", "event"),
         node("location:add", "UI/map → locations.add() · data { count?, fixed?, batch? }", "event"),
         node("location:link", "map → locations.link() · data { fromId, toId, distance }", "event"),
@@ -690,6 +711,7 @@
         node("travel:completed", "travel · arrival summary; UI calls locations.visit", "event"),
         node("travel:cancelled", "travel · abandoned journey summary", "event"),
         node("mainCharacter:saved", "mainCharacter · identity only (no image)", "event"),
+        node("creator:created", "creator · { name, background, origin, focus, stats, equipment }", "event"),
         node("mainCharacter:statChanged", "mainCharacter · any non-equipment stat: stat, delta, value, max", "event"),
         node("mainCharacter:armorChanged", "mainCharacter · armor mirrored from equipment", "event"),
         node("equipment:added", "equipment · { itemId, key, name, kind, rarity, weaponType|armorType, parts, stats, equipped, source }", "event"),
@@ -701,7 +723,7 @@
         node("combat:defended", "combat · player brace, armor and reduction", "event"),
         node("combat:ended", "combat · winner, loser, rounds", "event")
       ], "event")
-    ], "44");
+    ], "47");
 
     /* Docs & tests -------------------------------------------------------- */
     const testsBranch = node("Tests", "Node only · npm test", "test", [
@@ -712,6 +734,7 @@
       node("relations.test.cjs", "relation bands/types · high label · adjustRelation · events", "test"),
       node("encounters.test.cjs", "hostility spawn bands · enemy relation/level · source clearing · combat loot", "test"),
       node("main-character.test.cjs", "validation · image · base stats · effects · mirror", "test"),
+      node("creator.test.cjs", "starting stats · equipment grants · profile validation · save/load · reset", "test"),
       node("biome-events.test.cjs", "JSON loading · visit rolls · hostility modifiers · stat effects · reset", "test"),
       node("actions.test.cjs", "five actions · outcomes · costs · route time · travel · equipment", "test"),
       node("equipment.test.cjs", "body-part inventory · auto-equip · type/rarity filters · overlap swap · summed armor · combat · reset · save/load migration", "test"),
@@ -720,7 +743,7 @@
       node("save.test.cjs", "capture · exact restore · v0 migration · unsafe paths · format guard", "test"),
       node("editor.test.cjs", "formatter · byte-identical round-trip · schema checks · outcome ids · new data sections", "test"),
       node("serve.cjs", "static server on 127.0.0.1:8765", "test")
-    ], "14");
+    ], "15");
 
     const rootSub = live.state
       ? `${live.source} · ${clockText(time)} · tick ${time.tick}`

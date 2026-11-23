@@ -51,6 +51,8 @@ mercenary, a beast tamer or elven scout, or a highborn noble with court games, a
 
 ## Roles and backgrounds
 
+- [Built] Character creator with background, origin and focus choices that add starting stats and equipment, plus an editor-editable data file — build, 2026-11-23
+- [Idea] Point-buy or free stat allocation alongside the authored backgrounds — PM, 2026-11-23
 - [Decided] Roles are nothing more than a background; being a beast tamer does not force taming, it gives an advantage — Jo, 2026-10-25
 - [Decided] Starting backgrounds limited to a few, each with different starting bonuses — Jo, 2026-10-25
 - [Idea] Beast tamer — Jo, 2026-10-25
@@ -140,6 +142,7 @@ mercenary, a beast tamer or elven scout, or a highborn noble with court games, a
 
 ## Log
 
+- 2026-11-23: Character creator built: `characters/creatorData.js` defines backgrounds, origins and focuses that add starting stats and equipment. The first save uses the build through `creator:create`; later profile saves keep it. MainCharacter v0.7 accepts `data.stats`/`data.creator`, the UI has a live preview, and the editor edits the creator data. Summary refreshed.
 - 2026-11-05: Static map and interiors built: `map/data.js` now authors twelve sites and thirteen routes for every game, `map:load` is idempotent, and landmarks generate a room-and-corridor interior on first visit that is stored in the save. Sites use `autoLink: false` plus the new `location:link` request. The UI, status page and editor expose the map. Summary refreshed.
 - 2026-11-01: Equipment v0.4 built: every item now has a data-driven weapon or armor type. Weapons use sword/spear/axe/mace, armor uses cloth/leather/mail/plate/scale, and a five-rarity axe family fills out the new family. `equipment:add` filters by type, event payloads carry the type, old saves fall back to the catalogue, and the game, status page and editor show and validate it. Summary refreshed.
 - 2026-10-31: Equipment v0.3 built: swords, spears and maces fill one weapon slot with base damage, a Strength requirement and armor piercing. Five rarity tiers (Common, Uncommon, Rare, Legendary, Unique) define strict stat bands, and `equipment:add` accepts kind/rarity filters while `equipment:remove` destroys items. Combat v0.2 adds weapon damage, Strength gating and armor piercing; armor now reduces every hit and Defend doubles it. The game UI and editor were updated. Summary refreshed.

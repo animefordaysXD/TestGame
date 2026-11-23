@@ -1,4 +1,4 @@
-/* Editor schemas v0.2 — what each content type looks like. No DOM; tested in Node.
+/* Editor schemas v0.3 — what each content type looks like. No DOM; tested in Node.
    To add a content type: add its file to FILES, add a section (or sections) to SECTIONS, add a
    check to VALIDATORS and, if useful, a preview. The page (editor.html) needs no changes.
    See editor/README.md. */
@@ -16,6 +16,7 @@
     { id: "equipment", path: "equipment/data.js", format: "js", global: "EquipmentData" },
     { id: "actions", path: "actions/data.js", format: "js", global: "LocationActionsData" },
     { id: "characters", path: "characters/data.js", format: "js", global: "CharacterData" },
+    { id: "creator", path: "characters/creatorData.js", format: "js", global: "CharacterCreatorData" },
     { id: "locations", path: "locations/data.js", format: "js", global: "LocationData" },
     { id: "map", path: "map/data.js", format: "js", global: "MapData" },
     { id: "encounters", path: "encounters/data.js", format: "js", global: "EncounterData" },
@@ -68,6 +69,13 @@
     { key: "text", label: "Text", type: "textarea", rows: 2 },
     effectsField("Effects"),
     { key: "equipmentKey", label: "Awards item", type: "select", source: "equipmentKeys", allowEmpty: true, omitIfEmpty: true }
+  ];
+  const creatorOptionFields = [
+    { key: "key", label: "Key", type: "text", mono: true, help: "Stable id used by the creator module." },
+    { key: "name", label: "Name", type: "text" },
+    { key: "description", label: "Description", type: "textarea", rows: 2, help: "Shown beside the choice in the character creator." },
+    effectsField("Starting stat changes", "Added to the base stats at creation. Resources start partly full, so positive and negative changes both matter."),
+    { key: "equipment", label: "Starting equipment", type: "multiselect", source: "equipmentKeys", help: "Granted through equipment:add and auto-equipped when the slot is free." }
   ];
   const actionFields = [
     { key: "id", label: "Id", type: "text", mono: true },
@@ -521,6 +529,60 @@
       preview(_, ctx, data) {
         const l = data.characters.levels || {};
         return { notes: [`NPC levels are clamped to ${l.min ?? 1}–${l.max ?? 100}; new NPCs start at ${l.default ?? 1}.`, "Full leveling comes later; encounters set enemy levels for now."] };
+      }
+    },
+    {
+      id: "creator-settings", group: "Characters", title: "Character creation", file: "creator", kind: "form", at: ["settings"],
+      fields: [
+        { key: "resourceStartPercent", label: "Starting resources (%)", type: "number", min: 0, max: 100, step: 1, help: "HP, Stamina and Mana start at this share of their maximum." },
+        { key: "maxStartingItems", label: "Maximum starting items", type: "number", min: 1, step: 1, help: "Caps the combined equipment from background, origin and focus." }
+      ],
+      preview(_, ctx, data) {
+        const s = (data.creator && data.creator.settings) || {};
+        const backgrounds = (data.creator && data.creator.backgrounds) || [];
+        const origins = (data.creator && data.creator.origins) || [];
+        const focuses = (data.creator && data.creator.focuses) || [];
+        return { notes: [
+          `${backgrounds.length} backgrounds, ${origins.length} origins and ${focuses.length} focuses.`,
+          `Resources start at ${s.resourceStartPercent ?? 80}% of maximum; at most ${s.maxStartingItems ?? 6} items are granted.`,
+          "The first main-character save uses the chosen build; later saves keep the existing stats."
+        ] };
+      }
+    },
+    {
+      id: "creator-backgrounds", group: "Characters", title: "Backgrounds", file: "creator", kind: "list", at: ["backgrounds"],
+      fields: creatorOptionFields, label: (entry) => entry.name || entry.key || "(unnamed)",
+      sub: (entry) => `${(entry.stats || []).length} stat change${(entry.stats || []).length === 1 ? "" : "s"} · ${(entry.equipment || []).length} item${(entry.equipment || []).length === 1 ? "" : "s"}`,
+      newItem: (ctx, list) => ({ key: C.uniqueId(list.map((entry) => entry.key), "new_background"), name: "New background", description: "", stats: [], equipment: [] }),
+      preview(entry, ctx) {
+        return { chips: chipsFor(entry.stats, ctx), notes: [
+          entry.description || "No description.",
+          entry.equipment && entry.equipment.length ? `Starts with: ${entry.equipment.join(", ")}.` : "No starting equipment."
+        ] };
+      }
+    },
+    {
+      id: "creator-origins", group: "Characters", title: "Origins", file: "creator", kind: "list", at: ["origins"],
+      fields: creatorOptionFields, label: (entry) => entry.name || entry.key || "(unnamed)",
+      sub: (entry) => `${(entry.stats || []).length} stat change${(entry.stats || []).length === 1 ? "" : "s"} · ${(entry.equipment || []).length} item${(entry.equipment || []).length === 1 ? "" : "s"}`,
+      newItem: (ctx, list) => ({ key: C.uniqueId(list.map((entry) => entry.key), "new_origin"), name: "New origin", description: "", stats: [], equipment: [] }),
+      preview(entry, ctx) {
+        return { chips: chipsFor(entry.stats, ctx), notes: [
+          entry.description || "No description.",
+          entry.equipment && entry.equipment.length ? `Starts with: ${entry.equipment.join(", ")}.` : "No starting equipment."
+        ] };
+      }
+    },
+    {
+      id: "creator-focuses", group: "Characters", title: "Focuses", file: "creator", kind: "list", at: ["focuses"],
+      fields: creatorOptionFields, label: (entry) => entry.name || entry.key || "(unnamed)",
+      sub: (entry) => `${(entry.stats || []).length} stat change${(entry.stats || []).length === 1 ? "" : "s"} · ${(entry.equipment || []).length} item${(entry.equipment || []).length === 1 ? "" : "s"}`,
+      newItem: (ctx, list) => ({ key: C.uniqueId(list.map((entry) => entry.key), "new_focus"), name: "New focus", description: "", stats: [], equipment: [] }),
+      preview(entry, ctx) {
+        return { chips: chipsFor(entry.stats, ctx), notes: [
+          entry.description || "No description.",
+          entry.equipment && entry.equipment.length ? `Starts with: ${entry.equipment.join(", ")}.` : "No starting equipment."
+        ] };
       }
     },
     {
@@ -1019,6 +1081,50 @@
             else seen.set(value, key);
           }
         }
+      }
+    },
+    creator(file, d, ctx, out) {
+      const settings = makeReporter(out, "creator-settings");
+      const s = d.settings && typeof d.settings === "object" ? d.settings : null;
+      if (!s) settings("error", "The file needs a settings object.", null, "settings");
+      else {
+        if (!Number.isInteger(s.resourceStartPercent) || s.resourceStartPercent < 0 || s.resourceStartPercent > 100)
+          settings("error", "Starting resources must be a whole number from 0 to 100.", null, "resourceStartPercent");
+        if (!Number.isInteger(s.maxStartingItems) || s.maxStartingItems < 1)
+          settings("error", "Maximum starting items must be a whole number of at least 1.", null, "maxStartingItems");
+      }
+
+      for (const [field, noun] of [["backgrounds", "Background"], ["origins", "Origin"], ["focuses", "Focus"]]) {
+        const report = makeReporter(out, `creator-${field}`);
+        const list = d[field];
+        if (!Array.isArray(list) || !list.length) {
+          report("error", `The file needs at least one ${noun.toLowerCase()}.`, null, field);
+          continue;
+        }
+        checkIds(list, "key", report, noun);
+        list.forEach((entry, i) => {
+          if (!entry || typeof entry !== "object") return report("error", `${noun} #${i + 1} is not an object.`, i);
+          if (typeof entry.name !== "string" || !entry.name.trim()) report("warn", `Give the ${noun.toLowerCase()} a name.`, i, "name");
+          if (typeof entry.description !== "string" || !entry.description.trim())
+            report("warn", `Give the ${noun.toLowerCase()} a description.`, i, "description");
+          checkEffects(entry.stats, "Starting stat change", ctx, report, i);
+          if (!Array.isArray(entry.equipment)) {
+            report("error", "Starting equipment must be a list.", i, "equipment");
+          } else {
+            const seen = new Set();
+            for (const key of entry.equipment) {
+              if (typeof key !== "string" || !key.trim()) report("error", "Equipment keys must be non-empty strings.", i, "equipment");
+              else if (!ctx.equipmentKeys.includes(key)) report("error", `Unknown equipment key "${key}".`, i, "equipment");
+              else if (seen.has(key)) report("warn", `Equipment "${key}" is listed twice.`, i, "equipment");
+              else seen.add(key);
+            }
+            if (s && Number.isInteger(s.maxStartingItems) && entry.equipment.length > s.maxStartingItems)
+              report("warn", `This ${noun.toLowerCase()} grants more than the ${s.maxStartingItems}-item cap.`, i, "equipment");
+          }
+          const changes = Array.isArray(entry.stats) ? entry.stats.length : 0;
+          const items = Array.isArray(entry.equipment) ? entry.equipment.length : 0;
+          if (!changes && !items) report("warn", `This ${noun.toLowerCase()} changes nothing.`, i);
+        });
       }
     },
     encounters(file, d, ctx, out) {

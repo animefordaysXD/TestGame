@@ -1,4 +1,4 @@
-# Modular Text-RPG Engine — Spec v1.9
+# Modular Text-RPG Engine — Spec v1.10
 
 Plain JS/HTML, no build step, no dependencies. A small core runs the clock, event bus,
 RNG, state and save/load. All gameplay lives in modules that own one state slice and talk
@@ -132,6 +132,8 @@ Slices are JSON-safe. Never cache a slice object; `load()` replaces the whole st
 | character:saved | characters | `{ id }` |
 | character:tempCleared | characters | `{ ids, source? }` |
 | character:relationChanged | characters | `{ id, name, before, after, delta, relation, label, band, previousLabel, source }` |
+| creator:create (request) | UI | `{ draft }` with `name`, `gender`, `age`, `image?`, `background`, `origin`, `focus` |
+| mainCharacter:create (request) | creator | full profile plus `stats`, `equipment` keys and `creator` metadata |
 | location:add (request) | UI, map module | `{ count?, fixed?, batch? }`; `fixed` is an array of `{ key?, kind?, name, biome?, biomeKey?, weather?, hostility?, level?, autoLink? }` site definitions |
 | location:link (request) | map module | `{ fromId, toId, distance }`; links two existing locations as a two-way route |
 | location:added | locations | `{ id, key?, level, hostility, kind?, batch? }` |
@@ -174,6 +176,7 @@ Slices are JSON-safe. Never cache a slice object; `load()` replaces the whole st
 | mainCharacter:saved | mainCharacter | `{ id, name, gender, age }` (no image) |
 | mainCharacter:statChanged | mainCharacter | `{ id, stat, delta, value, max, eventId }` (any non-equipment base stat) |
 | mainCharacter:armorChanged | mainCharacter | `{ id, stat: "armor", delta, value, previous, itemId, itemName }` |
+| creator:created | creator | `{ name, background, backgroundName, origin, originName, focus, focusName, stats, equipment }` |
 
 ## Module registry
 
@@ -181,13 +184,14 @@ Slices are JSON-safe. Never cache a slice object; `load()` replaces the whole st
 |---|---|---|---|
 | core | none | `time`, `eventLog` | clock, state, save/load, event checking |
 | characters | none | `nextId`, `named{}`, `temp{}` | NPC generator with personality, behavior, relation, level, base stats and body; Named NPC / Temporary Spawn |
-| mainCharacter | none | `character` | player character; base stats, body; profile image; event/action/travel effects; JSON mirror |
+| mainCharacter | none | `character` | player character; base stats, body, starting-build metadata; profile image; event/action/travel effects; JSON mirror |
 | combat | none | `active`, `round`, `turn`, `player`, `enemy`, `defending`, `winner*`, `log[]` | basic player-first duel; attack/defend |
 | locations | none | `seed`, `createdAt`, `nextId`, `locations{}`, `currentId` | procedural locations with hostility/level, routes, visit/event checker, JSON mirror |
 | map | locations | `version`, `loaded`, `seed`, `total`, `lastGeneratedTick`, `lastGeneratedAt`, `sites{}`, `landmarks{}`, `terrain{}` | loads the authored static world once and generates procedural terrain inside landmarks |
 | actions | none | `locationId`, `locationName`, `biomeKey`, `actions[]`, `lastAction` | five area actions with costs, outcomes, time and route-based travel |
 | travel | none | `active`, `paused`, `distance`, route, `elapsedMinutes`, `durationMinutes`, `checks`, `eventCount`, `lastEvent`, `lastCompleted` | 5-minute journey checks; pause/resume on travel events |
 | equipment | none | `nextId`, `items{}`, `equippedByPart{}`, `equippedWeaponId` | main-character armor on body parts plus one weapon slot; weapon/armor types; mirrors summed armor into the character stat |
+| creator | mainCharacter, equipment | `lastCreated` | data-driven starting builds: background, origin and focus choose stats and equipment |
 | encounters | characters, equipment | `enemies{}`, `lastVisit`, `lastLoot` | hostility-driven hostile spawns on visit and hostility-scaled loot on a winning fight |
 
 `save/gameSave.js` is not a module and has no registry row: it owns no slice and emits no
@@ -325,7 +329,7 @@ files directly; see `editor/README.md`.
   missing parts, keeps saved statuses and unknown fields on known parts, and keeps unknown
   extra parts. Old saves without a body gain the full ten-part body on load.
 
-## Main character module v0.6
+## Main character module v0.7
 
 - Files: `characters/mainCharacterData.js`, `characters/mainCharacter.js`, plus the shared
   `characters/bodyData.js` and `characters/body.js`.
@@ -356,6 +360,12 @@ mainCharacter: {
     "moneyManagement": 10, "intrigue": 10, "intelligence": 10
   },
   "body": { "parts": { "head": { "key": "head", "status": "intact" } } },
+  "creator": {
+    "background": "soldier", "backgroundName": "Soldier",
+    "origin": "village", "originName": "Village",
+    "focus": "blade", "focusName": "Blade",
+    "equipment": ["chain_shirt", "iron_shortsword"]
+  },
   "createdAtTick": 0,
   "createdAt": "1000-01-01 06:00",
   "updatedAtTick": 4,
@@ -367,9 +377,14 @@ mainCharacter: {
   resized to `MainCharacterData.imageSize` (256 px) and compressed as WebP/PNG.
   `imageSource` is `"upload"` or `"default"`; a missing image gets an initials avatar
   generated by `defaultAvatar(name)` as an SVG data URL.
-- `stats` uses the shared **Base stats** block. A new main character starts from the
-  `start` values; profile edits preserve the current values. Stats are included in the
-  normal save and in `main.json`.
+- `stats` uses the shared **Base stats** block. A profile-only main character starts from the
+  `start` values; a creator-built character supplies its own starting block (resources start
+  at a configured percentage and the chosen background/origin/focus changes are applied).
+  Profile edits preserve the current values. Stats are included in the normal save and in
+  `main.json`.
+- `creator` is optional metadata for the UI/status page. It stores the chosen keys and
+  display names plus the granted equipment keys; the equipment module remains the source of
+  truth for the actual items.
 - `body` uses the shared **Character body** shape. Profile edits preserve saved part
   statuses; a missing or partial body is completed on load/save. It is included in
   `main.json`.
@@ -393,9 +408,13 @@ mainCharacter: {
   clamps to 0..`hpMax`. The combat module already announces that hit, so this does not
   emit a second `mainCharacter:statChanged` line.
 - `save(data, depth = 0)` validates name, gender and age, stores the character, and
-  emits `mainCharacter:saved`. The image is deliberately **not** included in the event
+  emits `mainCharacter:saved`. `data.stats` replaces the starting stat block (the creator
+  uses this); `data.creator` stores the build summary. Without either, profile edits keep
+  the current stats and build. The image is deliberately **not** included in the event
   data, so the event log and save file stay small. The UI calls `save()` directly and
   then `engine.flush()`.
+- It also listens for `mainCharacter:create`, which the creator module fires with the full
+  validated plan; this is the event-driven path to a creator-built character.
 - `prepareImage(file)` is browser-only: validates type/size, crops, resizes, compresses.
 - `toJSON()` returns the current character as pretty JSON.
 - `connectFolder()` picks the folder containing `index.html` and uses
@@ -403,11 +422,47 @@ mainCharacter: {
 - `writeToFolder()` rewrites the mirror from state. `folderConnected` reports whether a
   folder handle is held.
 - No tick generator. `init()` creates the slice and subscribes once to `location:event`,
-  `action:resolved`, `travel:event`, `equipment:equipped` / `equipment:unequipped` and
-  `combat:damage`; reset clears the character but keeps those single subscriptions.
-- UI on the test page: name, gender, age, image picker with preview, a stat grid
-  (ten base stats plus armor), a Body grid, **Save main character**, and **Connect
-  mainChar folder**. NPC cards show a compact stat line and body line.
+  `action:resolved`, `travel:event`, `equipment:equipped` / `equipment:unequipped`,
+  `combat:damage` and `mainCharacter:create`; reset clears the character but keeps those
+  single subscriptions.
+- UI on the test page: name, gender, age, background, origin, focus, image picker with
+  preview, a live build preview, a stat grid (ten base stats plus armor), a Body grid,
+  **Create character** / **Save profile**, and **Connect mainChar folder**. NPC cards show
+  a compact stat line and body line.
+
+## Character creator module v0.1
+
+- Files: `characters/creatorData.js`, `characters/creator.js`.
+- Slice: `{ lastCreated: null }` or a JSON-safe summary of the last build.
+- Content:
+
+```js
+{
+  settings: { resourceStartPercent: 80, maxStartingItems: 6 },
+  backgrounds: [{ key, name, description, stats: [{ stat, delta }], equipment: [key] }],
+  origins:    [ ... same shape ... ],
+  focuses:    [ ... same shape ... ]
+}
+```
+
+- The creator adds the chosen background, origin and focus `stats` deltas to the base
+  stats. Resource stats start at `resourceStartPercent` of their max, so positive and
+  negative changes both matter. Skills start from `statsData.js`, with the deltas applied;
+  all values are clamped to their definitions. `armor` is never changed here.
+- Starting equipment is the concatenation of the three option `equipment` lists, de-duped
+  and capped by `maxStartingItems`. `create()` fires `mainCharacter:create` first, then one
+  `equipment:add { key, source: "creator" }` per item, then `creator:created`. Equipment's
+  normal auto-equip and armor bridge therefore run against the new character.
+- `preview(draft)` returns the chosen options, computed stats and equipment keys without
+  touching state. It does not validate the profile, so the UI can update while the player
+  types. `validate(draft)` checks the profile (name/gender/age rules from
+  `mainCharacterData.js`) and the option keys, returning the event payload. `create()`
+  calls `validate()`.
+- The UI's first **Create character** save uses this path; later saves call
+  `mainCharacter.save()` and keep the existing stats/equipment. `creator:create` is the
+  event request used by the UI, and `creator:created` reports the build.
+- No RNG and no tick generator. Reset clears `lastCreated`; load normalises old saves
+  without the slice. The editor edits `characters/creatorData.js`.
 
 ## Combat module v0.2
 
@@ -906,6 +961,8 @@ characters/
   statsData.js
   mainCharacter.js
   mainCharacterData.js
+  creator.js
+  creatorData.js
   mainChar/
     README.md
     main.json        (written on folder connect/save)
@@ -943,6 +1000,7 @@ test/
   characters.test.cjs
   relations.test.cjs
   main-character.test.cjs
+  creator.test.cjs
   biome-events.test.cjs
   actions.test.cjs
   travel.test.cjs
@@ -968,6 +1026,10 @@ test/
   drawn atlas, site coordinates or overworld movement. Landmark interiors are a rendered
   tile grid with no movement, collision, doors or loot; the generator can be reused for
   travel terrain later.
+- Character creation is a fixed set of authored background/origin/focus choices, not a
+  point-buy system. It has no reroll, no custom option authoring in the UI beyond the data
+  file, and no progression after creation. A creator-built character cannot be rebuilt
+  without starting a new world or editing the save.
 - The page's **Visit** button requires a direct route from the current location; the
   module's `visit()` remains permissive for tests and arrival handoffs.
 - Travel events are generic interruptions with stat effects. They do not start combat,

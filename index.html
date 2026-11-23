@@ -102,6 +102,17 @@
       <label>Age
         <input type="number" id="mcAge" min="1" max="120" step="1">
       </label>
+      <label>Background
+        <select id="mcBackground"></select>
+      </label>
+      <label>Origin
+        <select id="mcOrigin"></select>
+      </label>
+      <label>Focus
+        <select id="mcFocus"></select>
+      </label>
+      <p class="meta" id="mcBuildPreview">Choose a build to preview its stats.</p>
+      <p class="meta">The first save uses these choices for starting stats and equipment. Later saves only edit the profile.</p>
       <div class="bar">
         <button class="primary" id="mcSave">Save main character</button>
         <button id="mcFolder">Connect mainChar folder</button>
@@ -199,7 +210,9 @@
 <script src="characters/body.js"></script>
 <script src="characters/characters.js"></script>
 <script src="characters/mainCharacterData.js"></script>
+<script src="characters/creatorData.js"></script>
 <script src="characters/mainCharacter.js"></script>
+<script src="characters/creator.js"></script>
 <script src="equipment/data.js"></script>
 <script src="equipment/equipment.js"></script>
 <script src="locations/data.js"></script>
@@ -225,6 +238,7 @@
     e.register(createCharactersModule());
     e.register(createMainCharacterModule());
     e.register(createEquipmentModule());
+    e.register(createCreatorModule());
     e.register(createLocationsModule());
     e.register(createMapModule());
     e.register(createActionsModule());
@@ -239,6 +253,7 @@
   const chars = engine.modules.get("characters");
   const mainCharModule = engine.modules.get("mainCharacter");
   const equipmentModule = engine.modules.get("equipment");
+  const creatorModule = engine.modules.get("creator");
   const locationsModule = engine.modules.get("locations");
   const mapModule = engine.modules.get("map");
   const travelModule = engine.modules.get("travel");
@@ -707,6 +722,54 @@
     $("mcGender").append(option);
   }
 
+  function fillCreatorSelect(id, options) {
+    const select = $(id);
+    select.innerHTML = "";
+    for (const entry of options) {
+      const option = document.createElement("option");
+      option.value = entry.key;
+      option.textContent = entry.name;
+      option.title = entry.description || entry.name;
+      select.append(option);
+    }
+  }
+  fillCreatorSelect("mcBackground", creatorModule.backgrounds());
+  fillCreatorSelect("mcOrigin", creatorModule.origins());
+  fillCreatorSelect("mcFocus", creatorModule.focuses());
+
+  function creatorDraft() {
+    return {
+      name: $("mcName").value,
+      gender: $("mcGender").value,
+      age: $("mcAge").value,
+      image: pendingMainImage,
+      background: $("mcBackground").value,
+      origin: $("mcOrigin").value,
+      focus: $("mcFocus").value
+    };
+  }
+
+  function equipmentLabel(key) {
+    const item = (window.EquipmentData && Array.isArray(EquipmentData.items))
+      ? EquipmentData.items.find((entry) => entry.key === key) : null;
+    return item ? item.name : key;
+  }
+
+  function renderCreatorPreview() {
+    const preview = $("mcBuildPreview");
+    try {
+      const plan = creatorModule.preview(creatorDraft());
+      const stats = statDisplay(plan.stats)
+        .filter(({ def }) => def.kind !== "equipment")
+        .map(({ def, value, max }) => `${def.short} ${value}/${max}`)
+        .join(" · ");
+      const gear = plan.equipment.map(equipmentLabel);
+      preview.textContent = `${plan.background.name} · ${plan.origin.name} · ${plan.focus.name} — ${stats}${gear.length ? ` · starts with ${gear.join(", ")}` : ""}`;
+    } catch (error) {
+      preview.textContent = error.message;
+    }
+  }
+
   function renderMainStats() {
     const c = engine.state.modules.mainCharacter.character;
     const grid = $("mcStats");
@@ -759,14 +822,22 @@
     $("mcName").value = c ? c.name : "";
     $("mcGender").value = c ? c.gender : (mcData.genders[0] || "female");
     $("mcAge").value = c ? c.age : mcData.defaultAge;
+    $("mcBackground").value = c && c.creator && c.creator.background ? c.creator.background : $("mcBackground").options[0]?.value;
+    $("mcOrigin").value = c && c.creator && c.creator.origin ? c.creator.origin : $("mcOrigin").options[0]?.value;
+    $("mcFocus").value = c && c.creator && c.creator.focus ? c.creator.focus : $("mcFocus").options[0]?.value;
     $("mcPreview").src = (c && c.image) || mainCharModule.defaultAvatar(c ? c.name : "Main Character");
     $("mcImage").value = "";
     $("mcFolder").textContent = mainCharModule.folderConnected ? "mainChar folder connected" : "Connect mainChar folder";
+    $("mcSave").textContent = c ? "Save profile" : "Create character";
+    const build = c && c.creator
+      ? ` · ${c.creator.backgroundName || c.creator.background} / ${c.creator.originName || c.creator.origin} / ${c.creator.focusName || c.creator.focus}`
+      : "";
     $("mcStatus").textContent = c
-      ? `Saved: ${c.name} · ${c.age} · ${c.gender}${mainCharModule.folderConnected ? " · folder connected" : ""}`
+      ? `Saved: ${c.name} · ${c.age} · ${c.gender}${build}${mainCharModule.folderConnected ? " · folder connected" : ""}`
       : "No main character saved yet.";
     renderMainStats();
     renderMainBody();
+    renderCreatorPreview();
   }
 
   $("mcImage").onchange = async (event) => {
@@ -785,13 +856,21 @@
 
   $("mcSave").onclick = async () => {
     try {
-      mainCharModule.save({
-        name: $("mcName").value,
-        gender: $("mcGender").value,
-        age: $("mcAge").value,
-        image: pendingMainImage
-      });
-      engine.flush();
+      const exists = !!engine.state.modules.mainCharacter.character;
+      const draft = creatorDraft();
+      if (exists) {
+        mainCharModule.save({
+          name: draft.name,
+          gender: draft.gender,
+          age: draft.age,
+          image: draft.image
+        });
+        engine.flush();
+      } else {
+        creatorModule.validate(draft);   // show profile/choice errors before queueing events
+        engine.fire({ type: "creator:create", data: { draft } });
+        engine.flush();
+      }
       pendingMainImage = null;
 
       const wrote = await mainCharModule.writeToFolder();
@@ -805,6 +884,8 @@
       alert(error.message);
     }
   };
+
+  for (const id of ["mcBackground", "mcOrigin", "mcFocus"]) $(id).onchange = renderCreatorPreview;
 
   $("mcFolder").onclick = async () => {
     try {
@@ -826,6 +907,7 @@
   engine.on("event:mainCharacter:saved", renderEquipment);
   engine.on("event:mainCharacter:statChanged", renderMainStats);
   engine.on("event:mainCharacter:armorChanged", renderMainStats);
+  engine.on("event:creator:created", renderMainCharacter);
 
   // ----- Equipment panel -----
   const rarityLabel = (key) => {

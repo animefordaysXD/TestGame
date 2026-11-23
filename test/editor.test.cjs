@@ -252,6 +252,12 @@ const has = (list, level, re) => list.some((i) => i.level === level && re.test(i
   assert.ok(has(problems((d) => { d.map.terrain.tiles.wall = "##"; }), "error", /exactly one character/), "tiles are single characters");
   const brokenMap = problems((d) => { delete d.map.world; });
   assert.ok(has(brokenMap, "error", /needs a world object/), "a broken map is reported, not thrown");
+  assert.ok(has(problems((d) => { d.creator.backgrounds.push({ ...d.creator.backgrounds[0] }); }), "error", /used twice/), "creator option keys are unique");
+  assert.ok(has(problems((d) => { d.creator.origins[0].equipment = ["nothing"]; }), "error", /Unknown equipment key/), "creator equipment exists");
+  assert.ok(has(problems((d) => { d.creator.focuses[0].stats = [{ stat: "luck", delta: 1 }]; }), "error", /unknown stat "luck"/), "creator stats are known");
+  assert.ok(has(problems((d) => { d.creator.settings.maxStartingItems = 0; }), "error", /at least 1/), "creator kit cap is positive");
+  const brokenCreator = problems((d) => { delete d.creator.backgrounds; });
+  assert.ok(has(brokenCreator, "error", /at least one background/), "a broken creator file is reported, not thrown");
   const bad = problems((d) => { d["biome:forest"] = { biome: "forest" }; });
   assert.ok(has(bad, "error", /"events" list/), "a broken file is reported, not thrown");
   // issues point at the entry so the page can show them next to it

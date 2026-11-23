@@ -8,7 +8,7 @@
 > game is and why, read [DESIGN.md](DESIGN.md); unapproved ideas live in
 > [IDEAS.md](IDEAS.md).
 
-Current build: core v0.2, characters v0.6, main character v0.6, equipment v0.4,
+Current build: core v0.2, characters v0.6, main character v0.7, creator v0.1, equipment v0.4,
 locations v0.5, map v0.2, actions v0.3, travel v0.2, combat v0.2, encounters v0.1,
 save helper v0.1, plus the read-only status viewer and the content editor (`editor.html`
 — a tool, not a module, and never loaded by the game).
@@ -42,7 +42,8 @@ System Access API; it does not prove the real browser folder picker works.
 On Windows, if PowerShell blocks `npm.ps1`, use `npm.cmd test` or run the test files
 directly with `node test/locations.test.cjs`, `node test/locations-disk.test.cjs`,
 `node test/characters.test.cjs`, `node test/relations.test.cjs`,
-`node test/main-character.test.cjs`, `node test/biome-events.test.cjs`,
+`node test/main-character.test.cjs`, `node test/creator.test.cjs`,
+`node test/biome-events.test.cjs`,
 `node test/actions.test.cjs`, `node test/equipment.test.cjs`,
 `node test/travel.test.cjs`, `node test/combat.test.cjs`, `node test/encounters.test.cjs`,
 `node test/map.test.cjs`, `node test/save.test.cjs`, and `node test/editor.test.cjs`.
@@ -50,18 +51,18 @@ directly with `node test/locations.test.cjs`, `node test/locations-disk.test.cjs
 ## Layout
 
 - `engine.js` — core (unchanged v0.2)
-- `characters/` — NPC generator, shared base stats, body data/helper, main character creator and storage
+- `characters/` — NPC generator, shared base stats, body data/helper, character creator, main character storage
 - `equipment/` — armor and weapon catalogue, weapon/armor types, rarity tiers, main-character inventory (equip/unequip/destroy)
 - `combat/` — player-first duels with weapons, Strength gating and armor piercing (Attack/Defend)
 - `locations/` — procedural locations with hostility and levels, linked into a travel graph
 - `encounters/` — hostility-driven hostile spawns on visit and hostility-scaled loot on a win
 - `map/` — static world map with authored sites and routes, plus procedural landmark interiors
-- `locations/events/` — per-biome event JSON (copy/paste templates and the tundra sample)
+- `locations/events/` — per-biome event JSON (working events and copy/paste templates)
 - `actions/` — five area actions with costs/outcomes and optional biome overrides
 - `travel/` — route-based journeys with 5-minute interruption checks and pause/resume
 - `save/` — seed + baseline + changes save files, JSON export/import and legacy migration
 - `editor/` — content editor core and schemas (no state, not loaded by the game)
-- `editor.html` — form editor for biome events, travel, armor, actions and character content
+- `editor.html` — form editor for biome events, travel, equipment, actions, character creation and map content
 - `Locations/` — JSON mirror folder (written after connecting it in the page)
 - `status.html` — read-only node-tree viewer for the current game state
 - `DESIGN.md` — what the game is and why: vision, pillars, decisions, roadmap
@@ -78,7 +79,8 @@ same `localStorage` slot (`save1`) as the game and shows:
 - the world clock, seed and event-log size;
 - every module and its live state slice: NPCs with personality archetypes, traits, behavior
   profiles, stats and ten-part bodies, the
-  main character with HP/Stamina/Mana, armor, skills and body parts, the equipment inventory, the
+  main character with HP/Stamina/Mana, armor, skills, body parts and starting build, the
+  creator's last build, the equipment inventory, the
   current combat and its log, locations with their routes and the current marker, the static
   map's site keys, landmarks and generated interiors, the five
   loaded actions plus the last resolution, and the current journey with its distance,
@@ -110,11 +112,23 @@ them.
   rebuild it.
 - The full format, API, migration and limits are in `save/README.md`.
 
+## Character creator
+
+- The Main character panel has **Background**, **Origin** and **Focus** selects. Each option
+  adds starting stat changes and equipment from `characters/creatorData.js`.
+- A live preview shows the resulting stats and starting kit. Resources start at 80% of
+  their maximum, so positive and negative choices both matter.
+- The first **Create character** save uses the build: the creator fires
+  `mainCharacter:create`, grants each item through `equipment:add`, and leaves the normal
+  auto-equip and armor bridge to run. Later **Save profile** calls keep the current stats,
+  equipment and build.
+- The creator data is editable in `editor.html` (settings, backgrounds, origins, focuses).
+
 ## Main character
 
 - Enter a name, choose a gender, set an age, and pick an image for the profile picture.
-- **Save main character** stores the character in the game state (and therefore in
-  the normal Save/Load slot).
+- **Create character** (first save) or **Save profile** stores the character in the game
+  state (and therefore in the normal Save/Load slot).
 - Uploaded images are centre-cropped to a square, resized to 256 px, and stored as a
   WebP/PNG data URL. If no image is picked, an initials avatar is generated as SVG.
 - **Connect mainChar folder** writes `characters/mainChar/main.json` and a viewable
@@ -123,9 +137,11 @@ them.
 - The main character and every NPC share ten base stats from
   `characters/statsData.js`: HP, Stamina, Mana, Strength, War, Diplomacy, Personal Combat,
   Money Management, Intrigue and Intelligence, plus an `armor` equipment stat.
-  HP/Stamina/Mana are resources; the skills are 1-20; armor is 0-100 and starts at 0. The
-  main character starts at 100/100 HP, 100/100 Stamina, 50/50 Mana, 0 armor and 10 in each
-  skill. NPCs roll their values. Strength is the weapon requirement used by combat.
+  HP/Stamina/Mana are resources; the skills are 1-20; armor is 0-100 and starts at 0.
+  The creator path starts resources at 80% of their maximum, then applies the chosen
+  background/origin/focus changes; a profile-only save starts at 100/100 HP, 100/100
+  Stamina, 50/50 Mana, 0 armor and 10 in each skill. NPCs roll their values. Strength is
+  the weapon requirement used by combat.
 - Location events, resolved area actions and travel interruptions can change any
   non-equipment base stat; the current values are saved with the character. Armor is
   written by the equipment module and is ignored by event/action/travel effects. The

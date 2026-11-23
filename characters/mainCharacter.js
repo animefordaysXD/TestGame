@@ -1,7 +1,9 @@
-/* Main character module v0.6 — one player character with a profile picture, base stats
-   and a humanoid body. The UI calls save()/prepareImage()/connectFolder() directly; other
-   modules read the state slice or listen for mainCharacter:saved / mainCharacter:statChanged.
-   Location, action, travel and combat effects are applied here through the event bus. See ENGINE_SPEC.md. */
+/* Main character module v0.7 — one player character with a profile picture, base stats,
+   optional starting-build metadata and a humanoid body. The UI calls
+   save()/prepareImage()/connectFolder() directly; other modules read the state slice or
+   listen for mainCharacter:saved / mainCharacter:statChanged. The creator supplies
+   starting stats through mainCharacter:create. Location, action, travel and combat effects
+   are applied here through the event bus. See ENGINE_SPEC.md. */
 (function (global) {
   "use strict";
   const D = global.MainCharacterData;
@@ -38,6 +40,22 @@
   }
 
   const defaultStats = () => normaliseStats(null);
+
+  // Creator metadata is optional. Keep only the small, JSON-safe summary the UI/status read.
+  function cleanCreator(raw) {
+    if (!raw || typeof raw !== "object") return null;
+    const text = (value) => typeof value === "string" ? value.trim() : "";
+    const equipment = Array.isArray(raw.equipment)
+      ? [...new Set(raw.equipment.filter((key) => typeof key === "string" && key.trim()).map((key) => key.trim()))]
+      : [];
+    const creator = {
+      background: text(raw.background), backgroundName: text(raw.backgroundName),
+      origin: text(raw.origin), originName: text(raw.originName),
+      focus: text(raw.focus), focusName: text(raw.focusName),
+      equipment
+    };
+    return creator.background || creator.origin || creator.focus ? creator : null;
+  }
 
   const escapeXml = (value) => String(value).replace(/[&<>"']/g, (ch) => ({
     "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&apos;"
@@ -118,6 +136,11 @@
 
       character.stats = normaliseStats(character.stats, character);
       character.body = B.normalise(character.body);
+      if (character.creator !== undefined) {
+        const creator = cleanCreator(character.creator);
+        if (creator) character.creator = creator;
+        else delete character.creator;
+      }
       delete character.stamina;
       delete character.staminaMax;
       return character;
@@ -172,6 +195,7 @@
         engine.on("event:equipment:equipped", (e) => mod.applyEquipment(e.data || {}, e.depth + 1));
         engine.on("event:equipment:unequipped", (e) => mod.applyEquipment(e.data || {}, e.depth + 1));
         engine.on("event:combat:damage", (e) => mod.applyCombatDamage(e.data || {}));
+        engine.on("event:mainCharacter:create", (e) => mod.save(e.data || {}, e.depth + 1));
       },
 
       onLoad(eng) {
@@ -215,8 +239,16 @@
         const previousCustom = existing && existing.imageSource === "upload" ? existing.image : null;
         const image = clean.image || previousCustom || defaultAvatar(clean.name);
         const imageSource = (clean.image || previousCustom) ? "upload" : "default";
-        const stats = existing ? normaliseStats(existing.stats, existing) : defaultStats();
+        const sourceStats = data && data.stats && typeof data.stats === "object"
+          ? data.stats
+          : (existing ? existing.stats : null);
+        const stats = normaliseStats(sourceStats, existing);
         const body = B.normalise(existing ? existing.body : null);
+        const creator = cleanCreator(
+          data && Object.prototype.hasOwnProperty.call(data, "creator")
+            ? data.creator
+            : (existing ? existing.creator : null)
+        );
 
         const character = {
           id: "main",
@@ -232,6 +264,7 @@
           updatedAtTick: now.tick,
           updatedAt: now.text
         };
+        if (creator) character.creator = creator;
 
         s.character = character;
         engine.fire({

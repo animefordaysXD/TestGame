@@ -234,7 +234,7 @@ keyed RNG, saves) can all be met from modules and helpers. Reopen only if a real
 - **Not built yet:** route-specific encounters, weather/hostility affecting the journey, and
   multi-hop route planning. The graph has no coordinates or map view.
 
-### 3.15 Content editing — Decided, Implemented (editor tool v0.1)
+### 3.15 Content editing — Decided, Implemented (editor tool v0.3)
 
 Content stays in data files, but hand-editing them is error-prone and slows down playtesting.
 `editor.html` is a form-based tool over the same files: it validates entries, shows previews,
@@ -246,9 +246,10 @@ and writes the data back without touching the game or the engine.
   comment, but the object is strict JSON so the editor can round-trip it losslessly. Unknown
   fields survive saves; older JavaScript-syntax files open with a lossy warning.
 - **Editable today:** biome events, travel events/tuning, equipment items (armor, weapons,
-  types), rarity tiers and settings, area actions and outcomes, and character names/traits/ages. Map,
-  locations, stats, combat tuning, body layout, behavior axes and personality archetypes are
-  not editable yet.
+  types), rarity tiers and settings, area actions and outcomes, character names/traits/ages,
+  character creation (backgrounds, origins, focuses), locations, encounters, and the static
+  map. Stats, combat tuning, body layout, behavior axes and personality archetypes are not
+  editable yet.
 - **Direct or downloaded saves.** With a folder connection (Chrome/Edge) saves write straight
   to disk; otherwise files download and must be moved back by hand.
 
@@ -298,6 +299,25 @@ slice adds weapons, item families and item quality without replacing the body-pa
 - **Still open:** how quickly higher rarities should appear, whether rarity has non-stat effects,
   and how NPC loadouts and loot tables will hand out or destroy items.
 
+### 3.18 Character creation — Decided, Implemented (creator v0.1)
+
+The player should start as a character with a little history, not a blank stat block. Three
+data-driven choices — background, origin and focus — add starting stat changes and equipment.
+The first save uses the build; later saves only edit the profile.
+
+- **Three choice groups.** Background is the main identity (soldier, hunter, scholar, thief,
+  merchant, outlander); origin is where the character grew up; focus is what they practised.
+  Every option lives in `characters/creatorData.js`.
+- **Stats are additive and clamped.** Resource stats start at 80% of maximum so positive and
+  negative changes both matter; skills start at their shared `start` value. The creator adds
+  each option's `{ stat, delta }` list and clamps to the stat definition.
+- **Equipment is a real kit.** Option lists name equipment keys; the creator grants them
+  through the normal `equipment:add` path, so auto-equip and the armor bridge work unchanged.
+- **One creator path.** `creator:create` validates a draft, fires `mainCharacter:create`, then
+  the equipment requests, then `creator:created`. Profile saves keep the current build.
+- **Still open:** point-buy or free allocation, rerolling, in-game rebuilding, and
+  background-specific events or dialogue.
+
 ## 4. Roadmap — Proposed
 
 Build playable slices, not systems in isolation. Each slice is a game you can play.
@@ -316,16 +336,18 @@ with interruption checks, and biome rolls on arrival exist. The world map is now
 `map/data.js` authors twelve sites and thirteen routes, and the tavern, castle and shack
 generate procedural interiors on first visit. Drawn layouts and atlas slots are still
 missing. Hostility-driven risk and events for most biomes are still missing. Slice 2 is
-partly built: body-part armor, one weapon slot and five item rarities exist with the armor
-bridge, but money, companions and beasts do not.
+partly built: a background/origin/focus character creator sets starting stats and a kit;
+body-part armor, one weapon slot and five item rarities exist with the armor bridge, but
+money, companions and beasts do not.
 
 ## 5. Status snapshot
 
 | area | state |
 |---|---|
 | engine core v0.2, event bus, seeded RNG, turn stepping | working, frozen |
-| characters v0.5: stats, ten-part body, 30 personality archetypes with traits and 0-100 behavior profiles (data-only); `temp`/`named` approximation (three-tier model planned) | working |
-| main character v0.6: stats, ten-part body, portrait, effect bridges, armor mirror | working |
+| characters v0.6: stats, ten-part body, 30 personality archetypes with traits and 0-100 behavior profiles (data-only); `temp`/`named` approximation (three-tier model planned) | working |
+| main character v0.7: stats, ten-part body, portrait, effect bridges, armor mirror, optional starting-build metadata | working |
+| creator v0.1: background/origin/focus choices set starting stats and equipment; live preview; editor support | working |
 | equipment v0.4: body-part armor, one weapon slot (swords/spears/axes/maces), weapon and armor types, five rarity tiers, inventory, equip/unequip/destroy | working |
 | actions v0.3: five area actions with time, costs, outcomes, route-aware Travel | working |
 | travel v0.2: 5-minute checks, event pause/resume, arrival handoff | working |
@@ -334,7 +356,7 @@ bridge, but money, companions and beasts do not.
 | combat v0.2: weapon damage, Strength gating and armor piercing; armor reduces every hit | working |
 | biome events | 7 of 10 biomes have a live event |
 | **save files v0.1 (seed + changes, JSON export/import)** | working |
-| **content editor v0.2 (`editor.html`, tool — not a module)** | working for biome events, travel, equipment (armor, weapons, types, rarity bands), actions, character names/traits/ages, locations, encounters, and the static map (sites, routes, interiors, tiles) |
+| **content editor v0.3 (`editor.html`, tool — not a module)** | working for biome events, travel, equipment (armor, weapons, types, rarity bands), actions, character names/traits/ages, character creation, locations, encounters, and the static map (sites, routes, interiors, tiles) |
 | character injury, healing and body-part effects | not started (body shape + status field exist) |
 | atlas, slots, keyed RNG, founding/razing | not started |
 | family, inheritance, courts, dialogue, NPC event checker | not started |
@@ -344,7 +366,8 @@ bridge, but money, companions and beasts do not.
 
 1. Inheritance: yes, no, or later? What happens on the player's death until then?
 2. How does magic work (schools, mana costs, who can use it)?
-3. Which 4–5 starting backgrounds, and what bonuses?
+3. How should creation grow: keep the authored backgrounds/origins/focuses, or add
+   point-buy allocation, rerolls and in-game rebuilding?
 4. Should the drawn map use provinces (regions) or show the route graph with roads? The travel
    graph exists as data; the visual map is still open.
 

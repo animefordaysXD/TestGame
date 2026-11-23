@@ -2,13 +2,14 @@
 
 **Repository:** <https://github.com/animefordaysXD/TestGame>
 
-**Last updated:** 2026-11-05
-**Current spec:** `ENGINE_SPEC.md` v1.9
-**Status:** working test page with a static authored world map (twelve sites, thirteen
-routes) plus procedural landmark interiors generated on first visit, a travel graph of
-connected locations, procedural locations with hostility and levels, hostility-modified biome
-events, hostility-driven encounters and loot, a main-character creator with ten base stats
-plus armor and a ten-part body, NPCs with the same stats, bodies, 30 named personality
+**Last updated:** 2026-11-23
+**Current spec:** `ENGINE_SPEC.md` v1.10
+**Status:** working test page with a data-driven character creator (background, origin and
+focus choose starting stats and equipment), a static authored world map (twelve sites,
+thirteen routes) plus procedural landmark interiors generated on first visit, a travel graph
+of connected locations, procedural locations with hostility and levels, hostility-modified
+biome events, hostility-driven encounters and loot, a main character with ten base
+stats plus armor and a ten-part body, NPCs with the same stats, bodies, 30 named personality
 archetypes, relations and levels, basic player-first combat (Attack/Defend), an equipment
 module with body-part armor plus a weapon slot (damage, Strength requirement, armor piercing),
 weapon/armor types and five rarity tiers, five area actions with costs/outcomes/time,
@@ -71,6 +72,8 @@ Tests currently cover:
   source-filtered clearing, legacy relation/level migration.
 - `test/main-character.test.cjs` — validation, image handling, base stats, effects,
   legacy stamina migration, save/load, reset, folder mirror.
+- `test/creator.test.cjs` — background/origin/focus stats and kits, preview without state,
+  profile validation, event order, profile edits, save/load and reset.
 - `test/biome-events.test.cjs` — JSON loading, visit rolls, hostility-modified chances,
   stat effects, reset, save/load.
 - `test/actions.test.cjs` — five-action loading, biome overrides, weighted outcomes,
@@ -125,7 +128,8 @@ Tests currently cover:
 | module | state slice | current behavior |
 |---|---|---|
 | `characters` | `nextId`, `named{}`, `temp{}` | NPC generator with personality, behavior, relation, level and base stats; Named NPC / Temporary Spawn |
-| `mainCharacter` | `character` | one player character, profile image, base stats, JSON mirror |
+| `mainCharacter` | `character` | one player character, profile image, base stats, optional starting-build metadata, JSON mirror |
+| `creator` | `lastCreated` | data-driven background/origin/focus choices that set starting stats and equipment |
 | `equipment` | `nextId`, `items{}`, `equippedByPart{}`, `equippedWeaponId` | main-character armor on body parts plus one weapon slot; rarity tiers; sums worn armor into the character stat |
 | `combat` | `active`, `round`, `turn`, `player`, `enemy`, `defending`, `winner*`, `log[]` | basic player-first duels; weapon damage, Strength gating and armor piercing; Attack/Defend |
 | `locations` | `seed`, `createdAt`, `nextId`, `locations{}` (with `connections[]`), `currentId` | procedural locations with hostility/level, travel graph, visit rolls, JSON mirror |
@@ -140,6 +144,21 @@ seed + baseline + changes format and migrates the old full-state saves.
 `editor.html` (with `editor/core.js` and `editor/schemas.js`) is also a tool, not a module: it
 has no slice, no events and is not registered in `buildEngine()`. It edits the content files
 directly; see the content-editor section below.
+
+### Character creator
+
+- `characters/creatorData.js` holds `settings.resourceStartPercent` (80),
+  `settings.maxStartingItems` (6), and the `backgrounds`, `origins` and `focuses` lists.
+  Each option has `key`, `name`, `description`, `stats` and `equipment`.
+- `characters/creator.js` v0.1 adds the chosen option stat deltas to the base stats, starts
+  resources at the configured percentage, combines the option equipment (de-duped and
+  capped), and exposes `preview()`, `validate()` and `create()`.
+- `creator:create { draft }` is the UI request. `create()` fires `mainCharacter:create`
+  first, then one `equipment:add { key, source: "creator" }` per item, then
+  `creator:created`. The normal auto-equip and armor bridge run against the new character.
+- The first **Create character** save uses this path. Later **Save profile** calls
+  `mainCharacter.save()` and keeps the current stats, equipment and build metadata.
+- The creator slice stores only `lastCreated`. Reset clears it; save/load keeps it.
 
 ### Main character
 
@@ -486,6 +505,14 @@ UI Import save file
 
 ## Recent work
 
+- Character creator: added `characters/creatorData.js` and `characters/creator.js` v0.1.
+  Background, origin and focus choices add starting stat changes and equipment; resources
+  start at 80% so both positive and negative changes matter. `creator:create` validates a
+  draft, `mainCharacter:create` stores the computed stats, `equipment:add` grants the kit,
+  and `creator:created` reports the build. MainCharacter v0.7 accepts `data.stats` and
+  stores optional build metadata. The UI has three selects and a live preview; the editor
+  edits the creator data (settings, backgrounds, origins, focuses); the status page shows
+  the last build. All fifteen Node test files pass.
 - Biome events: added working events to six more biomes — forest **Wolf Pack**, grassland
   **Wild Berries**, hills **Old Cairn**, coast **Washed-Up Crate**, desert **Heat Haze**
   and swamp **Miasma** — joining tundra **Snowfall**. They mix positive and negative
@@ -756,9 +783,10 @@ change, update ENGINE_SPEC.md, MODULES.md (including its update log), HANDOFF.md
 and the hand-maintained branches in status.html. Commit only when asked; do not push without
 explicit approval.
 
-Current build: core v0.2; characters v0.6; mainCharacter v0.6; equipment v0.4; locations v0.5;
-map v0.2; actions v0.3; travel v0.2; combat v0.2; encounters v0.1; save helper v0.1.
-Working: a static authored world map (twelve sites, thirteen routes) with procedural
+Current build: core v0.2; characters v0.6; mainCharacter v0.7; creator v0.1; equipment v0.4;
+locations v0.5; map v0.2; actions v0.3; travel v0.2; combat v0.2; encounters v0.1; save helper v0.1.
+Working: a data-driven character creator (background, origin and focus set starting stats
+and equipment); a static authored world map (twelve sites, thirteen routes) with procedural
 landmark interiors generated on first visit; a travel graph of connected locations with
 distances and route-based times; procedural locations with hostility and levels;
 hostility-modified biome events; hostility-driven encounters with hostility-scaled enemies
@@ -770,19 +798,21 @@ outcomes; route-based timed travel with 5-minute checks, event pause/resume and 
 through locations; basic player-first combat with weapon damage, Strength gating and armor
 piercing; real JSON save files (seed + baseline + changes) with legacy migration and
 unsafe-path guards, alongside quick localStorage saves; a read-only status tree; and a
-form-based content editor (`editor.html`) that is a tool, not a module. Fourteen Node test
+form-based content editor (`editor.html`) that is a tool, not a module. Fifteen Node test
 files are wired into npm test.
 
-Known gaps: landmark interiors are display-only (no movement, collision, doors or loot) and
-the world map has no drawn atlas; actions and events have no requirements or skill checks;
-travel events are stat-only scenes with no choices or combat handoff; NPC relations and
-levels are stored but no dialogue/progression rule reads them; jungle, mountains and
-wasteland still have only event templates; NPCs cannot equip and carry no weapon; combat has no flee, enemy AI, hit chance or
-variance; personality and behavior do not drive behaviour yet; body part status is structural
-only and no rule injures, heals or equips it; encounters depend on the player pressing Fight;
-the three-tier NPC model is only approximated by temp/named buckets.
+Known gaps: the creator is a fixed set of authored choices with no point-buy, reroll or
+in-game rebuild; landmark interiors are display-only (no movement, collision, doors or loot)
+and the world map has no drawn atlas; actions and events have no requirements or skill
+checks; travel events are stat-only scenes with no choices or combat handoff; NPC relations
+and levels are stored but no dialogue/progression rule reads them; jungle, mountains and
+wasteland still have only event templates; NPCs cannot equip and carry no weapon; combat has
+no flee, enemy AI, hit chance or variance; personality and behavior do not drive behaviour
+yet; body part status is structural only and no rule injures, heals or equips it;
+encounters depend on the player pressing Fight; the three-tier NPC model is only
+approximated by temp/named buckets.
 
-Suggested next step: give the generated interiors movement/collision (or draw the route
-graph) and reuse the terrain generator for travel. Ask what to build next; do not add
-unrequested scope.
+Suggested next step: give creation and progression more depth (point-buy or rebuild) or give
+the generated interiors movement/collision and reuse the terrain generator for travel. Ask
+what to build next; do not add unrequested scope.
 ```

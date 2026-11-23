@@ -11,7 +11,7 @@
 > - `MODULES.md` (this file) - practical per-module map and adjustment guide.
 
 **Last updated:** 2026-11-02
-**Build:** core v0.2, characters v0.6, mainCharacter v0.6, equipment v0.4,
+**Build:** core v0.2, characters v0.6, mainCharacter v0.7, creator v0.1, equipment v0.4,
 locations v0.5, map v0.2, actions v0.3, travel v0.2, combat v0.2,
 encounters v0.1, save helper v0.1, status viewer and content editor (both tools, not modules).
 
@@ -44,6 +44,7 @@ Newest first. Keep entries short; details live in the module sections.
 
 | Date | Change | Files |
 |---|---|---|
+| 2026-11-23 | Creator v0.1: a data-driven character creator chooses a background, origin and focus that add starting stats and equipment. `creator:create` previews/validates a draft, fires `mainCharacter:create` with the computed stats, grants the kit through `equipment:add`, then emits `creator:created`. MainCharacter v0.7 accepts `data.stats`/`data.creator` and stores the build summary. The UI gains three selects and a live preview; the editor edits `characters/creatorData.js` (settings, backgrounds, origins, focuses). | `characters/creatorData.js`, `characters/creator.js`, `characters/mainCharacter.js`, `editor/schemas.js`, `index.html`, `status.html`, `test/creator.test.cjs`, docs |
 | 2026-11-23 | Added working biome events to seven of ten biomes: forest Wolf Pack, grassland Wild Berries, hills Old Cairn, coast Washed-Up Crate, desert Heat Haze and swamp Miasma, joining the tundra Snowfall. Each pairs a themed effect with a positive, negative or neutral hostility modifier; the remaining three biomes keep their disabled templates. | `locations/events/*/events.json`, docs |
 | 2026-11-05 | Map v0.2: the world is now static. `map/data.js` holds twelve authored sites and thirteen routes plus interior presets; `map:load` is idempotent and `map:generate` stays as an alias. Sites use `autoLink: false` and the new `location:link` request installs the authored graph. Landmarks generate a room-and-corridor interior on the first visit with `engine.rng`, store it in `map.terrain` and reuse it. The UI/status show the static map and terrain, and the editor now edits the map. | `map/*`, `locations/locations.js`, `editor/schemas.js`, `index.html`, `status.html`, `test/map.test.cjs`, docs |
 | 2026-11-02 | Characters v0.6 and encounters v0.1: NPCs store a relation `{ value, type }` (-100..100 with data-driven bands/labels) and a level; `relationFor`, `setRelation`, `adjustRelation` and `levelFor` expose them. Locations v0.5 add per-biome level ranges, a location `level`, and hostility-modified biome event chances. The new `encounters` module spawns hostility-scaled hostile NPCs on `location:visited` and awards hostility-scaled loot on `combat:ended`; source-tagged clearing keeps ordinary spawns. The UI/status show relations, levels and encounters, and the editor now edits locations and encounters. | `characters/*`, `locations/*`, `encounters/*`, `editor/schemas.js`, `index.html`, `status.html`, tests, docs |
@@ -75,7 +76,8 @@ Newest first. Keep entries short; details live in the module sections.
 | core (engine) | 0.2 | `time`, `eventLog`, `version`, `seed`, `rngState` | - | bus + tick events | clock/log | covered indirectly |
 | save helper | 0.1 | none (not a module) | none | none | Export/Import save file | `save.test.cjs` |
 | characters | 0.6 | `nextId`, `named{}`, `temp{}` | `character:spawn/save/clearTemp`, `location:changed`, `combat:damage` | `character:spawned/saved/tempCleared/relationChanged` | NPC cards + body line | `characters.test.cjs`, `relations.test.cjs` |
-| mainCharacter | 0.6 | `character` | `location:event`, `action:resolved`, `travel:event`, `equipment:equipped/unequipped`, `combat:damage` | `mainCharacter:saved/statChanged/armorChanged` | Main character + body grid | `main-character.test.cjs` |
+| mainCharacter | 0.7 | `character` (optional `creator` summary) | `location:event`, `action:resolved`, `travel:event`, `equipment:equipped/unequipped`, `combat:damage`, `mainCharacter:create` | `mainCharacter:saved/statChanged/armorChanged` | Main character + body grid | `main-character.test.cjs` |
+| creator | 0.1 | `lastCreated` | `creator:create` | `mainCharacter:create`, `equipment:add`, `creator:created` | Main character build selects + preview | `creator.test.cjs` |
 | equipment | 0.4 | `nextId`, `items{}`, `equippedByPart{}`, `equippedWeaponId` | `equipment:add/equip/unequip/remove`, `action:resolved` | `equipment:added/equipped/unequipped/removed` | Equipment | `equipment.test.cjs` |
 | locations | 0.5 | `seed`, `createdAt`, `nextId`, `locations{}` (with `connections[]`), `currentId` | `location:add`, `location:link` | `location:added/visited/event` | Locations + biome events | `locations.test.cjs`, `locations-disk.test.cjs`, `biome-events.test.cjs` |
 | map | 0.2 | `version`, `loaded`, `seed`, `total`, `lastGeneratedTick`, `lastGeneratedAt`, `sites{}`, `landmarks{}`, `terrain{}` | `map:load`, `map:generate`, `location:added`, `location:visited` | `location:add`, `location:link`, `map:generated`, `map:terrainGenerated` | Locations panel (map status + terrain) | `map.test.cjs` |
@@ -85,7 +87,7 @@ Newest first. Keep entries short; details live in the module sections.
 | encounters | 0.1 | `enemies{}`, `lastVisit`, `lastLoot` | `location:visited`, `character:spawned/tempCleared`, `combat:ended` | `character:clearTemp`, `character:spawn`, `equipment:add` | Location visit status | `encounters.test.cjs` |
 
 Registration order in `index.html`: `bodyData.js` -> `body.js` -> characters -> mainCharacter ->
-equipment -> locations -> map -> actions -> travel -> combat -> encounters. Keep dependencies
+equipment -> creator -> locations -> map -> actions -> travel -> combat -> encounters. Keep dependencies
 registered earlier. The body data/helper must load before the character modules.
 The live page and the save baseline both use `buildEngine(opts)`, which registers the same
 modules and applies the save's seed/start date/tick size.
@@ -299,14 +301,15 @@ the encounters module seeds hostile values and levels, but no progression rule r
 
 ---
 
-## Main character (`characters/mainCharacter.js` v0.6)
+## Main character (`characters/mainCharacter.js` v0.7)
 
 ### Role
 
 Owns the one player character: identity, portrait, shared stats, ten-part body,
-event/action/travel effects, combat HP and the armor mirror. It never reads the equipment,
-actions, travel or combat slices; everything arrives through events. The UI calls `save()`
-directly and then `engine.flush()`.
+starting-build metadata, event/action/travel effects, combat HP and the armor mirror. It
+never reads the equipment, actions, travel or combat slices; everything arrives through
+events. The UI calls `save()` directly and then `engine.flush()`, or uses the creator module
+for a first build.
 
 ### Files and state
 
@@ -315,8 +318,9 @@ directly and then `engine.flush()`.
 - `characters/bodyData.js`, `characters/body.js` - shared body layout and normaliser.
 - `characters/mainCharacter.js` - validation, stats, body, effects, armor bridge, mirror.
 - Slice: `{ character: null }` or one object with
-  `{ id, name, gender, age, image, imageSource, stats, body, createdAtTick, createdAt, updatedAtTick, updatedAt }`.
+  `{ id, name, gender, age, image, imageSource, stats, body, creator?, createdAtTick, createdAt, updatedAtTick, updatedAt }`.
 - `image` is a data URL; `imageSource` is `"upload"` or `"default"`.
+- `creator` is optional `{ background, backgroundName, origin, originName, focus, focusName, equipment[] }`.
 
 ### Code map
 
@@ -324,10 +328,11 @@ directly and then `engine.flush()`.
 |---|---|
 | `normaliseStats(source, legacy)` | Builds/clamps the full stat block; migrates old top-level stamina |
 | `defaultStats()` | `normaliseStats(null)` - start values |
-| `normaliseCharacter()` | Runs stats + body normalisation on init/load |
+| `cleanCreator(raw)` | Keeps only the JSON-safe starting-build summary |
+| `normaliseCharacter()` | Runs stats + body + creator normalisation on init/load |
 | `defaultAvatar(name)` | Generates an SVG initials portrait as a data URL |
 | `prepareImage(file)` | Browser-only center-crop, resize, WebP/PNG compression |
-| `save(data, depth)` | Validates, preserves stats/body and the previous custom image, stores, emits `mainCharacter:saved` |
+| `save(data, depth)` | Validates, accepts optional `data.stats`/`data.creator`, preserves stats/body/image otherwise, stores, emits `mainCharacter:saved` |
 | `applyEffects(depth, effects, eventId)` | Shared clamp-and-apply loop for `{ stat, delta }`; emits one `statChanged` per real change |
 | `applyEventEffects` / `applyActionEffects` | Thin wrappers that pass the location event id / action id |
 | `applyTravelEffects` | Thin wrapper that applies a `travel:event` interruption with its event id |
@@ -342,7 +347,8 @@ directly and then `engine.flush()`.
   `action:resolved` -> `applyActionEffects`;
   `travel:event` -> `applyTravelEffects`;
   `equipment:equipped` / `equipment:unequipped` -> `applyEquipment`;
-  `combat:damage` -> `applyCombatDamage`.
+  `combat:damage` -> `applyCombatDamage`;
+  `mainCharacter:create` -> `save` with the creator's validated plan.
 - Emits: `mainCharacter:saved` (identity only, no image); `mainCharacter:statChanged`
   (`{ id, stat, delta, value, max, eventId }`) and `mainCharacter:armorChanged`
   (`{ id, stat: "armor", delta, value, previous, itemId, itemName }`) at `depth + 1`.
@@ -361,6 +367,7 @@ directly and then `engine.flush()`.
 | Armor text (`/100`) | `applyEquipment()` plus the same text in `index.html` and `status.html` |
 | Mirror file names | `mainCharacterData.js` `folder`, `jsonFile`, `imageBase` |
 | Keep stats when editing the profile | Already handled in `save()`; do not rebuild stats there |
+| Change a starting build | `characters/creatorData.js`, not this module |
 | Keep body-part statuses when editing the profile | Already handled in `save()` via `B.normalise(existing.body)` |
 
 ### Gotchas
@@ -374,6 +381,70 @@ directly and then `engine.flush()`.
   An item equipped before the character is saved will not update `stats.armor` later.
 - `applyEquipment` accepts `totalArmor` then falls back to `armor`.
 - A zero delta is skipped, so no empty log lines.
+
+---
+
+## Character creator (`characters/creator.js` v0.1)
+
+### Role
+
+Turns the choice of a background, origin and focus into a starting stat block and an
+equipment kit. It never writes the main character or equipment slices: it validates the
+draft, then fires `mainCharacter:create`, one `equipment:add` per item and finally
+`creator:created`. The UI uses `preview()` for live feedback and the first
+**Create character** save; later profile edits go straight to `mainCharacter.save()`.
+
+### Files and state
+
+- `characters/creatorData.js` - `settings.resourceStartPercent`,
+  `settings.maxStartingItems`, and the `backgrounds` / `origins` / `focuses` lists. Each
+  option has `key`, `name`, `description`, `stats` (effect list) and `equipment` (keys).
+- `characters/creator.js` - validation, stat calculation, kit assembly, event requests.
+- Slice: `{ lastCreated: null }` or
+  `{ name, background, backgroundName, origin, originName, focus, focusName, stats, equipment, createdAtTick, createdAt }`.
+
+### Code map
+
+| Symbol | What it does |
+|---|---|
+| `baseStats()` | Starts resources at the configured percentage and skills at their `start` values |
+| `applyChanges(stats, changes)` | Adds an option's `{ stat, delta }` list and clamps every value |
+| `planFor(draft)` | Picks the three options, combines stats and builds the de-duped, capped kit |
+| `cleanProfile(draft)` | Name/gender/age rules from `mainCharacterData.js` |
+| `preview(draft)` | Stats/equipment preview without validating the profile or changing state |
+| `validate(draft)` | Full profile + option validation; returns the `mainCharacter:create` payload |
+| `create(depth, draft)` | Stores `lastCreated`, fires the character and equipment requests, then `creator:created` |
+| `backgrounds()` / `origins()` / `focuses()` | JSON-safe copies for the UI |
+| `status()` | Copy of the slice for the status page |
+
+### Events
+
+- Listens: `creator:create` (`{ draft }`).
+- Emits: `mainCharacter:create` (validated plan), `equipment:add` per item
+  (`{ key, source: "creator" }`), and `creator:created`
+  (`{ name, background, backgroundName, origin, originName, focus, focusName, stats, equipment }`).
+- No RNG and no tick generator. `depends: ["mainCharacter", "equipment"]`.
+
+### Adjust it
+
+| If you want to... | Change |
+|---|---|
+| Add or retune a background, origin or focus | `characters/creatorData.js` lists |
+| Change how full resources start | `creatorData.js` `settings.resourceStartPercent` |
+| Change the kit size cap | `creatorData.js` `settings.maxStartingItems` |
+| Change stat calculation or validation | `creator.js` `baseStats()` / `planFor()` |
+| Change what happens on creation | `creator.js` `create()` event order |
+
+### Gotchas
+
+- Equipment is requested after `mainCharacter:create` so auto-equip and the armor bridge
+  see the new character. Do not reorder those events.
+- Starting items that conflict with an earlier item stay in the inventory rather than
+  replacing worn gear; the kit lists are authored to avoid conflicts today.
+- The creator is only used for the first character. Profile edits preserve stats and build
+  metadata; there is no in-game rebuild yet.
+- The option keys are also the stored creator metadata. Renaming a key in the data file
+  makes old saves keep the old display names but still work, because metadata stores names.
 
 ---
 
