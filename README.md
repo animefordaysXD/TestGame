@@ -9,7 +9,7 @@
 > [IDEAS.md](IDEAS.md).
 
 Current build: core v0.2, characters v0.6, main character v0.7, creator v0.1, equipment v0.4,
-locations v0.5, map v0.2, tutorial v0.1, actions v0.3, travel v0.2, combat v0.2, encounters v0.1,
+locations v0.5, map v0.2, tutorial v0.1, game v0.1, actions v0.3, travel v0.2, combat v0.2, encounters v0.1,
 save helper v0.1, plus the read-only status viewer and the content editor (`editor.html`
 — a tool, not a module, and never loaded by the game).
 
@@ -43,7 +43,7 @@ On Windows, if PowerShell blocks `npm.ps1`, use `npm.cmd test` or run the test f
 directly with `node test/locations.test.cjs`, `node test/locations-disk.test.cjs`,
 `node test/characters.test.cjs`, `node test/relations.test.cjs`,
 `node test/main-character.test.cjs`, `node test/creator.test.cjs`,
-`node test/tutorial.test.cjs`, `node test/biome-events.test.cjs`,
+`node test/tutorial.test.cjs`, `node test/game.test.cjs`, `node test/biome-events.test.cjs`,
 `node test/actions.test.cjs`, `node test/equipment.test.cjs`,
 `node test/travel.test.cjs`, `node test/combat.test.cjs`, `node test/encounters.test.cjs`,
 `node test/map.test.cjs`, `node test/save.test.cjs`, and `node test/editor.test.cjs`.
@@ -58,12 +58,14 @@ directly with `node test/locations.test.cjs`, `node test/locations-disk.test.cjs
 - `encounters/` — hostility-driven hostile spawns on visit and hostility-scaled loot on a win
 - `map/` — static world map with authored sites and routes, plus procedural landmark interiors
 - `tutorial/` — persistent opening checklist and its labels/hints
+- `game/` — journal objectives, site blurbs and exploration/combat progress for the game page
 - `locations/events/` — per-biome event JSON (working events and copy/paste templates)
 - `actions/` — five area actions with costs/outcomes and optional biome overrides
 - `travel/` — route-based journeys with 5-minute interruption checks and pause/resume
 - `save/` — seed + baseline + changes save files, JSON export/import and legacy migration
 - `editor/` — content editor core and schemas (no state, not loaded by the game)
 - `editor.html` — form editor for biome events, travel, equipment, actions, character creation and map content
+- `debug.html` — developer-facing all-panels sandbox (linked from the game header)
 - `Locations/` — JSON mirror folder (written after connecting it in the page)
 - `status.html` — read-only node-tree viewer for the current game state
 - `DESIGN.md` — what the game is and why: vision, pillars, decisions, roadmap
@@ -83,7 +85,8 @@ same `localStorage` slot (`save1`) as the game and shows:
   main character with HP/Stamina/Mana, armor, skills, body parts and starting build, the
   creator's last build, the equipment inventory, the
   current combat and its log, locations with their routes and the current marker, the static
-  map's site keys, landmarks and generated interiors, the tutorial checklist, the five
+  map's site keys, landmarks and generated interiors, the tutorial checklist, the game
+  journal and exploration record, the five
   loaded actions plus the last resolution, and the current journey with its distance,
   checks and last interruption;
 - content data counts and the enabled/total events in each biome file;
@@ -113,18 +116,26 @@ them.
   rebuild it.
 - The full format, API, migration and limits are in `save/README.md`.
 
-## Opening and tutorial
+## The game
 
-- The game opens on the character creator. Choose a background, origin and focus, then press
-  **Create character**.
+- The page opens on the character creator. Choose a background, origin and focus, then press
+  **Enter the Greyreach**.
 - The first save loads the static map and places the character in **Greywatch Village**.
-  The rest of the game appears, with the starting kit already in the **Inventory**.
-- The **Tutorial** panel tracks four steps: create a character, arrive in the village, take
-  your first action, and travel to **The Broken Wheel** tavern. Travel from the starting
-  town defaults to the tavern.
-- Tutorial progress is stored in the save. It is guidance, not a gate; after the checklist
-  you can explore, scavenge, fight or travel onward.
-- On a later visit, the landing page offers **Continue saved game** and **Import save file**.
+  The starting kit is already in the **Inventory**.
+- The HUD shows the date/time, current location, HP/Stamina/Armor and the current journal
+  objective. The left panel holds the character sheet and journal; the right panel holds
+  roads, inventory and known places.
+- **Look around** re-rolls the current location's biome events and encounter roll. Hostiles
+  appear under **Threats**; press **Fight** to enter turn-based combat. Victory can drop gear.
+- **Roads from here** lets you travel along authored routes. Journeys run in five-minute
+  checks and pause on travel events; Continue resumes and Turn back abandons the trip.
+- **Actions** are the local area actions (Scout, Scavenge, Rest, Hunt). Their time and costs
+  advance the clock and alter the character.
+- The journal is a five-objective opening arc: reach the village, take an action, follow the
+  old road, defeat a hostile, and return to The Broken Wheel. Progress is saved.
+- **Save** stores one browser save slot; **New game** returns to the creator. The landing
+  page can continue a saved game or import a JSON save file.
+- `debug.html` keeps the old all-panels sandbox and every raw control.
 
 ## Character creator
 

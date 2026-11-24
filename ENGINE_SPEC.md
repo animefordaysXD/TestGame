@@ -1,4 +1,4 @@
-# Modular Text-RPG Engine — Spec v1.11
+# Modular Text-RPG Engine — Spec v1.12
 
 Plain JS/HTML, no build step, no dependencies. A small core runs the clock, event bus,
 RNG, state and save/load. All gameplay lives in modules that own one state slice and talk
@@ -178,6 +178,7 @@ Slices are JSON-safe. Never cache a slice object; `load()` replaces the whole st
 | mainCharacter:armorChanged | mainCharacter | `{ id, stat: "armor", delta, value, previous, itemId, itemName }` |
 | creator:created | creator | `{ name, background, backgroundName, origin, originName, focus, focusName, stats, equipment }` |
 | tutorial:progress | tutorial | `{ step, steps, completed, updatedAtTick, completedAtTick }` |
+| game:progress | game | `{ event, objective, objectives, done, total, complete, visited, victories, defeats, actions, updatedAtTick, completedAtTick }` |
 
 ## Module registry
 
@@ -190,6 +191,7 @@ Slices are JSON-safe. Never cache a slice object; `load()` replaces the whole st
 | locations | none | `seed`, `createdAt`, `nextId`, `locations{}`, `currentId` | procedural locations with hostility/level, routes, visit/event checker, JSON mirror |
 | map | locations | `version`, `loaded`, `seed`, `total`, `lastGeneratedTick`, `lastGeneratedAt`, `sites{}`, `landmarks{}`, `terrain{}` | loads the authored static world once and generates procedural terrain inside landmarks |
 | tutorial | none | `started`, `steps{}`, `updatedAtTick`, `completedAtTick` | persistent first-steps progress: create, arrive, act, reach the tavern |
+| game | none | `started`, `visited{}`, `completed{}`, `objectiveOrder{}`, `sequence`, `actions`, `lastActionOrder`, `victories`, `lastVictoryOrder`, `defeats` | journal objectives and exploration/combat progress for the game page |
 | actions | none | `locationId`, `locationName`, `biomeKey`, `actions[]`, `lastAction` | five area actions with costs, outcomes, time and route-based travel |
 | travel | none | `active`, `paused`, `distance`, route, `elapsedMinutes`, `durationMinutes`, `checks`, `eventCount`, `lastEvent`, `lastCompleted` | 5-minute journey checks; pause/resume on travel events |
 | equipment | none | `nextId`, `items{}`, `equippedByPart{}`, `equippedWeaponId` | main-character armor on body parts plus one weapon slot; weapon/armor types; mirrors summed armor into the character stat |
@@ -772,6 +774,45 @@ tutorial: {
 - No RNG and no tick generator. Reset clears progress; save/load keeps it. The game page
   uses it to draw the tutorial checklist and hide the landing screen once a character exists.
 
+## Game module v0.1
+
+- Files: `game/data.js`, `game/game.js`; the playable page is `index.html`, while the
+  previous all-panels sandbox is `debug.html`.
+- Slice:
+
+```js
+game: {
+  started: false,
+  startedAtTick: null,
+  completedAtTick: null,
+  visited: {},          // site key -> { atTick, order }
+  completed: {},        // objective key -> true
+  objectiveOrder: {},   // objective key -> sequence when completed
+  sequence: 0,
+  actions: 0,
+  lastActionOrder: 0,
+  victories: 0,
+  lastVictoryOrder: 0,
+  defeats: 0,
+  updatedAtTick: null
+}
+```
+
+- `game/data.js` owns the journal objectives (`visit`, `action`, `victory`), optional
+  `site`/`siteKind` targets, optional `after` prerequisites, labels/hints with
+  `{start}`, `{tavern}` and `{site}` tokens, plus the site blurbs used by the game page.
+- The module subscribes to `creator:created` / `mainCharacter:saved` (started),
+  `location:visited` (records the site and its visit order), `action:resolved` (action
+  count/order) and `combat:ended` (victory/defeat count, victory order). It evaluates
+  objectives in order; `after` requires the qualifying visit/action/victory to happen after
+  the prerequisite.
+- Each completed objective emits `game:progress` at `depth + 1`, and the completion event
+  fires when every objective is done. Accessors: `objectives()`, `currentObjective()`,
+  `progress()` and `status()`.
+- No RNG and no tick generator. Reset clears progress; save/load keeps it.
+- The game page also renders encounter enemies from the encounters module, starts combat
+  snapshots, and drives travel; `debug.html` exposes every panel and request for testing.
+
 ## Actions module v0.3
 
 - Files: `actions/data.js`, `actions/actions.js`; notes in `actions/README.md`.
@@ -954,6 +995,7 @@ equipment: {
 
 ```
 index.html
+debug.html         all-panels sandbox/debug page (not a module)
 status.html        read-only live node-tree viewer (not a module)
 editor.html        form-based content editor (not a module)
 engine.js
@@ -1008,6 +1050,10 @@ tutorial/
   data.js
   tutorial.js
   README.md
+game/
+  data.js
+  game.js
+  README.md
 locations/
   data.js
   locations.js
@@ -1037,6 +1083,7 @@ test/
   main-character.test.cjs
   creator.test.cjs
   tutorial.test.cjs
+  game.test.cjs
   biome-events.test.cjs
   actions.test.cjs
   travel.test.cjs
@@ -1068,6 +1115,10 @@ test/
   without starting a new world or editing the save.
 - The opening tutorial is a linear four-step checklist with no skip, replay or reward.
   It marks the first action and the tavern trip, but does not gate the rest of the game.
+- The game page is a single-session, event-feed RPG interface. It has one browser save slot
+  plus JSON export/import, no party management, and no quest system beyond the authored
+  journal objectives. `debug.html` still exposes the old all-panels sandbox and is not a
+  player-facing screen.
 - The page's **Visit** button requires a direct route from the current location; the
   module's `visit()` remains permissive for tests and arrival handoffs.
 - Travel events are generic interruptions with stat effects. They do not start combat,

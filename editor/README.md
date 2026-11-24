@@ -83,6 +83,7 @@ biome there when `locations/data.js` gains one.
 - No editing of `CharacterData.behaviorAxes` or `CharacterData.personalities`. They are kept
   untouched when the character file is saved; add form fields in `schemas.js` to edit them.
 - No editor for per-biome action overrides to be created (existing ones appear and are
-  editable), dialogue, or the tutorial checklist text. These need their own content types first.
+  editable), dialogue, the tutorial checklist text, or the game journal. These need their
+  own content types first.
 - The folder picker needs Chrome or Edge. It was tested in Node with a mock folder, not in a
   real browser.

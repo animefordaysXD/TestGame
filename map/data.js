@@ -61,7 +61,7 @@ window.MapData = {
         "biome": "Grassland",
         "biomeKey": "grassland",
         "weather": "Windy",
-        "hostility": 28,
+        "hostility": 45,
         "level": 1
       },
       {

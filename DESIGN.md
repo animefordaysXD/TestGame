@@ -337,6 +337,24 @@ Greywatch Village, and reveals a short tutorial that teaches the basic loop.
 - **Still open:** a first real quest, rewards, skipping/replaying the tutorial, and more
   authored opening scenes per background.
 
+### 3.20 Game page and debug split — Decided, Implemented (game v0.1)
+
+The sandbox was useful for building but did not feel like a game. The player page is now a
+dark medieval text-RPG interface, and the old all-panels sandbox lives in `debug.html`.
+
+- **One screen, one loop.** The game page combines HUD, character sheet, journal, scene,
+  action cards, roads, threats, combat and inventory. The player can look around, take an
+  action, travel, meet spawned enemies and fight.
+- **Encounters are content.** Hostility still drives spawn chance, enemy count and level.
+  Look around re-rolls the current location; roads lead to more dangerous places.
+- **Journal, not quest engine.** `game/data.js` authors five gated objectives and per-site
+  blurbs. The module records visits, actions, victories and defeats, and marks a visit after
+  its prerequisite rather than counting an earlier one.
+- **Debug stays available.** `debug.html` exposes every raw panel and request for testing;
+  it is linked from the game header but is not the player-facing flow.
+- **Still open:** dialogue, branching quests, an actual quest log with rewards, and richer
+  combat (flee, variance, enemy AI).
+
 ## 4. Roadmap — Proposed
 
 Build playable slices, not systems in isolation. Each slice is a game you can play.
@@ -356,10 +374,11 @@ with interruption checks, and biome rolls on arrival exist. The world map is now
 generate procedural interiors on first visit. Drawn layouts and atlas slots are still
 missing. Hostility-driven risk and events for most biomes are still missing. The opening is
 now playable: the character creator is the landing page, the first save starts in
-Greywatch Village, and a four-step tutorial leads to the first action and the tavern. Slice 2
-is partly built: a background/origin/focus character creator sets starting stats and a kit;
-body-part armor, one weapon slot and five item rarities exist with the armor bridge, but
-money, companions and beasts do not.
+Greywatch Village, and the game page is a dark medieval HUD with a journal, scene, roads,
+spawned threats and combat. The old all-panels sandbox is `debug.html`. Slice 2 is partly
+built: a background/origin/focus character creator sets starting stats and a kit; body-part
+armor, one weapon slot and five item rarities exist with the armor bridge, but money,
+companions and beasts do not.
 
 ## 5. Status snapshot
 
@@ -375,6 +394,7 @@ money, companions and beasts do not.
 | locations v0.5: procedural locations and a travel graph with distances; fixed `kind` landmarks and authored static sites | working |
 | map v0.2: static authored world (sites + routes), authored starting site, and procedural landmark interiors generated on first visit | working |
 | tutorial v0.1: persistent four-step opening checklist (create, arrive, first action, tavern) with labels in `tutorial/data.js` | working |
+| game v0.1: dark game page with HUD, journal, roads, encounters, combat, inventory and a five-objective arc; `debug.html` keeps the old sandbox | working |
 | combat v0.2: weapon damage, Strength gating and armor piercing; armor reduces every hit | working |
 | biome events | 7 of 10 biomes have a live event |
 | **save files v0.1 (seed + changes, JSON export/import)** | working |

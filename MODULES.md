@@ -12,7 +12,7 @@
 
 **Last updated:** 2026-11-02
 **Build:** core v0.2, characters v0.6, mainCharacter v0.7, creator v0.1, equipment v0.4,
-locations v0.5, map v0.2, tutorial v0.1, actions v0.3, travel v0.2, combat v0.2,
+locations v0.5, map v0.2, tutorial v0.1, game v0.1, actions v0.3, travel v0.2, combat v0.2,
 encounters v0.1, save helper v0.1, status viewer and content editor (both tools, not modules).
 
 ---
@@ -44,6 +44,7 @@ Newest first. Keep entries short; details live in the module sections.
 
 | Date | Change | Files |
 |---|---|---|
+| 2026-11-24 | Game page and debug split: `index.html` is now a dark medieval game UI with a creator landing screen, HUD, journal, scene, actions, map roads, enemies, combat, inventory and known places. The old all-panels sandbox moved to `debug.html`. Added `game` v0.1 with authored journal objectives (visit/action/victory, `after` gates), visited sites, victory/defeat counts and `game:progress`. The game page drives travel and combat, re-rolls encounters with **Look around**, and shows the starting kit in the inventory. Old Stone Road is slightly more hostile so the first fight is reachable. | `index.html`, `debug.html`, `game/*`, `map/data.js`, `status.html`, tests, docs |
 | 2026-11-24 | Tutorial v0.1 and the opening flow: the game page starts on the character creator, creates the character, loads the static map, visits `world.start` (Greywatch Village), and shows a persistent four-step tutorial (create, arrive, first action, tavern). The tutorial module stores progress in a JSON-safe slice, updates from `creator:created`/`mainCharacter:saved`, `location:visited`, `action:resolved` and `travel:completed`, and emits `tutorial:progress`. The map gains `world.start` and `startKey()`/`startSite()`; travel defaults to the tavern from the starting town; the inventory heading and starting-kit text are clearer. | `index.html`, `map/*`, `tutorial/*`, `status.html`, `test/map.test.cjs`, `test/tutorial.test.cjs`, `test/save.test.cjs`, `package.json`, docs |
 | 2026-11-23 | Creator v0.1: a data-driven character creator chooses a background, origin and focus that add starting stats and equipment. `creator:create` previews/validates a draft, fires `mainCharacter:create` with the computed stats, grants the kit through `equipment:add`, then emits `creator:created`. MainCharacter v0.7 accepts `data.stats`/`data.creator` and stores the build summary. The UI gains three selects and a live preview; the editor edits `characters/creatorData.js` (settings, backgrounds, origins, focuses). | `characters/creatorData.js`, `characters/creator.js`, `characters/mainCharacter.js`, `editor/schemas.js`, `index.html`, `status.html`, `test/creator.test.cjs`, docs |
 | 2026-11-23 | Added working biome events to seven of ten biomes: forest Wolf Pack, grassland Wild Berries, hills Old Cairn, coast Washed-Up Crate, desert Heat Haze and swamp Miasma, joining the tundra Snowfall. Each pairs a themed effect with a positive, negative or neutral hostility modifier; the remaining three biomes keep their disabled templates. | `locations/events/*/events.json`, docs |
@@ -83,13 +84,14 @@ Newest first. Keep entries short; details live in the module sections.
 | locations | 0.5 | `seed`, `createdAt`, `nextId`, `locations{}` (with `connections[]`), `currentId` | `location:add`, `location:link` | `location:added/visited/event` | Locations + biome events | `locations.test.cjs`, `locations-disk.test.cjs`, `biome-events.test.cjs` |
 | map | 0.2 | `version`, `loaded`, `seed`, `total`, `lastGeneratedTick`, `lastGeneratedAt`, `sites{}`, `landmarks{}`, `terrain{}` | `map:load`, `map:generate`, `location:added`, `location:visited` | `location:add`, `location:link`, `map:generated`, `map:terrainGenerated` | Locations panel (map status + terrain) | `map.test.cjs` |
 | tutorial | 0.1 | `started`, `steps{}`, `updatedAtTick`, `completedAtTick` | `creator:created`, `mainCharacter:saved`, `location:visited`, `action:resolved`, `travel:completed` | `tutorial:progress` | Tutorial checklist | `tutorial.test.cjs` |
+| game | 0.1 | `started`, `visited{}`, `completed{}`, `objectiveOrder{}`, `sequence`, `actions`, `lastActionOrder`, `victories`, `lastVictoryOrder`, `defeats` | `creator:created`, `mainCharacter:saved`, `location:visited`, `action:resolved`, `combat:ended` | `game:progress` | Game page journal/HUD | `game.test.cjs` |
 | actions | 0.3 | `locationId`, `locationName`, `biomeKey`, `actions[]`, `lastAction` | `location:visited`, `action:choose` | `actions:loaded`, `action:chosen/resolved/blocked` | Actions | `actions.test.cjs` |
 | travel | 0.2 | `active`, `paused`, `distance`, route, `elapsedMinutes`, `durationMinutes`, `checks`, `eventCount`, `lastEvent`, `lastCompleted` | `travel:start/advance/continue/cancel` | `travel:started/progress/event/resumed/completed/cancelled` | Travel | `travel.test.cjs` |
 | combat | 0.2 | `active`, `round`, `turn`, snapshots, `log[]` | `combat:start/action` | `combat:started/damage/defended/ended` | Combat | `combat.test.cjs` |
 | encounters | 0.1 | `enemies{}`, `lastVisit`, `lastLoot` | `location:visited`, `character:spawned/tempCleared`, `combat:ended` | `character:clearTemp`, `character:spawn`, `equipment:add` | Location visit status | `encounters.test.cjs` |
 
 Registration order in `index.html`: `bodyData.js` -> `body.js` -> characters -> mainCharacter ->
-equipment -> creator -> locations -> map -> tutorial -> actions -> travel -> combat -> encounters. Keep dependencies
+equipment -> creator -> locations -> map -> tutorial -> game -> actions -> travel -> combat -> encounters. Keep dependencies
 registered earlier. The body data/helper must load before the character modules.
 The live page and the save baseline both use `buildEngine(opts)`, which registers the same
 modules and applies the save's seed/start date/tick size.
@@ -971,6 +973,64 @@ labels, checks and hints.
 - The module marks on events, not on current screen state, so leaving the starting town
   does not un-complete arrival.
 - The tutorial does not gate play. It is guidance and a progress record, not a quest system.
+
+---
+
+## Game (`game/game.js` v0.1)
+
+### Role
+
+Owns the journal and exploration record for the playable `index.html` page. It tracks which
+sites have been seen, how many actions/fights happened, and which authored objectives are
+complete. It never reads another slice; site names come from `map/data.js` content, and all
+progress arrives through events. `debug.html` exposes the old all-panels sandbox.
+
+### Files and state
+
+- `game/data.js` - title/tagline, opening and completion text, site blurbs, and objectives
+  (`visit`, `action`, `victory`; optional `site`, `siteKind`, `after`; `{start}`, `{tavern}`,
+  `{site}` tokens).
+- `game/game.js` - event subscriptions, objective evaluation, progress/accessors.
+- Slice:
+  `{ started, startedAtTick, completedAtTick, visited{}, completed{}, objectiveOrder{}, sequence, actions, lastActionOrder, victories, lastVictoryOrder, defeats, updatedAtTick }`.
+- `visited` stores `{ atTick, order }` per site; `objectiveOrder` and `sequence` let an
+  `after` objective tell whether a visit happened after its prerequisite.
+
+### Code map
+
+| Symbol | What it does |
+|---|---|
+| `visitKey(data)` | Maps a location name to its authored site key |
+| `evaluate(depth)` | Marks eligible objectives and emits `game:progress` |
+| `objectives()` / `currentObjective()` | Filled labels/hints and the next open objective |
+| `progress()` | Objective list, counts, visited sites, victories/defeats |
+| `status()` | Copy of the slice for the status page |
+
+### Events
+
+- Listens: `creator:created` / `mainCharacter:saved` (started), `location:visited`,
+  `action:resolved`, `combat:ended`.
+- Emits: `game:progress` at `depth + 1`.
+- No RNG and no tick generator. Reset clears progress; save/load keeps it.
+
+### Adjust it
+
+| If you want to... | Change |
+|---|---|
+| Change journal objectives or text | `game/data.js` |
+| Change what counts for a victory/visit/action | `game/game.js` listeners and `evaluate()` |
+| Change a site's description | `game/data.js` `siteText` |
+| Change the starting site | `map/data.js` `world.start` |
+| Change the game page layout | `index.html` (the sandbox is `debug.html`) |
+
+### Gotchas
+
+- Objective order matters for `after`. A visit, action or victory that happened before the
+  prerequisite does not count; the player must do it again after it.
+- The game module is deliberately small: it does not gate travel or combat and does not own
+  the map, encounters or equipment.
+- The landing screen and game shell both live in `index.html`. The old debug panels are
+  intentionally not part of the player UI.
 
 ---
 

@@ -16,6 +16,8 @@ require("../characters/mainCharacter.js");
 require("../characters/creator.js");
 require("../tutorial/data.js");
 require("../tutorial/tutorial.js");
+require("../game/data.js");
+require("../game/game.js");
 require("../equipment/data.js");
 require("../equipment/equipment.js");
 require("../locations/data.js");
@@ -41,6 +43,7 @@ function buildEngine(opts = {}) {
   engine.register(createLocationsModule());
   engine.register(createMapModule());
   engine.register(createTutorialModule());
+  engine.register(createGameModule());
   engine.register(createActionsModule());
   engine.register(createTravelModule());
   engine.register(createCombatModule());

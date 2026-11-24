@@ -1,0 +1,1446 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Greyreach — Debug sandbox</title>
+<style>
+  :root { --bg:#f6f5f2; --fg:#1d1d1b; --mute:#6b6b66; --line:#d9d7d0; --accent:#2f5d50; color-scheme: light; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#161715; --fg:#e8e6e0; --mute:#8f8e87; --line:#2c2d2a; --accent:#7fb5a3; color-scheme: dark; } }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:16px/1.5 Georgia, serif; }
+  main { max-width:640px; margin:0 auto; padding:24px 16px 48px; }
+  .clock { font-size:2.4rem; letter-spacing:.02em; margin:0; }
+  .meta { color:var(--mute); margin:0 0 20px; }
+  .bar { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:12px; }
+  button, select { font:inherit; padding:6px 12px; background:transparent; color:var(--fg); border:1px solid var(--line); border-radius:4px; cursor:pointer; }
+  button.primary { background:var(--accent); color:var(--bg); border-color:var(--accent); }
+  .bar input[type="number"] { width:64px; padding:6px 8px; background:transparent; color:var(--fg); border:1px solid var(--line); border-radius:4px; font:inherit; }
+  button:focus-visible, select:focus-visible, input:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+  label { color:var(--mute); }
+  #log { list-style:none; margin:16px 0 0; padding:0; border-top:1px solid var(--line); max-height:50vh; overflow-y:auto; }
+  #log li { padding:6px 0; border-bottom:1px solid var(--line); }
+  #log time { color:var(--mute); margin-right:8px; }
+  h2 { font-size:1.1rem; margin:20px 0 6px; }
+  .seed { color:var(--mute); font-size:.78rem; font-weight:normal; margin-left:6px; }
+  .chars { list-style:none; margin:0; padding:0; }
+  .chars li { padding:6px 0; border-bottom:1px solid var(--line); display:flex; gap:8px; justify-content:space-between; align-items:center; }
+  .chars small { display:block; color:var(--mute); }
+  .chars .row-actions { display:flex; flex-wrap:wrap; gap:6px; justify-content:flex-end; }
+  .empty { color:var(--mute); padding:12px 0; }
+  .creator { display:grid; grid-template-columns:128px minmax(0,1fr); gap:16px; padding:12px; border:1px solid var(--line); border-radius:6px; margin-bottom:12px; }
+  .creator .portrait img { display:block; width:128px; height:128px; object-fit:cover; background:var(--line); border:1px solid var(--line); border-radius:4px; }
+  .creator .portrait input { width:128px; margin-top:8px; font-size:.75rem; color:var(--mute); }
+  .creator label { display:block; margin-bottom:8px; font-size:.85rem; }
+  .creator input[type="text"], .creator input[type="number"], .creator select { display:block; width:100%; margin-top:3px; padding:6px 8px; background:transparent; color:var(--fg); border:1px solid var(--line); border-radius:4px; font:inherit; }
+  .creator .bar { margin-bottom:8px; }
+  .creator .status { margin:0; min-height:1.5em; }
+  .stats { margin:0 0 16px; }
+  .stats h3 { font-size:.95rem; margin:0 0 6px; }
+  .stat-grid { display:grid; grid-template-columns:repeat(3, minmax(0,1fr)); gap:6px; }
+  .stat { display:flex; justify-content:space-between; gap:6px; padding:5px 8px; border:1px solid var(--line); border-radius:4px; font:600 .78rem/1.4 "Segoe UI", system-ui, sans-serif; }
+  .stat-label { color:var(--mute); font-weight:400; }
+  .stat-value { font-variant-numeric:tabular-nums; }
+  .chars small.stats-line { font-family:"Segoe UI", system-ui, sans-serif; font-size:.72rem; font-variant-numeric:tabular-nums; margin-top:2px; }
+  .chars small.body-line { font-family:"Segoe UI", system-ui, sans-serif; font-size:.72rem; margin-top:2px; }
+  .terrain { display:block; overflow:auto; margin:0 0 8px; padding:10px; border:1px solid var(--line); border-radius:6px; background:color-mix(in srgb, var(--line) 18%, transparent); font:12px/1.15 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:.08em; white-space:pre; }
+  .landing-intro { margin: 10vh 0 24px; }
+  .landing-intro .eyebrow { text-transform:uppercase; letter-spacing:.22em; font:600 .72rem "Segoe UI", system-ui, sans-serif; color:var(--accent); margin:0 0 10px; }
+  .landing-intro h1 { font-size:3rem; line-height:1.02; margin:0 0 12px; letter-spacing:.01em; }
+  .landing-intro .lede { font-size:1.05rem; color:var(--mute); margin:0 0 18px; max-width:48ch; }
+  .landing-steps { margin:0 0 18px; padding-left:1.25rem; color:var(--mute); }
+  .landing-steps li { margin:6px 0; }
+  .tutorial { border:1px solid var(--line); border-radius:6px; padding:12px; margin:0 0 16px; }
+  .tutorial ol { margin:8px 0 10px; padding-left:1.4rem; }
+  .tutorial li { margin:4px 0; }
+  .tutorial li.done { color:var(--mute); text-decoration:line-through; }
+  .tutorial .step-done { color:var(--accent); font-weight:600; }
+  body.landing main > :not(#landingIntro):not(#mainCharacterPanel) { display:none; }
+  body.landing #mainCharacterPanel > .stats,
+  body.landing #mainCharacterPanel > p.meta,
+  body.landing #mcFolder,
+  body.landing #mcStatus { display:none; }
+  body.landing #mainCharacterPanel { margin-top:8px; }
+  body.landing #mainCharacterPanel .creator { padding:0; border:0; margin:0; }
+  body:not(.landing) #landingIntro { display:none; }
+  .combat { border:1px solid var(--line); border-radius:6px; padding:12px; margin-bottom:12px; }
+  .combatants { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+  .combatant { display:flex; justify-content:space-between; gap:8px; padding:6px 8px; border:1px solid var(--line); border-radius:4px; font:600 .82rem/1.4 "Segoe UI", system-ui, sans-serif; font-variant-numeric:tabular-nums; }
+  .combatant .stat-label { font-weight:400; }
+  #combatLog { list-style:none; margin:8px 0 0; padding:0; max-height:180px; overflow-y:auto; font-size:.82rem; }
+  #combatLog li { padding:4px 0; border-bottom:1px solid var(--line); }
+  #combatLog li:last-child { border-bottom:0; }
+  @media (max-width:520px) {
+    .creator { grid-template-columns:1fr; }
+    .creator .portrait { display:flex; gap:12px; align-items:flex-start; }
+    .stat-grid { grid-template-columns:repeat(2, minmax(0,1fr)); }
+  }
+  code { font-size:.85em; }
+  a { color:var(--accent); text-underline-offset:2px; }
+</style>
+</head>
+<body class="landing">
+<main>
+  <p class="meta" id="debugBanner"><a href="index.html">← Back to game</a> · <strong>Debug sandbox</strong> — every panel and test control is exposed here.</p>
+  <section id="landingIntro" class="landing-intro">
+    <p class="eyebrow">A text adventure</p>
+    <h1>The Greyreach</h1>
+    <p class="lede">Make a character, wake up in Greywatch Village, and take your first steps into a world that wants something from you.</p>
+    <ol class="landing-steps">
+      <li>Choose a background, origin and focus.</li>
+      <li>Create your character and arrive in the village.</li>
+      <li>Take an action, check your inventory, then travel to the tavern.</li>
+    </ol>
+    <div class="bar">
+      <button id="landingContinue">Continue saved game</button>
+      <button id="landingImport">Import save file</button>
+      <a href="index.html">Back to game</a>
+    </div>
+  </section>
+
+  <h1 class="clock" id="clock"></h1>
+  <p class="meta" id="meta"></p>
+  <p class="meta"><a href="status.html">Status tree →</a></p>
+
+  <div class="bar">
+    <button class="primary" id="step">Step</button>
+    <button id="play">Play</button>
+    <label>Tick size
+      <select id="size">
+        <option value="1">1 min</option><option value="5">5 min</option><option value="10" selected>10 min</option><option value="15">15 min</option>
+        <option value="30">30 min</option><option value="60">1 hour</option><option value="360">6 hours</option><option value="1440">1 day</option>
+      </select>
+    </label>
+  </div>
+  <div class="bar">
+    <button id="save">Quick save</button><button id="load">Quick load</button><button id="new">New world</button>
+    <label><input type="checkbox" id="demo"> Test generator</label>
+  </div>
+  <div class="bar">
+    <button id="saveFile">Export save file</button><button id="loadFile">Import save file</button>
+    <input type="file" id="saveFileInput" accept="application/json,.json" hidden aria-label="Load a text RPG save file">
+  </div>
+  <p class="meta" id="saveStatus">Save files store the world seed plus the changes since a fresh world.</p>
+
+  <section id="mainCharacterPanel">
+  <h2 id="mcTitle">Create your character</h2>
+  <div class="creator">
+    <div class="portrait">
+      <img id="mcPreview" alt="Main character portrait">
+      <input type="file" id="mcImage" accept="image/*" aria-label="Profile picture">
+    </div>
+    <div class="fields">
+      <label>Name
+        <input type="text" id="mcName" maxlength="40" autocomplete="off" placeholder="Enter a name">
+      </label>
+      <label>Gender
+        <select id="mcGender"></select>
+      </label>
+      <label>Age
+        <input type="number" id="mcAge" min="1" max="120" step="1">
+      </label>
+      <label>Background
+        <select id="mcBackground"></select>
+      </label>
+      <label>Origin
+        <select id="mcOrigin"></select>
+      </label>
+      <label>Focus
+        <select id="mcFocus"></select>
+      </label>
+      <p class="meta" id="mcBuildPreview">Choose a build to preview its stats.</p>
+      <p class="meta">The first save uses these choices for starting stats and equipment. Later saves only edit the profile.</p>
+      <div class="bar">
+        <button class="primary" id="mcSave">Save main character</button>
+        <button id="mcFolder">Connect mainChar folder</button>
+      </div>
+      <p class="meta status" id="mcStatus"></p>
+    </div>
+  </div>
+  <div class="stats">
+    <h3>Base stats</h3>
+    <div class="stat-grid" id="mcStats"></div>
+    <p class="meta">Set when the character is first saved. Profile edits keep the current values.</p>
+  </div>
+  <div class="stats">
+    <h3>Body</h3>
+    <div class="stat-grid" id="mcBody"></div>
+    <p class="meta">Head, torso, arms, hands, legs and feet. All parts start intact; no injury system uses them yet.</p>
+  </div>
+  <p class="meta">Saves in the game; with the folder connected, also writes <code>characters/mainChar/main.json</code> and a profile image.</p>
+  </section>
+
+  <section id="tutorial" class="tutorial" hidden>
+    <h2>Tutorial <span class="seed" id="tutorialProgress"></span></h2>
+    <p class="meta" id="tutorialStatus">Your story begins in Greywatch Village.</p>
+    <ol id="tutorialSteps"></ol>
+    <p class="meta" id="tutorialInventory"></p>
+    <p class="meta" id="tutorialHint"></p>
+    <div class="bar">
+      <button id="tutorialActions">Go to actions</button>
+      <button id="tutorialInventoryButton">Show inventory</button>
+    </div>
+  </section>
+
+  <h2 id="equipmentTitle">Inventory <span class="seed" id="equipArmor"></span></h2>
+  <div class="bar">
+    <button class="primary" id="equipFind">Find armor</button>
+    <button id="equipFindWeapon">Find weapon</button>
+    <button id="equipClear">Unequip all</button>
+  </div>
+  <p class="meta" id="equipStatus">No armor or weapon equipped.</p>
+  <ul class="chars" id="equipment"></ul>
+  <p class="meta">Your starting kit from the character creator appears here automatically. Equip, unequip or destroy items as you travel. Armor covers body parts and cannot share a part with another worn item. A weapon fills one weapon slot and needs Strength to use: below the requirement it adds no damage and no armor piercing. Armor reduces every hit and Defend doubles it. Only the main character can wear equipment in this version.</p>
+
+  <h2>Characters</h2>
+  <div class="bar">
+    <button class="primary" id="spawn">Spawn character</button>
+    <button id="leave">Leave location (clear temporary)</button>
+    <button id="disk">Connect folder</button>
+  </div>
+  <h2>Temporary Spawn</h2><ul class="chars" id="temp"></ul>
+  <h2>Named NPC</h2><ul class="chars" id="named"></ul>
+
+  <h2>Combat</h2>
+  <div class="combat">
+    <div class="combatants">
+      <div class="combatant"><span class="stat-label" id="combatPlayerName">You</span><strong id="combatPlayerHp">—</strong></div>
+      <div class="combatant"><span class="stat-label" id="combatEnemyName">Enemy</span><strong id="combatEnemyHp">—</strong></div>
+    </div>
+    <p class="meta" id="combatStatus">No combat. Use Fight on an NPC.</p>
+    <p class="meta">Attack uses Personal Combat plus the equipped weapon. Armor reduces every hit; Defend doubles that reduction, and a weapon's armor piercing cuts through it.</p>
+    <div class="bar">
+      <button id="combatAttack" disabled>Attack</button>
+      <button id="combatDefend" disabled>Defend</button>
+    </div>
+    <ul id="combatLog"></ul>
+  </div>
+
+  <h2>Locations <span class="seed" id="locSeed"></span></h2>
+  <div class="bar">
+    <button class="primary" id="loadMap">Load static map</button>
+    <button id="locDisk">Connect Locations folder</button>
+    <button id="reloadBiomeEvents">Reload biome events</button>
+  </div>
+  <p class="meta" id="mapStatus">Map: not loaded.</p>
+  <p class="meta">The world map is fixed content in <code>map/data.js</code>: the same sites and routes every game. Loading it again never duplicates sites.</p>
+  <p class="meta">The tavern, castle and shack generate their interiors procedurally the first time you visit them; the layout is then kept in the save.</p>
+  <p class="meta">JSON goes to <code>Locations/&lt;map seed&gt;/loc_0001.json</code> when the folder is connected.</p>
+  <p class="meta">Authored routes set the travel graph. A route's distance sets the journey time; the Travel action only offers linked destinations.</p>
+  <p class="meta">Biome events live in <code>locations/events/&lt;biome&gt;/events.json</code>. Each enabled event rolls its own chance on a visit.</p>
+  <p class="meta" id="locEventStatus">Biome events: loading…</p>
+  <ul class="chars" id="locations"></ul>
+  <p class="meta" id="locVisitStatus">Visit a location to roll its biome events.</p>
+  <p class="meta" id="terrainStatus" hidden></p>
+  <pre class="terrain" id="mapTerrain" hidden></pre>
+
+  <h2>Actions <span class="seed" id="actionArea"></span></h2>
+  <p class="meta" id="actionStatus">Visit a location to load five actions.</p>
+  <ul class="chars" id="actions"></ul>
+  <p class="meta">Costs and outcomes are applied to the main character. Time costs advance the clock. Travel offers only connected locations and runs in 5-minute steps; it can pause on an event, and the locations module still performs arrival.</p>
+
+  <h2>Travel <span class="seed" id="travelRoute"></span></h2>
+  <p class="meta" id="travelStatus">Choose Travel in the Actions panel to begin a journey.</p>
+  <div class="bar">
+    <button id="travelContinue" disabled>Continue travel</button>
+    <button id="travelCancel" disabled>Cancel journey</button>
+  </div>
+  <p class="meta" id="travelEvent" hidden></p>
+  <p class="meta">Travel advances the clock in 5-minute steps. A route's distance sets its duration (15 min per league). A travel event pauses the journey until you continue.</p>
+
+  <h2>Event log</h2>
+  <ul id="log"></ul>
+  <p class="empty" id="empty">No events yet. Generators are empty by default; add modules, or tick "Test generator" to check the event pipeline.</p>
+</main>
+
+<script src="engine.js"></script>
+<script src="characters/statsData.js"></script>
+<script src="characters/data.js"></script>
+<script src="characters/bodyData.js"></script>
+<script src="characters/body.js"></script>
+<script src="characters/characters.js"></script>
+<script src="characters/mainCharacterData.js"></script>
+<script src="characters/creatorData.js"></script>
+<script src="characters/mainCharacter.js"></script>
+<script src="characters/creator.js"></script>
+<script src="equipment/data.js"></script>
+<script src="equipment/equipment.js"></script>
+<script src="locations/data.js"></script>
+<script src="locations/locations.js"></script>
+<script src="map/data.js"></script>
+<script src="map/map.js"></script>
+<script src="tutorial/data.js"></script>
+<script src="tutorial/tutorial.js"></script>
+<script src="game/data.js"></script>
+<script src="game/game.js"></script>
+<script src="actions/data.js"></script>
+<script src="actions/actions.js"></script>
+<script src="travel/data.js"></script>
+<script src="travel/travel.js"></script>
+<script src="combat/data.js"></script>
+<script src="combat/combat.js"></script>
+<script src="encounters/data.js"></script>
+<script src="encounters/encounters.js"></script>
+<script src="save/gameSave.js"></script>
+<script>
+  const $ = (id) => document.getElementById(id);
+
+  // A fresh world with every module registered. The save helper uses the same factory to
+  // rebuild the baseline before applying a save file's changes.
+  function buildEngine(opts = {}) {
+    const e = new Engine({ startDate: "1000-01-01T06:00:00Z", tickMinutes: 10, ...opts });
+    e.register(createCharactersModule());
+    e.register(createMainCharacterModule());
+    e.register(createEquipmentModule());
+    e.register(createCreatorModule());
+    e.register(createLocationsModule());
+    e.register(createMapModule());
+    e.register(createTutorialModule());
+    e.register(createGameModule());
+    e.register(createActionsModule());
+    e.register(createTravelModule());
+    e.register(createCombatModule());
+    e.register(createEncountersModule());
+    // Add more modules here, e.g. e.register(createMarriageModule());
+    return e;
+  }
+
+  const engine = buildEngine();
+  const chars = engine.modules.get("characters");
+  const mainCharModule = engine.modules.get("mainCharacter");
+  const equipmentModule = engine.modules.get("equipment");
+  const creatorModule = engine.modules.get("creator");
+  const locationsModule = engine.modules.get("locations");
+  const mapModule = engine.modules.get("map");
+  const tutorialModule = engine.modules.get("tutorial");
+  const travelModule = engine.modules.get("travel");
+  const combatModule = engine.modules.get("combat");
+  const encounterModule = engine.modules.get("encounters");
+
+  const statDefs = CharacterStatsData.stats;
+  function statDisplay(stats) {
+    return statDefs.map((def) => {
+      const raw = stats && Number(stats[def.key]);
+      const value = Number.isFinite(raw) ? Math.round(raw) : null;
+      const max = def.kind === "resource" && stats && Number.isFinite(Number(stats[def.key + "Max"]))
+        ? Math.round(Number(stats[def.key + "Max"])) : def.max;
+      return { def, value, max };
+    });
+  }
+  function statsLine(stats) {
+    return statDisplay(stats).map(({ def, value, max }) => `${def.short} ${value === null ? "—" : value}/${max}`).join(" · ");
+  }
+  function statsTitle(stats) {
+    return statDisplay(stats).map(({ def, value, max }) => `${def.label} ${value === null ? "—" : value}/${max}`).join(" · ");
+  }
+  function behaviorLine(behavior) {
+    return (CharacterData.behaviorAxes || [])
+      .map((def) => `${def.label} ${behavior && Number.isFinite(Number(behavior[def.key])) ? Math.round(Number(behavior[def.key])) : "—"}`)
+      .join(" · ");
+  }
+  function bodyDefs() {
+    return (CharacterBodyData && CharacterBodyData.parts) || [];
+  }
+  function bodyParts(body) {
+    return body && body.parts && typeof body.parts === "object" ? body.parts : {};
+  }
+  function bodyStatus(part) {
+    return part && typeof part.status === "string" && part.status.trim()
+      ? part.status.trim()
+      : ((CharacterBodyData && CharacterBodyData.defaultStatus) || "intact");
+  }
+  function bodySummary(body) {
+    const parts = bodyParts(body), defs = bodyDefs();
+    const intact = defs.filter((def) => bodyStatus(parts[def.key]) === "intact").length;
+    return `${Object.keys(parts).length}/${defs.length} parts · ${intact} intact`;
+  }
+  function bodyTitle(body) {
+    const parts = bodyParts(body);
+    return bodyDefs().map((def) => `${def.label}: ${bodyStatus(parts[def.key])}`).join(" · ");
+  }
+
+  function render() {
+    const n = engine.now;
+    $("clock").textContent = n.text;
+    $("meta").textContent = `Tick ${n.tick} · ${n.tickMinutes} min per tick · seed ${engine.state.seed}`;
+    $("play").textContent = engine.running ? "Pause" : "Play";
+    $("size").value = String(n.tickMinutes);
+    $("empty").hidden = engine.state.eventLog.length > 0;
+  }
+  function addLine(e) {
+    const li = document.createElement("li");
+    const t = document.createElement("time"); t.textContent = e.when;
+    li.append(t, e.text || e.type);
+    $("log").prepend(li);
+  }
+  function rebuildLog() { $("log").innerHTML = ""; engine.state.eventLog.forEach(addLine); }
+
+  engine.on("event", addLine);
+  engine.on("tick:end", render);
+
+  function renderLocations() {
+    const s = engine.state.modules.locations;
+    if (!s) return;
+    $("locSeed").textContent = `map seed ${s.seed}`;
+
+    const mapS = mapModule.status();
+    const siteIds = Object.entries(mapS.sites || {});
+    const landmarkIds = Object.entries(mapS.landmarks || {});
+    $("mapStatus").textContent = mapS.loaded
+      ? `Map: ${mapS.total} static site${mapS.total === 1 ? "" : "s"} · ${siteIds.length} charted · ${landmarkIds.length} landmark${landmarkIds.length === 1 ? "" : "s"} (${landmarkIds.map(([kind, id]) => `${kind} ${id}`).join(", ")}) · loaded ${mapS.lastGeneratedAt}.`
+      : "Map: not loaded. Press Load static map.";
+
+    const current = s.currentId ? s.locations[s.currentId] : null;
+    $("locVisitStatus").textContent = current
+      ? `Current location: ${current.name} · level ${current.level ?? 1} · hostility ${current.hostility}/100 (${locationsModule.labelFor(current.hostility)}).`
+      : "Visit a location to roll its biome events and encounters.";
+
+    const terrain = current ? mapModule.terrainFor(current.id) : null;
+    const terrainEl = $("mapTerrain"), terrainStatus = $("terrainStatus");
+    if (terrain) {
+      const legend = ((MapData.terrain && MapData.terrain.legend) || [])
+        .map((entry) => `${entry.tile} ${entry.label}`).join(" · ");
+      terrainStatus.textContent = `${terrain.label} · ${terrain.rooms} room${terrain.rooms === 1 ? "" : "s"} · ${terrain.width}×${terrain.height} · generated ${terrain.generatedAt}${legend ? " · " + legend : ""}`;
+      terrainStatus.hidden = false;
+      terrainEl.textContent = terrain.tiles.join("\n");
+      terrainEl.hidden = false;
+    } else {
+      terrainStatus.hidden = true;
+      terrainStatus.textContent = "";
+      terrainEl.hidden = true;
+      terrainEl.textContent = "";
+    }
+
+    const ul = $("locations");
+    ul.innerHTML = "";
+    const list = Object.values(s.locations);
+    if (!list.length) {
+      const li = document.createElement("li");
+      li.className = "empty";
+      li.textContent = "No locations yet. Add one to chart the map.";
+      ul.append(li);
+      return;
+    }
+    for (const loc of list) {
+      const li = document.createElement("li"), box = document.createElement("div");
+      const title = document.createElement("strong"); title.textContent = loc.name;
+      const routes = Array.isArray(loc.connections) ? loc.connections : [];
+      const sm = document.createElement("small");
+      sm.textContent = `${loc.kind ? loc.kind + " · " : ""}${loc.biome} · ${loc.weather} · level ${loc.level ?? 1} · hostility ${loc.hostility}/100 (${locationsModule.labelFor(loc.hostility)}) · ${routes.length} route${routes.length === 1 ? "" : "s"}${loc.id === s.currentId ? " · current" : ""}`;
+      box.append(title, sm);
+      li.append(box);
+
+      const reachable = !current || current.id === loc.id || !!locationsModule.routeBetween(current.id, loc.id);
+      const visit = document.createElement("button");
+      visit.textContent = "Visit";
+      visit.title = reachable
+        ? "Visit this location and roll its biome events"
+        : `No direct route from ${current.name}; travel there from a connected location.`;
+      visit.disabled = !reachable;
+      visit.onclick = () => visitLocation(loc.id);
+      li.append(visit);
+
+      const b = document.createElement("button");
+      b.textContent = "JSON";
+      b.title = "Download this location as JSON";
+      b.onclick = () => downloadLocation(loc.id);
+      li.append(b);
+      ul.append(li);
+    }
+  }
+
+  function downloadLocation(id) {
+    const json = locationsModule.toJSON(id);
+    if (!json) return;
+    const blob = new Blob([json], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = id + ".json";
+    document.body.append(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  let visiting = false;
+  async function visitLocation(id) {
+    if (visiting) return;
+    const locState = engine.state.modules.locations;
+    const current = locState && locState.currentId ? locState.locations[locState.currentId] : null;
+    const target = locState && locState.locations ? locState.locations[id] : null;
+    if (current && current.id !== id && !locationsModule.routeBetween(current.id, id)) {
+      alert(`No direct route from ${current.name} to ${target ? target.name : id}. Travel along the routes from the Actions panel.`);
+      return;
+    }
+    visiting = true;
+    try {
+      const result = await locationsModule.visit(id);
+      engine.flush();
+      const names = result.events.map((event) => event.name);
+      const patrol = encounterModule ? encounterModule.lastVisit() : null;
+      const encounterText = patrol && patrol.triggered
+        ? ` ${patrol.count} hostile${patrol.count === 1 ? "" : "s"} appeared (${patrol.chancePercent}% chance at hostility ${patrol.hostility}).`
+        : patrol ? ` No encounter (${patrol.chancePercent}% chance at hostility ${patrol.hostility}).` : "";
+      $("locVisitStatus").textContent = (names.length
+        ? `Visited ${result.location.name}. Triggered: ${names.join(", ")}.`
+        : `Visited ${result.location.name}. No biome events triggered.`) + encounterText;
+    } catch (error) {
+      alert("Could not visit that location: " + error.message);
+    } finally {
+      visiting = false;
+    }
+  }
+
+  async function updateBiomeEventStatus(force = false) {
+    const el = $("locEventStatus");
+    el.textContent = "Biome events: loading…";
+    try {
+      const summary = await locationsModule.loadEvents(force);
+      el.textContent = summary.errors.length
+        ? `Biome events: ${summary.enabled} active, ${summary.errors.length} biome file(s) failed to load.`
+        : `Biome events: ${summary.enabled} active across ${summary.biomes} biomes.`;
+    } catch (error) {
+      el.textContent = "Biome events: could not load. Serve the project over HTTP.";
+      console.warn("[ui] biome event load failed", error);
+    }
+  }
+
+  $("reloadBiomeEvents").onclick = () => updateBiomeEventStatus(true);
+
+  function renderActions() {
+    const s = engine.state.modules.actions;
+    const actions = s && Array.isArray(s.actions) ? s.actions : [];
+    const travelActive = !!(engine.state.modules.travel && engine.state.modules.travel.active);
+
+    $("actionArea").textContent = s && s.locationName ? `— ${s.locationName}` : "";
+    const ul = $("actions");
+    ul.innerHTML = "";
+
+    if (!actions.length) {
+      $("actionStatus").textContent = "Visit a location to load five actions.";
+      const li = document.createElement("li");
+      li.className = "empty";
+      li.textContent = "No area actions loaded.";
+      ul.append(li);
+      return;
+    }
+
+    $("actionStatus").textContent = travelActive
+      ? "Travel in progress. Use the Travel panel to continue or cancel."
+      : `Choose an action in ${s.locationName || "the area"}. Costs and outcomes use the main character's stats.`;
+
+    const routeList = s.locationId ? locationsModule.connectionsFor(s.locationId) : [];
+    const routesById = new Map(routeList.map((route) => [route.id, route]));
+
+    for (const action of actions) {
+      const li = document.createElement("li"), box = document.createElement("div");
+      const title = document.createElement("strong");
+      title.textContent = action.name;
+      const sm = document.createElement("small");
+      const bits = [];
+      if (action.timeMinutes) bits.push(`${action.timeMinutes} min`);
+      for (const cost of action.costs) bits.push(`${cost.delta > 0 ? "+" : ""}${cost.delta} ${cost.stat}`);
+      sm.textContent = `${action.description}${bits.length ? ` · ${bits.join(" · ")}` : ""}`;
+      box.append(title, sm);
+
+      const row = document.createElement("div");
+      row.className = "row-actions";
+
+      let destination = null;
+      if (action.requiresDestination) {
+        destination = document.createElement("select");
+        destination.setAttribute("aria-label", `Destination for ${action.name}`);
+        if (!routeList.length) {
+          const option = document.createElement("option");
+          option.value = "";
+          option.textContent = "No routes from here";
+          destination.append(option);
+          destination.disabled = true;
+        } else {
+          for (const route of routeList) {
+            const option = document.createElement("option");
+            option.value = route.id;
+            option.textContent = `${route.name} (${route.biome}) · ${route.distance} league${route.distance === 1 ? "" : "s"} · ${route.minutes} min`;
+            destination.append(option);
+          }
+          // From the starting town, make the tavern the first suggested journey.
+          const start = startingKey();
+          const here = s.locationId ? engine.state.modules.locations.locations[s.locationId] : null;
+          const tavernRoute = routeList.find((route) => route.kind === "tavern");
+          if (tavernRoute && here && here.key === start) destination.value = tavernRoute.id;
+        }
+        row.append(destination);
+      }
+
+      const b = document.createElement("button");
+      b.textContent = "Choose";
+      b.title = `Choose ${action.name}`;
+      b.disabled = !!(travelActive || (action.requiresDestination && !routeList.length));
+      b.onclick = () => chooseAction(
+        action,
+        destination ? destination.value : "",
+        destination ? routesById.get(destination.value) || null : null
+      );
+
+      row.append(b);
+      li.append(box, row);
+      ul.append(li);
+    }
+  }
+
+  let choosingAction = false;
+  let drivingTravel = false;
+
+  async function chooseAction(action, destinationId, route = null) {
+    if (choosingAction) return;
+    if (engine.state.modules.travel && engine.state.modules.travel.active) return;
+    choosingAction = true;
+    try {
+      engine.fire({
+        type: "action:choose",
+        data: {
+          actionId: action.id,
+          destinationId,
+          distance: route ? route.distance : undefined,
+          durationMinutes: route ? route.minutes : undefined
+        }
+      });
+      engine.flush();
+
+      const last = engine.state.modules.actions.lastAction;
+      if (!last || last.actionId !== action.id) return;
+
+      // Travel spends its time in 5-minute checks instead of one block.
+      if (last.travelTo) {
+        await beginTravel(last);
+        return;
+      }
+
+      // Other actions spend their time immediately, in whole core ticks.
+      if (last.timeMinutes > 0) {
+        const tickMinutes = Math.max(1, engine.now.tickMinutes);
+        engine.step(Math.max(1, Math.ceil(last.timeMinutes / tickMinutes)));
+        engine.flush();
+      }
+      $("actionStatus").textContent = `${last.text}${last.timeMinutes ? ` (${last.timeMinutes} min)` : ""}`;
+    } catch (error) {
+      alert("Could not resolve that action: " + error.message);
+    } finally {
+      choosingAction = false;
+    }
+  }
+
+  async function beginTravel(last) {
+    const locState = engine.state.modules.locations;
+    const destination = locState && locState.locations ? locState.locations[last.travelTo] : null;
+    if (!destination) {
+      alert("That destination is no longer on the map.");
+      return;
+    }
+
+    act("travel:start", {
+      originId: last.locationId,
+      originName: last.locationName,
+      destinationId: destination.id,
+      destinationName: destination.name,
+      destinationBiomeKey: destination.biomeKey,
+      distance: last.travelDistance || 0,
+      durationMinutes: last.timeMinutes
+    });
+
+    const journey = engine.state.modules.travel;
+    if (!journey || !journey.active) {
+      $("actionStatus").textContent = "The journey could not begin.";
+      return;
+    }
+    await driveTravel();
+  }
+
+  // Drive a journey one 5-minute check at a time. The UI owns the clock: it switches
+  // to 5-minute ticks, steps once per check, then restores the player's tick size.
+  async function driveTravel() {
+    if (drivingTravel) return;
+    drivingTravel = true;
+    const originalTick = engine.now.tickMinutes;
+    let completed = null;
+    try {
+      if (engine.now.tickMinutes !== travelModule.minutesPerCheck) {
+        engine.setTickMinutes(travelModule.minutesPerCheck);
+      }
+      for (;;) {
+        const journey = engine.state.modules.travel;
+        if (!journey || !journey.active || journey.paused) break;
+
+        // A continued journey that was already at its destination (an event on the
+        // final check) completes without adding another tick.
+        if (journey.elapsedMinutes < journey.durationMinutes) {
+          engine.step(1);
+          engine.flush();
+        }
+        act("travel:advance", { minutes: travelModule.minutesPerCheck });
+
+        const after = engine.state.modules.travel;
+        if (!after.active) { completed = after.lastCompleted; break; }
+        if (after.paused) break;
+      }
+    } finally {
+      if (engine.now.tickMinutes !== originalTick) engine.setTickMinutes(originalTick);
+      drivingTravel = false;
+      renderTravel();
+    }
+
+    if (completed) await arriveTravel(completed);
+  }
+
+  async function arriveTravel(completed) {
+    let arrival = `You reach ${completed.destinationName} after ${completed.elapsedMinutes} min.`;
+    try {
+      const result = await locationsModule.visit(completed.destinationId);
+      engine.flush();
+      const names = result.events.map((event) => event.name);
+      arrival = `You reach ${result.location.name} after ${completed.elapsedMinutes} min.${names.length ? ` Triggered: ${names.join(", ")}.` : " No biome events."}`;
+      $("locVisitStatus").textContent = `Current location: ${result.location.name}.`;
+    } catch (error) {
+      alert("Could not finish the journey: " + error.message);
+    }
+    renderTravel();
+    renderActions();
+    $("actionStatus").textContent = arrival;
+  }
+
+  function renderTravel() {
+    const s = engine.state.modules.travel || {};
+    const active = !!s.active;
+
+    $("travelContinue").disabled = !active;
+    $("travelCancel").disabled = !active;
+    $("travelRoute").textContent = active
+      ? `— ${s.originName || "here"} to ${s.destinationName || "somewhere"}${s.distance ? ` · ${s.distance} league${s.distance === 1 ? "" : "s"}` : ""}`
+      : "";
+
+    const eventBox = $("travelEvent");
+    if (active) {
+      $("travelStatus").textContent = [
+        `${s.elapsedMinutes}/${s.durationMinutes} min`,
+        s.distance ? `${s.distance} league${s.distance === 1 ? "" : "s"}` : "",
+        s.paused ? "paused by an event" : "travelling",
+        `${s.checks} check${s.checks === 1 ? "" : "s"}`
+      ].filter(Boolean).join(" · ");
+      if (s.paused && s.lastEvent) {
+        eventBox.hidden = false;
+        eventBox.textContent = `${s.lastEvent.name}: ${s.lastEvent.text} Continue when ready.`;
+      } else {
+        eventBox.hidden = true;
+        eventBox.textContent = "";
+      }
+    } else if (s.lastCompleted) {
+      $("travelStatus").textContent = `Arrived at ${s.lastCompleted.destinationName} after ${s.lastCompleted.elapsedMinutes} minutes${s.lastCompleted.distance ? ` (${s.lastCompleted.distance} league${s.lastCompleted.distance === 1 ? "" : "s"})` : ""}.`;
+      eventBox.hidden = true;
+      eventBox.textContent = "";
+    } else {
+      $("travelStatus").textContent = "Choose Travel in the Actions panel to begin a journey.";
+      eventBox.hidden = true;
+      eventBox.textContent = "";
+    }
+  }
+
+  $("travelContinue").onclick = async () => {
+    const journey = engine.state.modules.travel;
+    if (!journey || !journey.active) return;
+    if (journey.paused) act("travel:continue");
+    await driveTravel();
+  };
+
+  $("travelCancel").onclick = () => {
+    if (!confirm("Abandon this journey? Time and costs already spent are not refunded.")) return;
+    act("travel:cancel");
+    renderTravel();
+  };
+
+  engine.on("event:actions:loaded", renderActions);
+  engine.on("event:action:resolved", (e) => {
+    const data = e.data || {};
+    $("actionStatus").textContent = `${data.text || e.text || "Action resolved."}${data.timeMinutes ? ` (${data.timeMinutes} min)` : ""}`;
+  });
+  engine.on("event:action:blocked", (e) => { $("actionStatus").textContent = e.text; });
+  engine.on("event:location:added", renderActions);
+
+  for (const name of ["travel:started", "travel:progress", "travel:event", "travel:resumed", "travel:completed", "travel:cancelled"]) {
+    engine.on(`event:${name}`, () => { renderTravel(); renderActions(); });
+  }
+
+  // ----- Main character panel -----
+  const mcData = MainCharacterData;
+  let pendingMainImage = null;
+
+  $("mcName").maxLength = mcData.nameMaxLength;
+  $("mcAge").min = mcData.ageRange[0];
+  $("mcAge").max = mcData.ageRange[1];
+  for (const gender of mcData.genders) {
+    const option = document.createElement("option");
+    option.value = gender;
+    option.textContent = gender;
+    $("mcGender").append(option);
+  }
+
+  function fillCreatorSelect(id, options) {
+    const select = $(id);
+    select.innerHTML = "";
+    for (const entry of options) {
+      const option = document.createElement("option");
+      option.value = entry.key;
+      option.textContent = entry.name;
+      option.title = entry.description || entry.name;
+      select.append(option);
+    }
+  }
+  fillCreatorSelect("mcBackground", creatorModule.backgrounds());
+  fillCreatorSelect("mcOrigin", creatorModule.origins());
+  fillCreatorSelect("mcFocus", creatorModule.focuses());
+
+  function creatorDraft() {
+    return {
+      name: $("mcName").value,
+      gender: $("mcGender").value,
+      age: $("mcAge").value,
+      image: pendingMainImage,
+      background: $("mcBackground").value,
+      origin: $("mcOrigin").value,
+      focus: $("mcFocus").value
+    };
+  }
+
+  function equipmentLabel(key) {
+    const item = (window.EquipmentData && Array.isArray(EquipmentData.items))
+      ? EquipmentData.items.find((entry) => entry.key === key) : null;
+    return item ? item.name : key;
+  }
+
+  function renderCreatorPreview() {
+    const preview = $("mcBuildPreview");
+    try {
+      const plan = creatorModule.preview(creatorDraft());
+      const stats = statDisplay(plan.stats)
+        .filter(({ def }) => def.kind !== "equipment")
+        .map(({ def, value, max }) => `${def.short} ${value}/${max}`)
+        .join(" · ");
+      const gear = plan.equipment.map(equipmentLabel);
+      preview.textContent = `${plan.background.name} · ${plan.origin.name} · ${plan.focus.name} — ${stats}${gear.length ? ` · starts with ${gear.join(", ")}` : ""}`;
+    } catch (error) {
+      preview.textContent = error.message;
+    }
+  }
+
+  function renderMainStats() {
+    const c = engine.state.modules.mainCharacter.character;
+    const grid = $("mcStats");
+    grid.innerHTML = "";
+    for (const { def, value, max } of statDisplay(c && c.stats)) {
+      const cell = document.createElement("div");
+      cell.className = "stat";
+      cell.title = `${def.label}: ${value === null ? "not set" : `${value}/${max}`}`;
+
+      const label = document.createElement("span");
+      label.className = "stat-label";
+      label.textContent = def.label;
+
+      const val = document.createElement("span");
+      val.className = "stat-value";
+      val.textContent = value === null ? "—" : `${value}/${max}`;
+
+      cell.append(label, val);
+      grid.append(cell);
+    }
+  }
+
+  function renderMainBody() {
+    const c = engine.state.modules.mainCharacter.character;
+    const parts = bodyParts(c && c.body);
+    const grid = $("mcBody");
+    grid.innerHTML = "";
+    for (const def of bodyDefs()) {
+      const part = parts[def.key];
+      const cell = document.createElement("div");
+      cell.className = "stat";
+      cell.title = `${def.label} · ${def.side}${def.parent ? ` · attached to ${def.parent}` : " · root"}${def.vital ? " · vital" : ""}`;
+
+      const label = document.createElement("span");
+      label.className = "stat-label";
+      label.textContent = def.label;
+
+      const val = document.createElement("span");
+      val.className = "stat-value";
+      val.textContent = part ? bodyStatus(part) : "—";
+
+      cell.append(label, val);
+      grid.append(cell);
+    }
+  }
+
+  function renderMainCharacter() {
+    const s = engine.state.modules.mainCharacter;
+    const c = s && s.character;
+    $("mcName").value = c ? c.name : "";
+    $("mcGender").value = c ? c.gender : (mcData.genders[0] || "female");
+    $("mcAge").value = c ? c.age : mcData.defaultAge;
+    $("mcBackground").value = c && c.creator && c.creator.background ? c.creator.background : $("mcBackground").options[0]?.value;
+    $("mcOrigin").value = c && c.creator && c.creator.origin ? c.creator.origin : $("mcOrigin").options[0]?.value;
+    $("mcFocus").value = c && c.creator && c.creator.focus ? c.creator.focus : $("mcFocus").options[0]?.value;
+    $("mcPreview").src = (c && c.image) || mainCharModule.defaultAvatar(c ? c.name : "Main Character");
+    $("mcImage").value = "";
+    $("mcFolder").textContent = mainCharModule.folderConnected ? "mainChar folder connected" : "Connect mainChar folder";
+    $("mcSave").textContent = c ? "Save profile" : "Create character";
+    const build = c && c.creator
+      ? ` · ${c.creator.backgroundName || c.creator.background} / ${c.creator.originName || c.creator.origin} / ${c.creator.focusName || c.creator.focus}`
+      : "";
+    $("mcStatus").textContent = c
+      ? `Saved: ${c.name} · ${c.age} · ${c.gender}${build}${mainCharModule.folderConnected ? " · folder connected" : ""}`
+      : "No main character saved yet.";
+    renderMainStats();
+    renderMainBody();
+    renderCreatorPreview();
+  }
+
+  function startingKey() {
+    const sites = (MapData.world && Array.isArray(MapData.world.locations)) ? MapData.world.locations : [];
+    const configured = MapData.world && typeof MapData.world.start === "string" ? MapData.world.start : "";
+    if (sites.some((site) => site.key === configured)) return configured;
+    return sites[0] ? sites[0].key : "";
+  }
+
+  function siteForKey(key) {
+    return ((MapData.world && MapData.world.locations) || []).find((site) => site.key === key) || null;
+  }
+
+  function syncLanding() {
+    const character = engine.state.modules.mainCharacter.character;
+    const inGame = !!character;
+    document.body.classList.toggle("landing", !inGame);
+    $("mcTitle").textContent = inGame ? "Main character" : "Create your character";
+    $("tutorial").hidden = !inGame;
+    if (inGame) renderTutorial();
+  }
+
+  function renderTutorial() {
+    const character = engine.state.modules.mainCharacter.character;
+    const section = $("tutorial");
+    if (!character) { section.hidden = true; return; }
+    section.hidden = false;
+
+    const locState = engine.state.modules.locations || {};
+    const current = locState.currentId && locState.locations ? locState.locations[locState.currentId] : null;
+    const actionsState = engine.state.modules.actions || {};
+    const equipmentState = engine.state.modules.equipment || { items: {} };
+    const items = Object.values(equipmentState.items || {});
+    const progress = tutorialModule.progress();
+    const defs = tutorialModule.steps();
+    const steps = defs.map((def) => ({ ...def, done: !!progress.steps[def.key] }));
+
+    $("tutorialProgress").textContent = `— ${progress.done}/${progress.total} complete`;
+    const list = $("tutorialSteps");
+    list.innerHTML = "";
+    for (const step of steps) {
+      const li = document.createElement("li");
+      if (step.done) li.className = "done";
+      const mark = document.createElement("span");
+      mark.className = "step-done";
+      mark.textContent = step.done ? "✓ " : "○ ";
+      li.append(mark, document.createTextNode(step.label));
+      list.append(li);
+    }
+
+    const last = actionsState.lastAction;
+    $("tutorialStatus").textContent = last
+      ? `Last action: ${last.text}${last.timeMinutes ? ` (${last.timeMinutes} min)` : ""}`
+      : current
+        ? `You are in ${current.name}.`
+        : (TutorialData.startText || "Your story begins.").replace("{start}", siteForKey(startingKey())?.name || "the starting town");
+    $("tutorialInventory").textContent = items.length
+      ? `Starting inventory: ${items.map((item) => `${item.name}${item.equipped ? " (equipped)" : ""}`).join(", ")}.`
+      : "Your inventory is empty. Actions can sometimes find equipment.";
+
+    const next = steps.find((step) => !step.done);
+    $("tutorialHint").textContent = next ? next.hint : (TutorialData.completeText || "Tutorial complete.");
+  }
+
+  let enteringWorld = false;
+  async function enterWorld() {
+    if (enteringWorld) return;
+    enteringWorld = true;
+    try {
+      if (!engine.state.modules.map.loaded) act("map:load");
+      const start = mapModule.startSite();
+      const locState = engine.state.modules.locations;
+      if (start && !locState.currentId) {
+        await locationsModule.visit(start.id);
+        engine.flush();
+      }
+    } catch (error) {
+      console.warn("[ui] could not enter the starting town", error);
+    } finally {
+      enteringWorld = false;
+      syncLanding();
+      renderLocations();
+      renderActions();
+      renderTravel();
+      renderTutorial();
+    }
+  }
+
+  async function ensureWorld() {
+    const character = engine.state.modules.mainCharacter.character;
+    syncLanding();
+    if (!character) return;
+    if (!engine.state.modules.locations.currentId) await enterWorld();
+  }
+
+  $("mcImage").onchange = async (event) => {
+    const file = event.target.files && event.target.files[0];
+    if (!file) return;
+    try {
+      pendingMainImage = await mainCharModule.prepareImage(file);
+      $("mcPreview").src = pendingMainImage;
+      $("mcStatus").textContent = "Picture ready. Save the character to keep it.";
+    } catch (error) {
+      pendingMainImage = null;
+      event.target.value = "";
+      alert(error.message);
+    }
+  };
+
+  $("mcSave").onclick = async () => {    try {
+      const exists = !!engine.state.modules.mainCharacter.character;
+      const draft = creatorDraft();
+      if (exists) {
+        mainCharModule.save({
+          name: draft.name,
+          gender: draft.gender,
+          age: draft.age,
+          image: draft.image
+        });
+        engine.flush();
+      } else {
+        creatorModule.validate(draft);   // show profile/choice errors before queueing events
+        engine.fire({ type: "creator:create", data: { draft } });
+        engine.flush();
+        await enterWorld();
+      }
+      pendingMainImage = null;
+
+      const wrote = await mainCharModule.writeToFolder();
+      renderMainCharacter();
+      syncLanding();
+      $("mcStatus").textContent = wrote
+        ? `Saved to characters/${mcData.folder}/${mcData.jsonFile} and profile image.`
+        : mainCharModule.folderConnected
+          ? "Saved in game, but the folder write failed. Check the console."
+          : "Saved in game. Connect the mainChar folder to write a JSON copy.";
+    } catch (error) {
+      alert(error.message);
+    }
+  };
+
+  for (const id of ["mcBackground", "mcOrigin", "mcFocus"]) $(id).onchange = renderCreatorPreview;
+
+  $("mcFolder").onclick = async () => {
+    try {
+      const info = await mainCharModule.connectFolder();
+      // Do not re-render the form here: it may contain unsaved edits or a new image.
+      $("mcFolder").textContent = "mainChar folder connected";
+      const hasCharacter = !!engine.state.modules.mainCharacter.character;
+      $("mcStatus").textContent = info.wrote
+        ? `Folder connected; saved to ${info.path}/${mcData.jsonFile}.`
+        : hasCharacter
+          ? `Folder connected: ${info.path}, but writing ${mcData.jsonFile} failed. Check the console.`
+          : `Folder connected: ${info.path}. Save a character to write the JSON.`;
+    } catch (error) {
+      alert("Could not connect the mainChar folder (Chrome or Edge required): " + error.message);
+    }
+  };
+
+  engine.on("event:mainCharacter:saved", renderMainCharacter);
+  engine.on("event:mainCharacter:saved", renderEquipment);
+  engine.on("event:mainCharacter:statChanged", renderMainStats);
+  engine.on("event:mainCharacter:armorChanged", renderMainStats);
+  engine.on("event:creator:created", renderMainCharacter);
+
+  // ----- Equipment panel -----
+  const rarityLabel = (key) => {
+    const def = (window.EquipmentData && Array.isArray(EquipmentData.rarities))
+      ? EquipmentData.rarities.find((rarity) => rarity.key === key) : null;
+    return def ? def.label : (key || "Common");
+  };
+  const typeLabel = (item) => {
+    if (!item) return "Unknown";
+    const weapon = item.kind === "weapon";
+    const defs = window.EquipmentData && (weapon ? EquipmentData.weaponTypes : EquipmentData.armorTypes);
+    const key = weapon ? item.weaponType : item.armorType;
+    const def = Array.isArray(defs) ? defs.find((type) => type.key === key) : null;
+    return def ? def.label : (key || "Untyped");
+  };
+
+  function renderEquipment() {
+    const s = engine.state.modules.equipment || { items: {}, equippedByPart: {}, equippedWeaponId: null };
+    const items = Object.values(s.items || {});
+    const byPart = s.equippedByPart || {};
+    const bodyParts = (window.CharacterBodyData && Array.isArray(window.CharacterBodyData.parts)) ? window.CharacterBodyData.parts : [];
+    const partLabel = (key) => {
+      const def = bodyParts.find((part) => part.key === key);
+      return def ? def.label : key;
+    };
+    const labels = (parts) => (Array.isArray(parts) ? parts : []).map(partLabel);
+    const isWorn = (item) => item.kind === "weapon"
+      ? s.equippedWeaponId === item.id
+      : (Array.isArray(item.parts) && item.parts.some((part) => byPart[part] === item.id));
+    const worn = items.filter(isWorn);
+    const armor = equipmentModule.totalArmor();
+    const weapon = equipmentModule.equippedWeapon();
+    const covered = bodyParts.filter((part) => byPart[part.key]);
+    const main = engine.state.modules.mainCharacter && engine.state.modules.mainCharacter.character;
+    const strength = main && main.stats ? Math.round(Number(main.stats.strength) || 0) : 0;
+    const hasMain = !!main;
+
+    $("equipFind").disabled = !hasMain;
+    $("equipFindWeapon").disabled = !hasMain;
+    $("equipClear").disabled = !hasMain || !worn.length;
+    $("equipArmor").textContent = weapon
+      ? `${weapon.name} · armor ${armor}/100`
+      : `armor ${armor}/100 · ${covered.length}/${bodyParts.length} parts`;
+
+    const weaponStatus = weapon
+      ? `Weapon: ${weapon.name} (${typeLabel(weapon)} · ${rarityLabel(weapon.rarity)}) · damage ${weapon.damage} · ${weapon.armorPiercing}% armor piercing${strength < weapon.strength ? ` · TOO HEAVY (need Strength ${weapon.strength})` : ""}`
+      : "No weapon equipped.";
+    $("equipStatus").textContent = worn.length
+      ? `Wearing ${worn.length} item${worn.length === 1 ? "" : "s"} · armor ${armor}/100. ${weaponStatus}`
+      : `${items.length ? "Nothing equipped." : "No equipment yet. Find armor or a weapon here, or scavenge while exploring."} ${weaponStatus}`;
+
+    const ul = $("equipment");
+    ul.innerHTML = "";
+    if (!items.length) {
+      const li = document.createElement("li");
+      li.className = "empty";
+      li.textContent = hasMain ? "No equipment in the inventory." : "Create a character first.";
+      ul.append(li);
+      return;
+    }
+
+    for (const item of items) {
+      const equipped = isWorn(item);
+      const li = document.createElement("li"), box = document.createElement("div");
+      const title = document.createElement("strong");
+      title.textContent = `${item.name} · ${typeLabel(item)} · ${rarityLabel(item.rarity)}`;
+      const sm = document.createElement("small");
+      sm.textContent = item.kind === "weapon"
+        ? `${typeLabel(item)} · damage ${item.damage} · Strength ${item.strength} · ${item.armorPiercing}% armor piercing · ${equipped ? "equipped" : "in inventory"}`
+        : `${typeLabel(item)} armor · ${labels(item.parts).join(", ") || "no parts"} · armor ${item.armor} · ${equipped ? "equipped" : "in inventory"}`;
+      box.append(title, sm);
+      li.append(box);
+
+      const actions = document.createElement("div");
+      actions.className = "row-actions";
+
+      const b = document.createElement("button");
+      if (equipped) {
+        b.textContent = "Unequip";
+        b.onclick = () => act("equipment:unequip", { itemId: item.id });
+      } else if (item.kind === "weapon") {
+        const tooHeavy = strength < item.strength;
+        b.textContent = tooHeavy ? "Too heavy" : "Equip";
+        b.title = `${item.name} (${typeLabel(item)}, ${rarityLabel(item.rarity)}) — damage ${item.damage}, needs Strength ${item.strength}, ${item.armorPiercing}% armor piercing${tooHeavy ? `; current Strength ${strength}` : ""}`;
+        b.disabled = !hasMain || tooHeavy;
+        b.onclick = () => act("equipment:equip", { itemId: item.id });
+      } else {
+        const conflicts = [...new Set((item.parts || []).map((part) => byPart[part]).filter((id) => id && id !== item.id))]
+          .map((id) => (s.items[id] || {}).name).filter(Boolean);
+        b.textContent = "Equip";
+        b.title = `Equip ${item.name} (${typeLabel(item)}, ${labels(item.parts).join(", ")}, armor ${item.armor})${conflicts.length ? ` — replaces ${conflicts.join(", ")}` : ""}`;
+        b.disabled = !hasMain;
+        b.onclick = () => act("equipment:equip", { itemId: item.id });
+      }
+
+      const destroy = document.createElement("button");
+      destroy.textContent = "Destroy";
+      destroy.title = `Destroy ${item.name} (${rarityLabel(item.rarity)}). This cannot be undone.`;
+      destroy.disabled = !hasMain;
+      destroy.onclick = () => {
+        if (window.confirm(`Destroy ${item.name}? This cannot be undone.`))
+          act("equipment:remove", { itemId: item.id });
+      };
+
+      actions.append(b, destroy);
+      li.append(actions);
+      ul.append(li);
+    }
+  }
+
+  $("equipFind").onclick = () => {
+    if (!engine.state.modules.mainCharacter.character) {
+      alert("Create a character before finding equipment.");
+      return;
+    }
+    act("equipment:add", { kind: "armor" });
+  };
+  $("equipFindWeapon").onclick = () => {
+    if (!engine.state.modules.mainCharacter.character) {
+      alert("Create a character before finding equipment.");
+      return;
+    }
+    act("equipment:add", { kind: "weapon" });
+  };
+  $("equipClear").onclick = () => act("equipment:unequip");
+
+  for (const name of ["equipment:added", "equipment:equipped", "equipment:unequipped", "equipment:removed"]) {
+    engine.on(`event:${name}`, renderEquipment);
+  }
+
+  ["reset", "load", "run", "pause", "tickSize"].forEach((n) => engine.on(n, () => {
+    if (n === "reset" || n === "load") {
+      pendingMainImage = null;
+      rebuildLog();
+      renderLocations();
+      renderMainCharacter();
+      renderEquipment();
+      renderActions();
+      renderTravel();
+      renderCombat();
+      ensureWorld().catch((error) => console.warn("[ui] could not prepare the world", error));
+    }
+    render();
+  }));
+  engine.on("event:location:added", renderLocations);
+  engine.on("event:location:visited", renderLocations);
+  engine.on("event:map:generated", renderLocations);
+  engine.on("event:map:terrainGenerated", renderLocations);
+
+  $("step").onclick = () => engine.step();
+  $("play").onclick = () => engine.running ? engine.pause() : engine.run(300);
+  $("size").onchange = (e) => engine.setTickMinutes(+e.target.value);
+  $("new").onclick = () => engine.reset(Date.now());
+
+  $("save").onclick = () => {
+    try {
+      localStorage.setItem("save1", engine.serialize());
+      $("saveStatus").textContent = `Quick save stored in this browser at ${engine.now.text}.`;
+    } catch (error) {
+      alert("Quick saving is unavailable in this browser context.");
+    }
+  };
+
+  $("load").onclick = () => {
+    try {
+      const saved = localStorage.getItem("save1");
+      if (!saved) { alert("No quick save found."); return; }
+      engine.load(saved);
+      $("saveStatus").textContent = `Loaded the browser quick save at ${engine.now.text}.`;
+    } catch (error) {
+      alert("Loading is unavailable in this browser context.");
+    }
+  };
+
+  $("landingContinue").onclick = () => $("load").click();
+  $("landingImport").onclick = () => $("loadFile").click();
+  $("tutorialActions").onclick = () => $("actions").scrollIntoView({ behavior: "smooth", block: "center" });
+  $("tutorialInventoryButton").onclick = () => $("equipmentTitle").scrollIntoView({ behavior: "smooth", block: "center" });
+
+  for (const name of [
+    "mainCharacter:saved", "creator:created", "location:visited", "actions:loaded",
+    "action:resolved", "travel:completed", "tutorial:progress", "equipment:added",
+    "equipment:equipped", "equipment:unequipped", "equipment:removed"
+  ]) {
+    engine.on(`event:${name}`, renderTutorial);
+  }
+
+  function downloadSaveFile(save) {
+    const blob = new Blob([GameSave.stringify(save)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = GameSave.fileName(save);
+    document.body.append(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  $("saveFile").onclick = () => {
+    try {
+      const save = GameSave.capture(engine, buildEngine);
+      downloadSaveFile(save);
+      $("saveStatus").textContent = `Exported ${save.label} · ${save.changes.length} change${save.changes.length === 1 ? "" : "s"}.`;
+    } catch (error) {
+      alert("Could not export the save file: " + error.message);
+    }
+  };
+
+  $("loadFile").onclick = () => $("saveFileInput").click();
+  $("saveFileInput").onchange = async (event) => {
+    const file = event.target.files && event.target.files[0];
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const save = GameSave.restore(text, engine, { buildEngine });
+      $("saveStatus").textContent = `Imported ${save.label} from ${file.name} · ${save.changes.length} change${save.changes.length === 1 ? "" : "s"}.`;
+    } catch (error) {
+      alert("Could not import that save file: " + error.message);
+    } finally {
+      event.target.value = "";
+    }
+  };
+
+  // Harness-only generator to verify the pipeline. Not part of the core.
+  $("demo").onchange = (e) => {
+    if (e.target.checked) engine.registerGenerator("test", ({ roll, engine }) =>
+      roll < engine.chancePerTick(3) ? { type: "test", text: "A test event occurred." } : null);
+    else engine.generators.delete("test");
+  };
+
+
+  // ----- Characters panel -----
+  const act = (type, data) => { engine.fire({ type, data }); engine.flush(); };
+
+  // ----- Combat panel -----
+  function combatSnapshot(c) {
+    const weapon = c && c.id === "main" && equipmentModule ? equipmentModule.weaponFor(c.id) : null;
+    return {
+      id: c.id,
+      name: c.name,
+      hp: c.stats.hp,
+      hpMax: c.stats.hpMax,
+      personalCombat: c.stats.personalCombat,
+      strength: c.stats.strength ?? 10,
+      armor: c.stats.armor ?? 0,
+      weapon: weapon
+        ? {
+          key: weapon.key, name: weapon.name, rarity: weapon.rarity, weaponType: weapon.weaponType,
+          damage: weapon.damage, strength: weapon.strength, armorPiercing: weapon.armorPiercing
+        }
+        : null
+    };
+  }
+
+  function startCombat(c) {
+    const main = engine.state.modules.mainCharacter.character;
+    if (!main) { alert("Save a main character before starting combat."); return; }
+    if (!main.stats || main.stats.hp <= 0) { alert("The main character has no HP left."); return; }
+    const combat = engine.state.modules.combat;
+    if (combat && combat.active) { alert("Finish the current combat first."); return; }
+    if (!c || !c.stats || c.stats.hp <= 0) { alert("That NPC cannot fight."); return; }
+    act("combat:start", { player: combatSnapshot(main), enemy: combatSnapshot(c) });
+  }
+
+  function renderCombat() {
+    const s = engine.state.modules.combat || {};
+    const active = !!s.active;
+    const player = s.player, enemy = s.enemy;
+
+    $("combatPlayerName").textContent = player ? player.name : "You";
+    $("combatPlayerHp").textContent = player ? `${player.hp}/${player.hpMax}` : "—";
+    $("combatEnemyName").textContent = enemy ? enemy.name : "Enemy";
+    $("combatEnemyHp").textContent = enemy ? `${enemy.hp}/${enemy.hpMax}` : "—";
+
+    $("combatStatus").textContent = active
+      ? `Round ${s.round} · ${s.turn === "player" ? "your turn" : "enemy turn"}`
+      : s.winnerName
+        ? `${s.winnerName} won after ${s.round} round${s.round === 1 ? "" : "s"}.`
+        : "No combat. Use Fight on an NPC.";
+
+    $("combatAttack").disabled = !active || s.turn !== "player";
+    $("combatDefend").disabled = !active || s.turn !== "player";
+
+    const log = Array.isArray(s.log) ? s.log : [];
+    const ul = $("combatLog");
+    ul.innerHTML = "";
+    for (const line of log.slice(-8)) {
+      const li = document.createElement("li");
+      li.textContent = line;
+      ul.append(li);
+    }
+  }
+
+  $("combatAttack").onclick = () => act("combat:action", { action: "attack" });
+  $("combatDefend").onclick = () => act("combat:action", { action: "defend" });
+  for (const name of ["combat:started", "combat:damage", "combat:defended", "combat:ended"]) {
+    engine.on(`event:${name}`, () => {
+      renderCombat();
+      renderMainStats();
+    });
+  }
+
+  function renderChars() {
+    const s = engine.state.modules.characters;
+    for (const [key, saveable] of [["temp", true], ["named", false]]) {
+      const ul = $(key); ul.innerHTML = "";
+      const list = Object.values(s[key]);
+      if (!list.length) { const li = document.createElement("li"); li.className = "empty"; li.textContent = "None."; ul.append(li); }
+      for (const c of list) {
+        const li = document.createElement("li"), box = document.createElement("div");
+        box.textContent = `${c.name}, ${c.age}, ${c.gender}`;
+        const sm = document.createElement("small");
+        const relation = chars.relationFor(c.relation && c.relation.value, c.relation && c.relation.type);
+        sm.textContent = `level ${c.level ?? 1} · ${relation.label} ${relation.value >= 0 ? "+" : ""}${relation.value} · ${c.personality ? c.personality.name + " · " : ""}${c.traits.join(", ")}`;
+        sm.title = behaviorLine(c.behavior);
+        box.append(sm);
+        const st = document.createElement("small");
+        st.className = "stats-line";
+        st.textContent = statsLine(c.stats);
+        st.title = statsTitle(c.stats);
+        box.append(st);
+        const body = document.createElement("small");
+        body.className = "body-line";
+        body.textContent = `Body: ${bodySummary(c.body)}`;
+        body.title = bodyTitle(c.body);
+        box.append(body);
+        li.append(box);
+
+        const row = document.createElement("div");
+        row.className = "row-actions";
+        const fight = document.createElement("button");
+        fight.textContent = "Fight";
+        fight.title = `Fight ${c.name}`;
+        const combat = engine.state.modules.combat;
+        fight.disabled = !!(combat && combat.active) || c.stats.hp <= 0;
+        fight.onclick = () => startCombat(c);
+        row.append(fight);
+
+        if (saveable) {
+          const b = document.createElement("button");
+          b.textContent = "Save as Named NPC";
+          b.onclick = () => act("character:save", { id: c.id });
+          row.append(b);
+        }
+        li.append(row);
+        ul.append(li);
+      }
+    }
+  }
+  $("spawn").onclick = () => act("character:spawn");
+  $("leave").onclick = () => act("location:changed");
+  $("disk").onclick = async () => { try { await chars.connectFolder(); $("disk").textContent = "Folder connected"; } catch (e) { alert("Could not connect a folder (Chrome or Edge required): " + e.message); } };
+  ["event", "reset", "load"].forEach((n) => engine.on(n, renderChars));
+  renderChars();
+
+  // ----- Locations panel -----
+  $("loadMap").onclick = () => act("map:load");
+  $("locDisk").onclick = async () => {
+    try {
+      const info = await locationsModule.connectFolder();
+      $("locDisk").textContent = `Folder connected (${info.count})`;
+      renderLocations();
+    } catch (e) {
+      alert("Could not connect the Locations folder (Chrome or Edge required): " + e.message);
+    }
+  };
+
+  renderMainCharacter();
+  renderEquipment();
+  renderLocations();
+  renderActions();
+  renderTravel();
+  renderCombat();
+  render();
+  ensureWorld().catch((error) => console.warn("[ui] could not prepare the world", error));
+  updateBiomeEventStatus();
+</script>
+</body>
+</html>

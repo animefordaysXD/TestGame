@@ -161,6 +161,7 @@
 <script src="locations/data.js"></script>
 <script src="map/data.js"></script>
 <script src="tutorial/data.js"></script>
+<script src="game/data.js"></script>
 <script src="actions/data.js"></script>
 <script src="travel/data.js"></script>
 <script src="combat/data.js"></script>
@@ -184,6 +185,7 @@
   const BD = window.CharacterBodyData || { parts: [], defaultStatus: "intact" };
   const MD = window.MapData || { world: { locations: [], routes: [] }, terrain: { interiors: [], legend: [] } };
   const TUT = window.TutorialData || { steps: [], startText: "", completeText: "" };
+  const GD = window.GameData || { objectives: [], siteText: {} };
 
   const $ = (id) => document.getElementById(id);
   const svg = $("tree");
@@ -222,6 +224,7 @@
         encounters: { enemies: {}, lastVisit: null, lastLoot: null },
         map: { version: 2, loaded: false, seed: 0, total: 0, lastGeneratedTick: null, lastGeneratedAt: "", sites: {}, landmarks: {}, terrain: {} },
         tutorial: { started: false, steps: { created: false, arrived: false, action: false, travel: false }, updatedAtTick: null, completedAtTick: null },
+        game: { started: false, startedAtTick: null, completedAtTick: null, visited: {}, completed: {}, objectiveOrder: {}, sequence: 0, actions: 0, lastActionOrder: 0, victories: 0, lastVictoryOrder: 0, defeats: 0, updatedAtTick: null },
         actions: { locationId: null, locationName: "", biomeKey: "", actions: [], lastAction: null },
         equipment: { nextId: 1, items: {}, equippedByPart: {}, equippedWeaponId: null },
         travel: {
@@ -608,6 +611,30 @@
       node("Rules", "creator:created / mainCharacter:saved · location:visited · action:resolved · travel:completed → tutorial:progress", "content")
     ], tutorialDone ? "built" : "empty");
 
+    /* Game journal -------------------------------------------------------- */
+    const gameState = modules.game || {};
+    const gameVisited = Object.keys(gameState.visited || {}).length;
+    const gameObjectives = (GD.objectives || []).map((objective) => {
+      const siteKey = objective.siteKind
+        ? (((MD.world && MD.world.locations) || []).find((site) => site.kind === objective.siteKind) || {}).key
+        : objective.site === "{start}" ? (MD.world && MD.world.start) : objective.site;
+      const site = ((MD.world && MD.world.locations) || []).find((entry) => entry.key === siteKey);
+      const fill = (text) => String(text || "")
+        .replace(/\{start\}/g, (startSite && startSite.name) || "the starting town")
+        .replace(/\{tavern\}/g, (tavernSite && tavernSite.name) || "the tavern")
+        .replace(/\{site\}/g, (site && site.name) || siteKey || "the road");
+      const done = !!(gameState.completed || {})[objective.key];
+      return node(fill(objective.label || objective.key),
+        `${objective.key} · ${objective.type} · ${done ? "complete" : "pending"}${objective.hint ? ` · ${fill(objective.hint)}` : ""}`,
+        done ? "state" : "warn", [], done ? "done" : "");
+    });
+    const gameDone = (GD.objectives || []).filter((objective) => (gameState.completed || {})[objective.key]).length;
+    const gameBranch = node("game", `v0.1 · ${gameDone}/${(GD.objectives || []).length} objectives`, "module", [
+      node("Progress", `${gameDone}/${(GD.objectives || []).length} objectives · ${gameVisited} place(s) visited · ${gameState.victories || 0} victor${(gameState.victories || 0) === 1 ? "y" : "ies"} · ${gameState.defeats || 0} defeat${(gameState.defeats || 0) === 1 ? "" : "s"}`, "state"),
+      group(`Journal (${gameDone}/${(GD.objectives || []).length})`, "game/data.js · event-driven journal", gameObjectives, "state"),
+      node("Rules", "creator:created / mainCharacter:saved · location:visited · action:resolved · combat:ended → game:progress · new game page; debug.html keeps the sandbox", "content")
+    ], gameDone ? "built" : "empty");
+
     /* Actions ------------------------------------------------------------- */
     const actionState = modules.actions || {};
     const actions = Array.isArray(actionState.actions) ? actionState.actions : [];
@@ -657,9 +684,9 @@
       node("Rules", "UI advances 5-minute ticks · travel:event pauses · Continue resumes · completion calls locations.visit", "content")
     ], travelActive || travelDone ? "built" : "empty");
 
-    const modulesBranch = node("Modules", "11 registered · event-driven · one slice each", "state", [
-      chars, mainCharacter, creatorBranch, equipmentBranch, combatBranch, locationsBranch, encountersBranch, mapBranch, tutorialBranch, actionsBranch, travelBranch
-    ], "11");
+    const modulesBranch = node("Modules", "12 registered · event-driven · one slice each", "state", [
+      chars, mainCharacter, creatorBranch, equipmentBranch, combatBranch, locationsBranch, encountersBranch, mapBranch, tutorialBranch, gameBranch, actionsBranch, travelBranch
+    ], "12");
 
     /* Content ------------------------------------------------------------- */
     const biomeNodes = biomes.map((biome) => {
@@ -681,6 +708,7 @@
       node("mainCharacterData.js", `portrait ${MC.imageSize ?? 256}px · upload ≤ ${Math.round((MC.maxUploadBytes || 0) / 1048576)} MB · ${(MC.genders || []).length} genders`, "content"),
       node("characters/creatorData.js", `${(CRD.backgrounds || []).length} backgrounds · ${(CRD.origins || []).length} origins · ${(CRD.focuses || []).length} focuses · resources ${(CRD.settings && CRD.settings.resourceStartPercent) ?? 80}% · max ${(CRD.settings && CRD.settings.maxStartingItems) ?? 6} starting items`, "content"),
       node("tutorial/data.js", `${(TUT.steps || []).length} steps · start text · complete text · tokens {start} and {tavern}`, "content"),
+      node("game/data.js", `${(GD.objectives || []).length} journal objectives · ${Object.keys(GD.siteText || {}).length} site blurbs · opening and completion text`, "content"),
       node("locations/data.js", `${biomes.length} biomes · ${weatherTotal} weather entries · default hostility ${LOC.defaultHostility ?? 50} · level ranges on every biome · ${(LOC.namePrefixes || []).length} prefixes · ${(LOC.nameSuffixes || []).length} suffixes · ${(LOC.namePatterns || []).length} name patterns · ${(LOC.travelGraph && LOC.travelGraph.minutesPerDistance) || 15} min per league`, "content"),
       node("actions/data.js", `${defaultActions.length} default actions · ${overrides.length} biome override(s) · ${defaultActions.reduce((sum, action) => sum + ((action.outcomes || []).length), 0)} outcomes`, "content"),
       node("travel/data.js", `${(TRD.events || []).length} travel events · ${TRD.chancePercent ?? 0}% per check · every ${TRD.minutesPerCheck ?? 5} min · ${Object.keys(TRD.chanceByBiome || {}).length} biome override(s)`, "content"),
@@ -689,7 +717,7 @@
       node("encounters/data.js", `${(END.spawn && END.spawn.bands || []).length} spawn bands · max ${END.spawn && END.spawn.maxPerVisit || 4} per visit · ${(END.loot && END.loot.rarityBands || []).length} loot rarity bands · drop ${END.loot && END.loot.dropChancePercent || 0}% + hostility`, "content"),
       node("editor/schemas.js", "content-editor model · 8 editable types · strict JSON round-trip · no state or events", "content"),
       group(`Biome events (${biomes.length} files)`, eventsSummary, biomeNodes, "content"),
-      node("Docs", "DESIGN.md · IDEAS.md · ENGINE_SPEC.md v1.11 · MODULES.md · HANDOFF.md · README.md · save/README.md · editor/README.md · actions/README.md · equipment/README.md · travel/README.md · combat/README.md · locations/README.md · map/README.md · tutorial/README.md · locations/events/README.md · characters/mainChar/README.md", "content")
+      node("Docs", "DESIGN.md · IDEAS.md · ENGINE_SPEC.md v1.12 · MODULES.md · HANDOFF.md · README.md · save/README.md · editor/README.md · actions/README.md · equipment/README.md · travel/README.md · combat/README.md · locations/README.md · map/README.md · tutorial/README.md · game/README.md · locations/events/README.md · characters/mainChar/README.md", "content")
     ], "data");
 
     /* Events -------------------------------------------------------------- */
@@ -740,6 +768,7 @@
         node("mainCharacter:saved", "mainCharacter · identity only (no image)", "event"),
         node("creator:created", "creator · { name, background, origin, focus, stats, equipment }", "event"),
         node("tutorial:progress", "tutorial · { step, steps, completed, updatedAtTick, completedAtTick }", "event"),
+        node("game:progress", "game · { event, objective, objectives, done, total, complete, visited, victories, defeats }", "event"),
         node("mainCharacter:statChanged", "mainCharacter · any non-equipment stat: stat, delta, value, max", "event"),
         node("mainCharacter:armorChanged", "mainCharacter · armor mirrored from equipment", "event"),
         node("equipment:added", "equipment · { itemId, key, name, kind, rarity, weaponType|armorType, parts, stats, equipped, source }", "event"),
@@ -751,7 +780,7 @@
         node("combat:defended", "combat · player brace, armor and reduction", "event"),
         node("combat:ended", "combat · winner, loser, rounds", "event")
       ], "event")
-    ], "48");
+    ], "49");
 
     /* Docs & tests -------------------------------------------------------- */
     const testsBranch = node("Tests", "Node only · npm test", "test", [
@@ -764,6 +793,7 @@
       node("main-character.test.cjs", "validation · image · base stats · effects · mirror", "test"),
       node("creator.test.cjs", "starting stats · equipment grants · profile validation · save/load · reset", "test"),
       node("tutorial.test.cjs", "four-step progress · event signals · idempotence · completion · save/load · reset", "test"),
+      node("game.test.cjs", "journal order · visits/actions/victories · tokens · save/load · reset", "test"),
       node("biome-events.test.cjs", "JSON loading · visit rolls · hostility modifiers · stat effects · reset", "test"),
       node("actions.test.cjs", "five actions · outcomes · costs · route time · travel · equipment", "test"),
       node("equipment.test.cjs", "body-part inventory · auto-equip · type/rarity filters · overlap swap · summed armor · combat · reset · save/load migration", "test"),
@@ -772,7 +802,7 @@
       node("save.test.cjs", "capture · exact restore · v0 migration · unsafe paths · format guard", "test"),
       node("editor.test.cjs", "formatter · byte-identical round-trip · schema checks · outcome ids · new data sections", "test"),
       node("serve.cjs", "static server on 127.0.0.1:8765", "test")
-    ], "16");
+    ], "17");
 
     const rootSub = live.state
       ? `${live.source} · ${clockText(time)} · tick ${time.tick}`
