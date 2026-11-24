@@ -71,6 +71,8 @@ seed plus the same first visit produces the same layout.
 Edit `map/data.js`:
 
 - `world.name` — display name.
+- `world.start` — the site key where a newly created character begins (currently
+  `greywatch_village`). If the key is missing, the module falls back to the first site.
 - `world.locations` — static sites. Each has `key`, `name`, `biome`, `biomeKey`,
   `weather`, `hostility`, `level`, optional `kind` (landmark id) and optional `interior`
   preset. Wild sites leave `kind` and `interior` empty.
@@ -103,4 +105,6 @@ another preset.
 - `ensureTerrain(locationId)` — generate on demand; safe to call repeatedly.
 - `siteForLocation(locationId)` — authored site merged with its location id.
 - `siteFor(key)` — authored site by content key, or `null`.
+- `startKey()` — the configured starting site key (with a first-site fallback).
+- `startSite()` — the starting site merged with its location id, or `null` before load.
 - `status()` — copy of the slice for the UI/status page.

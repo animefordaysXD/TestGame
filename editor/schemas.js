@@ -271,7 +271,8 @@
     {
       id: "map-world", group: "Map", title: "World settings", file: "map", kind: "form", at: ["world"],
       fields: [
-        { key: "name", label: "World name", type: "text", help: "Display name only; the map's sites and routes live below." }
+        { key: "name", label: "World name", type: "text", help: "Display name only; the map's sites and routes live below." },
+        { key: "start", label: "Starting site", type: "select", source: "mapSites", help: "The town a newly created character enters. It must be one of the sites below." }
       ],
       preview(_, ctx, data) {
         const world = data.map.world || {};
@@ -280,6 +281,7 @@
         const landmarks = sites.filter((site) => site.kind);
         return { notes: [
           `${world.name || "Unnamed world"} has ${sites.length} static sites and ${routes.length} authored routes.`,
+          `New characters start at ${world.start || "the first site"}.`,
           `${landmarks.length} landmark${landmarks.length === 1 ? "" : "s"} generate procedural interiors.`,
           "Loading the map is idempotent: it never charts a second copy."
         ] };
@@ -1002,6 +1004,8 @@
         } else {
           checkIds(worldData.locations, "key", sites, "Site");
           const siteKeys = new Set(worldData.locations.map((site) => site && site.key).filter(Boolean));
+          if (typeof worldData.start !== "string" || !siteKeys.has(worldData.start))
+            world("error", "Starting site must be one of the map sites.", null, "start");
           worldData.locations.forEach((site, i) => {
             if (!site || typeof site !== "object") return sites("error", `Site #${i + 1} is not an object.`, i);
             if (typeof site.name !== "string" || !site.name.trim()) sites("warn", "Give the site a name.", i, "name");

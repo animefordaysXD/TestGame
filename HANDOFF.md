@@ -2,19 +2,22 @@
 
 **Repository:** <https://github.com/animefordaysXD/TestGame>
 
-**Last updated:** 2026-11-23
-**Current spec:** `ENGINE_SPEC.md` v1.10
-**Status:** working test page with a data-driven character creator (background, origin and
-focus choose starting stats and equipment), a static authored world map (twelve sites,
-thirteen routes) plus procedural landmark interiors generated on first visit, a travel graph
-of connected locations, procedural locations with hostility and levels, hostility-modified
-biome events, hostility-driven encounters and loot, a main character with ten base
-stats plus armor and a ten-part body, NPCs with the same stats, bodies, 30 named personality
-archetypes, relations and levels, basic player-first combat (Attack/Defend), an equipment
-module with body-part armor plus a weapon slot (damage, Strength requirement, armor piercing),
-weapon/armor types and five rarity tiers, five area actions with costs/outcomes/time,
-route-based timed travel with 5-minute event checks and pause/resume, real JSON save files
-(seed + baseline + changes) alongside the quick local save, and a live node-tree status page.
+**Last updated:** 2026-11-24
+**Current spec:** `ENGINE_SPEC.md` v1.11
+**Status:** working playable opening: the character creator is the landing page, creating a
+character loads the static world and starts them in Greywatch Village, a persistent
+four-step tutorial guides the first action and tavern trip, and the inventory shows the
+starting kit. It also has a data-driven character creator (background, origin and focus set
+starting stats and equipment), a static authored world map (twelve sites, thirteen routes)
+plus procedural landmark interiors generated on first visit, a travel graph of connected
+locations, procedural locations with hostility and levels, hostility-modified biome events,
+hostility-driven encounters and loot, a main character with ten base stats plus armor and a
+ten-part body, NPCs with the same stats, bodies, 30 named personality archetypes, relations
+and levels, basic player-first combat (Attack/Defend), an equipment module with body-part
+armor plus a weapon slot (damage, Strength requirement, armor piercing), weapon/armor types
+and five rarity tiers, five area actions with costs/outcomes/time, route-based timed travel
+with 5-minute event checks and pause/resume, real JSON save files (seed + baseline + changes)
+alongside the quick local save, and a live node-tree status page.
 
 This file is the starting point for a new AI session. Read it first, then `README.md`,
 `DESIGN.md` (what the game is and why), `ENGINE_SPEC.md` and `MODULES.md` (the per-module
@@ -74,6 +77,8 @@ Tests currently cover:
   legacy stamina migration, save/load, reset, folder mirror.
 - `test/creator.test.cjs` — background/origin/focus stats and kits, preview without state,
   profile validation, event order, profile edits, save/load and reset.
+- `test/tutorial.test.cjs` — four-step progress, event signals, idempotence, completion,
+  token-filled labels, save/load and reset.
 - `test/biome-events.test.cjs` — JSON loading, visit rolls, hostility-modified chances,
   stat effects, reset, save/load.
 - `test/actions.test.cjs` — five-action loading, biome overrides, weighted outcomes,
@@ -135,6 +140,7 @@ Tests currently cover:
 | `locations` | `seed`, `createdAt`, `nextId`, `locations{}` (with `connections[]`), `currentId` | procedural locations with hostility/level, travel graph, visit rolls, JSON mirror |
 | `encounters` | `enemies{}`, `lastVisit`, `lastLoot` | hostility-scaled hostile spawns on visit and hostility-scaled loot on a winning fight |
 | `map` | `version`, `loaded`, `seed`, `total`, `lastGeneratedTick`, `lastGeneratedAt`, `sites{}`, `landmarks{}`, `terrain{}` | static authored world: loads sites/routes once and generates procedural landmark interiors on first visit |
+| `tutorial` | `started`, `steps{}`, `updatedAtTick`, `completedAtTick` | persistent opening checklist: create, arrive, first action, reach the tavern |
 | `actions` | `locationId`, `locationName`, `biomeKey`, `actions[]`, `lastAction` | five area actions with costs, outcomes, time and route-aware Travel |
 | `travel` | `active`, `paused`, `distance`, route, `elapsedMinutes`, `durationMinutes`, `checks`, `eventCount`, `lastEvent`, `lastCompleted` | 5-minute journey checks, event pause/resume, arrival handoff |
 
@@ -159,6 +165,24 @@ directly; see the content-editor section below.
 - The first **Create character** save uses this path. Later **Save profile** calls
   `mainCharacter.save()` and keeps the current stats, equipment and build metadata.
 - The creator slice stores only `lastCreated`. Reset clears it; save/load keeps it.
+
+### Opening flow and tutorial
+
+- The game page starts in a landing state: the character creator is the first screen and the
+  rest of the game is hidden. **Continue saved game** and **Import save file** are available
+  from the landing screen.
+- After the first **Create character**, the UI loads the static map (idempotent
+  `map:load`), then visits `MapData.world.start` (`greywatch_village`) if there is no current
+  location, and reveals the game shell. Later profile saves do not move the party.
+- `map/data.js` now carries `world.start`; `map.startKey()` / `map.startSite()` expose it,
+  and the map editor lets you change it.
+- `tutorial/tutorial.js` v0.1 owns persistent progress for four steps: create, arrive, take
+  an action, reach the tavern. It listens to `creator:created` / `mainCharacter:saved`,
+  `location:visited`, `action:resolved` and `travel:completed`, and emits `tutorial:progress`.
+- `tutorial/data.js` holds the labels and hints; `{start}` and `{tavern}` are filled from
+  the map. The UI draws the checklist, status, starting inventory and two shortcut buttons.
+- The Travel destination in the starting town defaults to the tavern, so the tutorial's last
+  step is one click away. Completing the tutorial does not gate the rest of the game.
 
 ### Main character
 
@@ -505,6 +529,14 @@ UI Import save file
 
 ## Recent work
 
+- Opening flow and tutorial: the game now starts on the character creator landing page.
+  Creating a character loads the static map, visits the authored starting site
+  (`greywatch_village`), and reveals the game shell. A new `tutorial` module v0.1 persists
+  four steps (create, arrive, first action, tavern) and emits `tutorial:progress`;
+  `tutorial/data.js` holds the labels/hints. Travel from the start defaults to the tavern,
+  the inventory is labelled clearly with the starting kit, and the landing screen can
+  continue/import saves. Map v0.2 gained `world.start` and `startKey()`/`startSite()`. All
+  sixteen Node test files pass.
 - Character creator: added `characters/creatorData.js` and `characters/creator.js` v0.1.
   Background, origin and focus choices add starting stat changes and equipment; resources
   start at 80% so both positive and negative changes matter. `creator:create` validates a
@@ -784,35 +816,36 @@ and the hand-maintained branches in status.html. Commit only when asked; do not 
 explicit approval.
 
 Current build: core v0.2; characters v0.6; mainCharacter v0.7; creator v0.1; equipment v0.4;
-locations v0.5; map v0.2; actions v0.3; travel v0.2; combat v0.2; encounters v0.1; save helper v0.1.
-Working: a data-driven character creator (background, origin and focus set starting stats
-and equipment); a static authored world map (twelve sites, thirteen routes) with procedural
-landmark interiors generated on first visit; a travel graph of connected locations with
-distances and route-based times; procedural locations with hostility and levels;
-hostility-modified biome events; hostility-driven encounters with hostility-scaled enemies
-and loot; shared stats (including Strength) and ten-part bodies; 30 named NPC personality
-archetypes with traits and behavior profiles (data-only, no AI reads them yet) plus relation
-bands and levels; body-part armor plus a weapon slot, weapon/armor types, five rarity tiers,
-and armor/weapon stats feeding combat; five area actions with time, costs and weighted
-outcomes; route-based timed travel with 5-minute checks, event pause/resume and arrival
-through locations; basic player-first combat with weapon damage, Strength gating and armor
-piercing; real JSON save files (seed + baseline + changes) with legacy migration and
-unsafe-path guards, alongside quick localStorage saves; a read-only status tree; and a
-form-based content editor (`editor.html`) that is a tool, not a module. Fifteen Node test
-files are wired into npm test.
+locations v0.5; map v0.2; tutorial v0.1; actions v0.3; travel v0.2; combat v0.2; encounters v0.1; save helper v0.1.
+Working: a playable opening where the character creator is the landing page, creating a
+character loads the static map and starts them in Greywatch Village, and a persistent
+four-step tutorial guides the first action and tavern trip; a data-driven character creator
+(background, origin and focus set starting stats and equipment); a static authored world map
+(twelve sites, thirteen routes) with procedural landmark interiors generated on first visit;
+a travel graph of connected locations with distances and route-based times; procedural
+locations with hostility and levels; hostility-modified biome events; hostility-driven
+encounters with hostility-scaled enemies and loot; shared stats (including Strength) and
+ten-part bodies; 30 named NPC personality archetypes with traits and behavior profiles
+(data-only, no AI reads them yet) plus relation bands and levels; body-part armor plus a
+weapon slot, weapon/armor types, five rarity tiers, and armor/weapon stats feeding combat;
+five area actions with time, costs and weighted outcomes; route-based timed travel with
+5-minute checks, event pause/resume and arrival through locations; basic player-first combat
+with weapon damage, Strength gating and armor piercing; real JSON save files (seed + baseline
++ changes) with legacy migration and unsafe-path guards, alongside quick localStorage saves;
+a read-only status tree; and a form-based content editor (`editor.html`) that is a tool, not a
+module. Sixteen Node test files are wired into npm test.
 
-Known gaps: the creator is a fixed set of authored choices with no point-buy, reroll or
-in-game rebuild; landmark interiors are display-only (no movement, collision, doors or loot)
-and the world map has no drawn atlas; actions and events have no requirements or skill
-checks; travel events are stat-only scenes with no choices or combat handoff; NPC relations
-and levels are stored but no dialogue/progression rule reads them; jungle, mountains and
-wasteland still have only event templates; NPCs cannot equip and carry no weapon; combat has
-no flee, enemy AI, hit chance or variance; personality and behavior do not drive behaviour
-yet; body part status is structural only and no rule injures, heals or equips it;
-encounters depend on the player pressing Fight; the three-tier NPC model is only
-approximated by temp/named buckets.
+Known gaps: the opening tutorial is a linear checklist with no skip, replay, rewards or
+gating; the creator is a fixed set of authored choices with no point-buy, reroll or in-game
+rebuild; landmark interiors are display-only (no movement, collision, doors or loot) and the
+world map has no drawn atlas; actions and events have no requirements or skill checks; travel
+events are stat-only scenes with no choices or combat handoff; NPC relations and levels are
+stored but no dialogue/progression rule reads them; jungle, mountains and wasteland still
+have only event templates; NPCs cannot equip and carry no weapon; combat has no flee, enemy
+AI, hit chance or variance; personality and behavior do not drive behaviour yet; body part
+status is structural only and no rule injures, heals or equips it; encounters depend on the
+player pressing Fight; the three-tier NPC model is only approximated by temp/named buckets.
 
-Suggested next step: give creation and progression more depth (point-buy or rebuild) or give
-the generated interiors movement/collision and reuse the terrain generator for travel. Ask
-what to build next; do not add unrequested scope.
+Suggested next step: give the opening a first real quest or goal (a reason to leave town),
+or add point-buy/rebuild to creation. Ask what to build next; do not add unrequested scope.
 ```

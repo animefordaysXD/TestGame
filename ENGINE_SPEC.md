@@ -1,4 +1,4 @@
-# Modular Text-RPG Engine — Spec v1.10
+# Modular Text-RPG Engine — Spec v1.11
 
 Plain JS/HTML, no build step, no dependencies. A small core runs the clock, event bus,
 RNG, state and save/load. All gameplay lives in modules that own one state slice and talk
@@ -177,6 +177,7 @@ Slices are JSON-safe. Never cache a slice object; `load()` replaces the whole st
 | mainCharacter:statChanged | mainCharacter | `{ id, stat, delta, value, max, eventId }` (any non-equipment base stat) |
 | mainCharacter:armorChanged | mainCharacter | `{ id, stat: "armor", delta, value, previous, itemId, itemName }` |
 | creator:created | creator | `{ name, background, backgroundName, origin, originName, focus, focusName, stats, equipment }` |
+| tutorial:progress | tutorial | `{ step, steps, completed, updatedAtTick, completedAtTick }` |
 
 ## Module registry
 
@@ -188,6 +189,7 @@ Slices are JSON-safe. Never cache a slice object; `load()` replaces the whole st
 | combat | none | `active`, `round`, `turn`, `player`, `enemy`, `defending`, `winner*`, `log[]` | basic player-first duel; attack/defend |
 | locations | none | `seed`, `createdAt`, `nextId`, `locations{}`, `currentId` | procedural locations with hostility/level, routes, visit/event checker, JSON mirror |
 | map | locations | `version`, `loaded`, `seed`, `total`, `lastGeneratedTick`, `lastGeneratedAt`, `sites{}`, `landmarks{}`, `terrain{}` | loads the authored static world once and generates procedural terrain inside landmarks |
+| tutorial | none | `started`, `steps{}`, `updatedAtTick`, `completedAtTick` | persistent first-steps progress: create, arrive, act, reach the tavern |
 | actions | none | `locationId`, `locationName`, `biomeKey`, `actions[]`, `lastAction` | five area actions with costs, outcomes, time and route-based travel |
 | travel | none | `active`, `paused`, `distance`, route, `elapsedMinutes`, `durationMinutes`, `checks`, `eventCount`, `lastEvent`, `lastCompleted` | 5-minute journey checks; pause/resume on travel events |
 | equipment | none | `nextId`, `items{}`, `equippedByPart{}`, `equippedWeaponId` | main-character armor on body parts plus one weapon slot; weapon/armor types; mirrors summed armor into the character stat |
@@ -722,10 +724,11 @@ map: {
 }
 ```
 
-- The world is **static**: `map/data.js` owns `world.locations` (key, kind, name, biome,
-  biomeKey, weather, hostility, level, optional interior), `world.routes` (id, from, to,
-  distance) and `terrain` (tile symbols, legend, interior presets). Every game loads the
-  same sites and routes; there is no random world-location count.
+- The world is **static**: `map/data.js` owns `world.start` (the starting site key),
+  `world.locations` (key, kind, name, biome, biomeKey, weather, hostility, level, optional
+  interior), `world.routes` (id, from, to, distance) and `terrain` (tile symbols, legend,
+  interior presets). Every game loads the same sites and routes; there is no random
+  world-location count.
 - `map:load` is idempotent. On the first call it stores metadata and fires **one**
   `location:add { count: 0, fixed, batch }`. Sites carry `autoLink: false`, so the
   locations module does not add random routes. `location:added` events carrying the batch
@@ -736,10 +739,38 @@ map: {
   room-and-corridor grid once with `engine.rng`, stores it under `terrain[locationId]` and
   emits `map:terrainGenerated`. Later visits reuse the stored grid; saves keep it. The
   algorithm is self-contained so future travel terrain can call the same generator.
-- Accessors: `terrainFor(id)`, `ensureTerrain(id)`, `siteForLocation(id)`, `siteFor(key)`
-  and `status()`.
+- Accessors: `terrainFor(id)`, `ensureTerrain(id)`, `siteForLocation(id)`, `siteFor(key)`,
+  `startKey()`, `startSite()` and `status()`. `startSite()` returns the authored starting
+  site merged with its location id after the map loads; it falls back to the first site if
+  the configured key is missing.
 - `map` declares `depends: ["locations"]`. It has no tick generator. Reset clears the
   slice and any in-flight batch; load normalizes saves without the new fields.
+
+## Tutorial module v0.1
+
+- Files: `tutorial/data.js`, `tutorial/tutorial.js`.
+- Slice:
+
+```js
+tutorial: {
+  started: false,
+  steps: { created: false, arrived: false, action: false, travel: false },
+  updatedAtTick: null,
+  completedAtTick: null
+}
+```
+
+- The four fixed step keys are data-declared in `tutorial/data.js`; the UI fills `{start}`
+  and `{tavern}` from the authored map names.
+- The module subscribes once to `creator:created` / `mainCharacter:saved` (character step),
+  `location:visited` (arrival, and tavern arrival also completes travel),
+  `action:resolved` (first action) and `travel:completed` (tavern destination). A completed
+  step is idempotent. Each real change emits `tutorial:progress` at `depth + 1`; when all
+  four are complete it records `completedAtTick`.
+- Accessors: `progress()` (`{ steps, done, total, complete, updatedAtTick,
+  completedAtTick }`), `steps()` (filled labels/hints) and `status()`.
+- No RNG and no tick generator. Reset clears progress; save/load keeps it. The game page
+  uses it to draw the tutorial checklist and hide the landing screen once a character exists.
 
 ## Actions module v0.3
 
@@ -973,6 +1004,10 @@ map/
   data.js
   map.js
   README.md
+tutorial/
+  data.js
+  tutorial.js
+  README.md
 locations/
   data.js
   locations.js
@@ -1001,6 +1036,7 @@ test/
   relations.test.cjs
   main-character.test.cjs
   creator.test.cjs
+  tutorial.test.cjs
   biome-events.test.cjs
   actions.test.cjs
   travel.test.cjs
@@ -1030,6 +1066,8 @@ test/
   point-buy system. It has no reroll, no custom option authoring in the UI beyond the data
   file, and no progression after creation. A creator-built character cannot be rebuilt
   without starting a new world or editing the save.
+- The opening tutorial is a linear four-step checklist with no skip, replay or reward.
+  It marks the first action and the tavern trip, but does not gate the rest of the game.
 - The page's **Visit** button requires a direct route from the current location; the
   module's `visit()` remains permissive for tests and arrival handoffs.
 - Travel events are generic interruptions with stat effects. They do not start combat,

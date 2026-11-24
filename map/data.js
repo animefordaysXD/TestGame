@@ -1,13 +1,15 @@
 ﻿/* Static world map and interior terrain content. Edit freely: this is data, not logic.
    The world map is fixed: every new game loads the same sites, routes and landmark
-   interiors. The procedural generator builds a landmark interior the first time it is
-   visited; the same generator can be reused for travel terrain later.
+   interiors, and starts the character at world.start. The procedural generator builds a
+   landmark interior the first time it is visited; the same generator can be reused for
+   travel terrain later.
    Keep the object below strict JSON (quoted keys, no comments, no trailing commas);
    put notes in this header instead. Edited by editor.html. */
 window.MapData = {
   "version": 2,
   "world": {
     "name": "The Greyreach",
+    "start": "greywatch_village",
     "locations": [
       {
         "key": "broken_wheel",

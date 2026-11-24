@@ -160,6 +160,7 @@
 <script src="equipment/data.js"></script>
 <script src="locations/data.js"></script>
 <script src="map/data.js"></script>
+<script src="tutorial/data.js"></script>
 <script src="actions/data.js"></script>
 <script src="travel/data.js"></script>
 <script src="combat/data.js"></script>
@@ -182,6 +183,7 @@
   const CD = window.CharacterData || { traits: [], opposites: [], personalities: [], behaviorAxes: [] };
   const BD = window.CharacterBodyData || { parts: [], defaultStatus: "intact" };
   const MD = window.MapData || { world: { locations: [], routes: [] }, terrain: { interiors: [], legend: [] } };
+  const TUT = window.TutorialData || { steps: [], startText: "", completeText: "" };
 
   const $ = (id) => document.getElementById(id);
   const svg = $("tree");
@@ -219,6 +221,7 @@
         creator: { lastCreated: null },
         encounters: { enemies: {}, lastVisit: null, lastLoot: null },
         map: { version: 2, loaded: false, seed: 0, total: 0, lastGeneratedTick: null, lastGeneratedAt: "", sites: {}, landmarks: {}, terrain: {} },
+        tutorial: { started: false, steps: { created: false, arrived: false, action: false, travel: false }, updatedAtTick: null, completedAtTick: null },
         actions: { locationId: null, locationName: "", biomeKey: "", actions: [], lastAction: null },
         equipment: { nextId: 1, items: {}, equippedByPart: {}, equippedWeaponId: null },
         travel: {
@@ -576,11 +579,34 @@
     ));
     const mapBranch = node("map", `v0.2 · ${mapState.loaded ? `${mapState.total} static sites` : "not loaded"}`, "module", [
       node("Static world", mapState.loaded ? `${mapState.total} sites · ${Object.keys(mapLandmarks).length} landmarks · loaded ${mapState.lastGeneratedAt || "—"}` : "no static map loaded yet", mapState.loaded ? "state" : "warn"),
+      node("Starting site", `${(MD.world && MD.world.start) || "—"}${(MD.world && MD.world.start) ? ` · ${((MD.world.locations || []).find((site) => site.key === MD.world.start) || {}).name || ""}` : ""}`, "state"),
       group(`Sites (${mapSiteItems.length})`, "authored in map/data.js · fixed routes replace random links", mapSiteItems, "state"),
       group(`Landmarks (${mapLandmarkItems.length})`, "tavern, castle and shack generate interiors on visit", mapLandmarkItems, "state"),
       group(`Generated interiors (${mapTerrainItems.length})`, "procedural room-and-corridor terrain, stored in the save", mapTerrainItems, "state"),
       node("Rules", `${(MD.world && MD.world.locations || []).length} authored site(s) · ${(MD.world && MD.world.routes || []).length} authored route(s) · ${(MD.terrain && MD.terrain.interiors || []).length} interior preset(s) · map:load → location:add → location:link → map:terrainGenerated`, "content")
     ], mapState.loaded ? "built" : "empty");
+
+    /* Tutorial ------------------------------------------------------------- */
+    const tutorialState = modules.tutorial || { steps: {} };
+    const startSite = (MD.world && MD.world.locations || []).find((site) => site.key === (MD.world && MD.world.start));
+    const tavernSite = (MD.world && MD.world.locations || []).find((site) => site.kind === "tavern");
+    const tutorialFill = (text) => String(text || "")
+      .replace(/\{start\}/g, (startSite && startSite.name) || "the starting town")
+      .replace(/\{tavern\}/g, (tavernSite && tavernSite.name) || "the tavern");
+    const tutorialSteps = (TUT.steps || []).map((step) => node(
+      tutorialFill(step.label || step.key),
+      `${step.key} · ${(tutorialState.steps || {})[step.key] ? "complete" : "pending"}${step.hint ? ` · ${tutorialFill(step.hint)}` : ""}`,
+      (tutorialState.steps || {})[step.key] ? "state" : "warn",
+      [], (tutorialState.steps || {})[step.key] ? "done" : ""
+    ));
+    const tutorialDone = (TUT.steps || []).filter((step) => (tutorialState.steps || {})[step.key]).length;
+    const tutorialBranch = node("tutorial", `v0.1 · ${tutorialDone}/${(TUT.steps || []).length} steps`, "module", [
+      node("Progress", tutorialState.completedAtTick !== null && tutorialState.completedAtTick !== undefined
+        ? `complete at tick ${tutorialState.completedAtTick}`
+        : `${tutorialDone}/${(TUT.steps || []).length} steps · last change tick ${tutorialState.updatedAtTick ?? "—"}`, "state"),
+      group(`Steps (${tutorialDone}/${(TUT.steps || []).length})`, "creator · arrival · first action · tavern", tutorialSteps, "state"),
+      node("Rules", "creator:created / mainCharacter:saved · location:visited · action:resolved · travel:completed → tutorial:progress", "content")
+    ], tutorialDone ? "built" : "empty");
 
     /* Actions ------------------------------------------------------------- */
     const actionState = modules.actions || {};
@@ -631,9 +657,9 @@
       node("Rules", "UI advances 5-minute ticks · travel:event pauses · Continue resumes · completion calls locations.visit", "content")
     ], travelActive || travelDone ? "built" : "empty");
 
-    const modulesBranch = node("Modules", "10 registered · event-driven · one slice each", "state", [
-      chars, mainCharacter, creatorBranch, equipmentBranch, combatBranch, locationsBranch, encountersBranch, mapBranch, actionsBranch, travelBranch
-    ], "10");
+    const modulesBranch = node("Modules", "11 registered · event-driven · one slice each", "state", [
+      chars, mainCharacter, creatorBranch, equipmentBranch, combatBranch, locationsBranch, encountersBranch, mapBranch, tutorialBranch, actionsBranch, travelBranch
+    ], "11");
 
     /* Content ------------------------------------------------------------- */
     const biomeNodes = biomes.map((biome) => {
@@ -654,6 +680,7 @@
       node("characters/statsData.js", `${ST.stats.length} stats · ${ST.stats.filter((d) => d.kind === "resource").length} resources · ${ST.stats.filter((d) => d.kind === "skill").length} skills · ${ST.stats.filter((d) => d.kind === "equipment").length} equipment`, "content"),
       node("mainCharacterData.js", `portrait ${MC.imageSize ?? 256}px · upload ≤ ${Math.round((MC.maxUploadBytes || 0) / 1048576)} MB · ${(MC.genders || []).length} genders`, "content"),
       node("characters/creatorData.js", `${(CRD.backgrounds || []).length} backgrounds · ${(CRD.origins || []).length} origins · ${(CRD.focuses || []).length} focuses · resources ${(CRD.settings && CRD.settings.resourceStartPercent) ?? 80}% · max ${(CRD.settings && CRD.settings.maxStartingItems) ?? 6} starting items`, "content"),
+      node("tutorial/data.js", `${(TUT.steps || []).length} steps · start text · complete text · tokens {start} and {tavern}`, "content"),
       node("locations/data.js", `${biomes.length} biomes · ${weatherTotal} weather entries · default hostility ${LOC.defaultHostility ?? 50} · level ranges on every biome · ${(LOC.namePrefixes || []).length} prefixes · ${(LOC.nameSuffixes || []).length} suffixes · ${(LOC.namePatterns || []).length} name patterns · ${(LOC.travelGraph && LOC.travelGraph.minutesPerDistance) || 15} min per league`, "content"),
       node("actions/data.js", `${defaultActions.length} default actions · ${overrides.length} biome override(s) · ${defaultActions.reduce((sum, action) => sum + ((action.outcomes || []).length), 0)} outcomes`, "content"),
       node("travel/data.js", `${(TRD.events || []).length} travel events · ${TRD.chancePercent ?? 0}% per check · every ${TRD.minutesPerCheck ?? 5} min · ${Object.keys(TRD.chanceByBiome || {}).length} biome override(s)`, "content"),
@@ -662,7 +689,7 @@
       node("encounters/data.js", `${(END.spawn && END.spawn.bands || []).length} spawn bands · max ${END.spawn && END.spawn.maxPerVisit || 4} per visit · ${(END.loot && END.loot.rarityBands || []).length} loot rarity bands · drop ${END.loot && END.loot.dropChancePercent || 0}% + hostility`, "content"),
       node("editor/schemas.js", "content-editor model · 8 editable types · strict JSON round-trip · no state or events", "content"),
       group(`Biome events (${biomes.length} files)`, eventsSummary, biomeNodes, "content"),
-      node("Docs", "DESIGN.md · IDEAS.md · ENGINE_SPEC.md v1.10 · MODULES.md · HANDOFF.md · README.md · save/README.md · editor/README.md · actions/README.md · equipment/README.md · travel/README.md · combat/README.md · locations/README.md · map/README.md · locations/events/README.md · characters/mainChar/README.md", "content")
+      node("Docs", "DESIGN.md · IDEAS.md · ENGINE_SPEC.md v1.11 · MODULES.md · HANDOFF.md · README.md · save/README.md · editor/README.md · actions/README.md · equipment/README.md · travel/README.md · combat/README.md · locations/README.md · map/README.md · tutorial/README.md · locations/events/README.md · characters/mainChar/README.md", "content")
     ], "data");
 
     /* Events -------------------------------------------------------------- */
@@ -712,6 +739,7 @@
         node("travel:cancelled", "travel · abandoned journey summary", "event"),
         node("mainCharacter:saved", "mainCharacter · identity only (no image)", "event"),
         node("creator:created", "creator · { name, background, origin, focus, stats, equipment }", "event"),
+        node("tutorial:progress", "tutorial · { step, steps, completed, updatedAtTick, completedAtTick }", "event"),
         node("mainCharacter:statChanged", "mainCharacter · any non-equipment stat: stat, delta, value, max", "event"),
         node("mainCharacter:armorChanged", "mainCharacter · armor mirrored from equipment", "event"),
         node("equipment:added", "equipment · { itemId, key, name, kind, rarity, weaponType|armorType, parts, stats, equipped, source }", "event"),
@@ -723,7 +751,7 @@
         node("combat:defended", "combat · player brace, armor and reduction", "event"),
         node("combat:ended", "combat · winner, loser, rounds", "event")
       ], "event")
-    ], "47");
+    ], "48");
 
     /* Docs & tests -------------------------------------------------------- */
     const testsBranch = node("Tests", "Node only · npm test", "test", [
@@ -735,6 +763,7 @@
       node("encounters.test.cjs", "hostility spawn bands · enemy relation/level · source clearing · combat loot", "test"),
       node("main-character.test.cjs", "validation · image · base stats · effects · mirror", "test"),
       node("creator.test.cjs", "starting stats · equipment grants · profile validation · save/load · reset", "test"),
+      node("tutorial.test.cjs", "four-step progress · event signals · idempotence · completion · save/load · reset", "test"),
       node("biome-events.test.cjs", "JSON loading · visit rolls · hostility modifiers · stat effects · reset", "test"),
       node("actions.test.cjs", "five actions · outcomes · costs · route time · travel · equipment", "test"),
       node("equipment.test.cjs", "body-part inventory · auto-equip · type/rarity filters · overlap swap · summed armor · combat · reset · save/load migration", "test"),
@@ -743,7 +772,7 @@
       node("save.test.cjs", "capture · exact restore · v0 migration · unsafe paths · format guard", "test"),
       node("editor.test.cjs", "formatter · byte-identical round-trip · schema checks · outcome ids · new data sections", "test"),
       node("serve.cjs", "static server on 127.0.0.1:8765", "test")
-    ], "15");
+    ], "16");
 
     const rootSub = live.state
       ? `${live.source} · ${clockText(time)} · tick ${time.tick}`

@@ -44,6 +44,25 @@
   .chars small.stats-line { font-family:"Segoe UI", system-ui, sans-serif; font-size:.72rem; font-variant-numeric:tabular-nums; margin-top:2px; }
   .chars small.body-line { font-family:"Segoe UI", system-ui, sans-serif; font-size:.72rem; margin-top:2px; }
   .terrain { display:block; overflow:auto; margin:0 0 8px; padding:10px; border:1px solid var(--line); border-radius:6px; background:color-mix(in srgb, var(--line) 18%, transparent); font:12px/1.15 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:.08em; white-space:pre; }
+  .landing-intro { margin: 10vh 0 24px; }
+  .landing-intro .eyebrow { text-transform:uppercase; letter-spacing:.22em; font:600 .72rem "Segoe UI", system-ui, sans-serif; color:var(--accent); margin:0 0 10px; }
+  .landing-intro h1 { font-size:3rem; line-height:1.02; margin:0 0 12px; letter-spacing:.01em; }
+  .landing-intro .lede { font-size:1.05rem; color:var(--mute); margin:0 0 18px; max-width:48ch; }
+  .landing-steps { margin:0 0 18px; padding-left:1.25rem; color:var(--mute); }
+  .landing-steps li { margin:6px 0; }
+  .tutorial { border:1px solid var(--line); border-radius:6px; padding:12px; margin:0 0 16px; }
+  .tutorial ol { margin:8px 0 10px; padding-left:1.4rem; }
+  .tutorial li { margin:4px 0; }
+  .tutorial li.done { color:var(--mute); text-decoration:line-through; }
+  .tutorial .step-done { color:var(--accent); font-weight:600; }
+  body.landing main > :not(#landingIntro):not(#mainCharacterPanel) { display:none; }
+  body.landing #mainCharacterPanel > .stats,
+  body.landing #mainCharacterPanel > p.meta,
+  body.landing #mcFolder,
+  body.landing #mcStatus { display:none; }
+  body.landing #mainCharacterPanel { margin-top:8px; }
+  body.landing #mainCharacterPanel .creator { padding:0; border:0; margin:0; }
+  body:not(.landing) #landingIntro { display:none; }
   .combat { border:1px solid var(--line); border-radius:6px; padding:12px; margin-bottom:12px; }
   .combatants { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
   .combatant { display:flex; justify-content:space-between; gap:8px; padding:6px 8px; border:1px solid var(--line); border-radius:4px; font:600 .82rem/1.4 "Segoe UI", system-ui, sans-serif; font-variant-numeric:tabular-nums; }
@@ -60,8 +79,23 @@
   a { color:var(--accent); text-underline-offset:2px; }
 </style>
 </head>
-<body>
+<body class="landing">
 <main>
+  <section id="landingIntro" class="landing-intro">
+    <p class="eyebrow">A text adventure</p>
+    <h1>The Greyreach</h1>
+    <p class="lede">Make a character, wake up in Greywatch Village, and take your first steps into a world that wants something from you.</p>
+    <ol class="landing-steps">
+      <li>Choose a background, origin and focus.</li>
+      <li>Create your character and arrive in the village.</li>
+      <li>Take an action, check your inventory, then travel to the tavern.</li>
+    </ol>
+    <div class="bar">
+      <button id="landingContinue">Continue saved game</button>
+      <button id="landingImport">Import save file</button>
+    </div>
+  </section>
+
   <h1 class="clock" id="clock"></h1>
   <p class="meta" id="meta"></p>
   <p class="meta"><a href="status.html">Status tree →</a></p>
@@ -86,7 +120,8 @@
   </div>
   <p class="meta" id="saveStatus">Save files store the world seed plus the changes since a fresh world.</p>
 
-  <h2>Main character</h2>
+  <section id="mainCharacterPanel">
+  <h2 id="mcTitle">Create your character</h2>
   <div class="creator">
     <div class="portrait">
       <img id="mcPreview" alt="Main character portrait">
@@ -131,8 +166,21 @@
     <p class="meta">Head, torso, arms, hands, legs and feet. All parts start intact; no injury system uses them yet.</p>
   </div>
   <p class="meta">Saves in the game; with the folder connected, also writes <code>characters/mainChar/main.json</code> and a profile image.</p>
+  </section>
 
-  <h2>Equipment <span class="seed" id="equipArmor"></span></h2>
+  <section id="tutorial" class="tutorial" hidden>
+    <h2>Tutorial <span class="seed" id="tutorialProgress"></span></h2>
+    <p class="meta" id="tutorialStatus">Your story begins in Greywatch Village.</p>
+    <ol id="tutorialSteps"></ol>
+    <p class="meta" id="tutorialInventory"></p>
+    <p class="meta" id="tutorialHint"></p>
+    <div class="bar">
+      <button id="tutorialActions">Go to actions</button>
+      <button id="tutorialInventoryButton">Show inventory</button>
+    </div>
+  </section>
+
+  <h2 id="equipmentTitle">Inventory <span class="seed" id="equipArmor"></span></h2>
   <div class="bar">
     <button class="primary" id="equipFind">Find armor</button>
     <button id="equipFindWeapon">Find weapon</button>
@@ -140,7 +188,7 @@
   </div>
   <p class="meta" id="equipStatus">No armor or weapon equipped.</p>
   <ul class="chars" id="equipment"></ul>
-  <p class="meta">Armor covers body parts and cannot share a part with another worn item. A weapon fills one weapon slot and needs Strength to use: below the requirement it adds no damage and no armor piercing. Armor reduces every hit and Defend doubles it. Only the main character can wear equipment in this version.</p>
+  <p class="meta">Your starting kit from the character creator appears here automatically. Equip, unequip or destroy items as you travel. Armor covers body parts and cannot share a part with another worn item. A weapon fills one weapon slot and needs Strength to use: below the requirement it adds no damage and no armor piercing. Armor reduces every hit and Defend doubles it. Only the main character can wear equipment in this version.</p>
 
   <h2>Characters</h2>
   <div class="bar">
@@ -219,6 +267,8 @@
 <script src="locations/locations.js"></script>
 <script src="map/data.js"></script>
 <script src="map/map.js"></script>
+<script src="tutorial/data.js"></script>
+<script src="tutorial/tutorial.js"></script>
 <script src="actions/data.js"></script>
 <script src="actions/actions.js"></script>
 <script src="travel/data.js"></script>
@@ -241,6 +291,7 @@
     e.register(createCreatorModule());
     e.register(createLocationsModule());
     e.register(createMapModule());
+    e.register(createTutorialModule());
     e.register(createActionsModule());
     e.register(createTravelModule());
     e.register(createCombatModule());
@@ -256,6 +307,7 @@
   const creatorModule = engine.modules.get("creator");
   const locationsModule = engine.modules.get("locations");
   const mapModule = engine.modules.get("map");
+  const tutorialModule = engine.modules.get("tutorial");
   const travelModule = engine.modules.get("travel");
   const combatModule = engine.modules.get("combat");
   const encounterModule = engine.modules.get("encounters");
@@ -507,6 +559,11 @@
             option.textContent = `${route.name} (${route.biome}) · ${route.distance} league${route.distance === 1 ? "" : "s"} · ${route.minutes} min`;
             destination.append(option);
           }
+          // From the starting town, make the tavern the first suggested journey.
+          const start = startingKey();
+          const here = s.locationId ? engine.state.modules.locations.locations[s.locationId] : null;
+          const tavernRoute = routeList.find((route) => route.kind === "tavern");
+          if (tavernRoute && here && here.key === start) destination.value = tavernRoute.id;
         }
         row.append(destination);
       }
@@ -840,6 +897,99 @@
     renderCreatorPreview();
   }
 
+  function startingKey() {
+    const sites = (MapData.world && Array.isArray(MapData.world.locations)) ? MapData.world.locations : [];
+    const configured = MapData.world && typeof MapData.world.start === "string" ? MapData.world.start : "";
+    if (sites.some((site) => site.key === configured)) return configured;
+    return sites[0] ? sites[0].key : "";
+  }
+
+  function siteForKey(key) {
+    return ((MapData.world && MapData.world.locations) || []).find((site) => site.key === key) || null;
+  }
+
+  function syncLanding() {
+    const character = engine.state.modules.mainCharacter.character;
+    const inGame = !!character;
+    document.body.classList.toggle("landing", !inGame);
+    $("mcTitle").textContent = inGame ? "Main character" : "Create your character";
+    $("tutorial").hidden = !inGame;
+    if (inGame) renderTutorial();
+  }
+
+  function renderTutorial() {
+    const character = engine.state.modules.mainCharacter.character;
+    const section = $("tutorial");
+    if (!character) { section.hidden = true; return; }
+    section.hidden = false;
+
+    const locState = engine.state.modules.locations || {};
+    const current = locState.currentId && locState.locations ? locState.locations[locState.currentId] : null;
+    const actionsState = engine.state.modules.actions || {};
+    const equipmentState = engine.state.modules.equipment || { items: {} };
+    const items = Object.values(equipmentState.items || {});
+    const progress = tutorialModule.progress();
+    const defs = tutorialModule.steps();
+    const steps = defs.map((def) => ({ ...def, done: !!progress.steps[def.key] }));
+
+    $("tutorialProgress").textContent = `— ${progress.done}/${progress.total} complete`;
+    const list = $("tutorialSteps");
+    list.innerHTML = "";
+    for (const step of steps) {
+      const li = document.createElement("li");
+      if (step.done) li.className = "done";
+      const mark = document.createElement("span");
+      mark.className = "step-done";
+      mark.textContent = step.done ? "✓ " : "○ ";
+      li.append(mark, document.createTextNode(step.label));
+      list.append(li);
+    }
+
+    const last = actionsState.lastAction;
+    $("tutorialStatus").textContent = last
+      ? `Last action: ${last.text}${last.timeMinutes ? ` (${last.timeMinutes} min)` : ""}`
+      : current
+        ? `You are in ${current.name}.`
+        : (TutorialData.startText || "Your story begins.").replace("{start}", siteForKey(startingKey())?.name || "the starting town");
+    $("tutorialInventory").textContent = items.length
+      ? `Starting inventory: ${items.map((item) => `${item.name}${item.equipped ? " (equipped)" : ""}`).join(", ")}.`
+      : "Your inventory is empty. Actions can sometimes find equipment.";
+
+    const next = steps.find((step) => !step.done);
+    $("tutorialHint").textContent = next ? next.hint : (TutorialData.completeText || "Tutorial complete.");
+  }
+
+  let enteringWorld = false;
+  async function enterWorld() {
+    if (enteringWorld) return;
+    enteringWorld = true;
+    try {
+      if (!engine.state.modules.map.loaded) act("map:load");
+      const start = mapModule.startSite();
+      const locState = engine.state.modules.locations;
+      if (start && !locState.currentId) {
+        await locationsModule.visit(start.id);
+        engine.flush();
+      }
+    } catch (error) {
+      console.warn("[ui] could not enter the starting town", error);
+    } finally {
+      enteringWorld = false;
+      syncLanding();
+      renderLocations();
+      renderActions();
+      renderTravel();
+      renderTutorial();
+    }
+  }
+
+  async function ensureWorld() {
+    const character = engine.state.modules.mainCharacter.character;
+    syncLanding();
+    if (!character) return;
+    if (!engine.state.modules.locations.currentId) await enterWorld();
+  }
+
   $("mcImage").onchange = async (event) => {
     const file = event.target.files && event.target.files[0];
     if (!file) return;
@@ -854,8 +1004,7 @@
     }
   };
 
-  $("mcSave").onclick = async () => {
-    try {
+  $("mcSave").onclick = async () => {    try {
       const exists = !!engine.state.modules.mainCharacter.character;
       const draft = creatorDraft();
       if (exists) {
@@ -870,11 +1019,13 @@
         creatorModule.validate(draft);   // show profile/choice errors before queueing events
         engine.fire({ type: "creator:create", data: { draft } });
         engine.flush();
+        await enterWorld();
       }
       pendingMainImage = null;
 
       const wrote = await mainCharModule.writeToFolder();
       renderMainCharacter();
+      syncLanding();
       $("mcStatus").textContent = wrote
         ? `Saved to characters/${mcData.folder}/${mcData.jsonFile} and profile image.`
         : mainCharModule.folderConnected
@@ -964,7 +1115,7 @@
     if (!items.length) {
       const li = document.createElement("li");
       li.className = "empty";
-      li.textContent = hasMain ? "No equipment in the inventory." : "Save a main character first.";
+      li.textContent = hasMain ? "No equipment in the inventory." : "Create a character first.";
       ul.append(li);
       return;
     }
@@ -1020,14 +1171,14 @@
 
   $("equipFind").onclick = () => {
     if (!engine.state.modules.mainCharacter.character) {
-      alert("Save a main character before finding equipment.");
+      alert("Create a character before finding equipment.");
       return;
     }
     act("equipment:add", { kind: "armor" });
   };
   $("equipFindWeapon").onclick = () => {
     if (!engine.state.modules.mainCharacter.character) {
-      alert("Save a main character before finding equipment.");
+      alert("Create a character before finding equipment.");
       return;
     }
     act("equipment:add", { kind: "weapon" });
@@ -1048,6 +1199,7 @@
       renderActions();
       renderTravel();
       renderCombat();
+      ensureWorld().catch((error) => console.warn("[ui] could not prepare the world", error));
     }
     render();
   }));
@@ -1080,6 +1232,19 @@
       alert("Loading is unavailable in this browser context.");
     }
   };
+
+  $("landingContinue").onclick = () => $("load").click();
+  $("landingImport").onclick = () => $("loadFile").click();
+  $("tutorialActions").onclick = () => $("actions").scrollIntoView({ behavior: "smooth", block: "center" });
+  $("tutorialInventoryButton").onclick = () => $("equipmentTitle").scrollIntoView({ behavior: "smooth", block: "center" });
+
+  for (const name of [
+    "mainCharacter:saved", "creator:created", "location:visited", "actions:loaded",
+    "action:resolved", "travel:completed", "tutorial:progress", "equipment:added",
+    "equipment:equipped", "equipment:unequipped", "equipment:removed"
+  ]) {
+    engine.on(`event:${name}`, renderTutorial);
+  }
 
   function downloadSaveFile(save) {
     const blob = new Blob([GameSave.stringify(save)], { type: "application/json" });
@@ -1269,6 +1434,7 @@
   renderTravel();
   renderCombat();
   render();
+  ensureWorld().catch((error) => console.warn("[ui] could not prepare the world", error));
   updateBiomeEventStatus();
 </script>
 </body>

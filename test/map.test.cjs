@@ -27,6 +27,7 @@ function buildEngine(seed = 20261029) {
 const sites = MapData.world.locations;
 const siteByKey = new Map(sites.map((site) => [site.key, site]));
 assert.ok(sites.length >= 3, "the static map has sites");
+assert.ok(sites.some((site) => site.key === MapData.world.start), "the configured starting site exists");
 assert.equal(new Set(sites.map((site) => site.key)).size, sites.length, "site keys are unique");
 assert.equal(new Set(sites.map((site) => site.name)).size, sites.length, "site names are unique");
 
@@ -69,6 +70,11 @@ assert.equal(map.lastGeneratedTick, engine.now.tick, "the load tick is recorded"
 assert.ok(map.lastGeneratedAt, "the load time is recorded");
 assert.equal(added[0].depth, 2, "location:added follows the map request at depth + 1");
 assert.equal(generated[0].depth, 3, "map:generated waits for the last site at depth + 1");
+assert.equal(mapModule.startKey(), MapData.world.start, "the configured starting key is exposed");
+const start = mapModule.startSite();
+assert.ok(start && start.id, "the starting site has a location id after loading");
+assert.equal(start.key, MapData.world.start);
+assert.equal(locations.locations[start.id].key, MapData.world.start);
 
 for (const site of sites) {
   const id = map.sites[site.key];

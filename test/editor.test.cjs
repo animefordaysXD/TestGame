@@ -246,6 +246,7 @@ const has = (list, level, re) => list.some((i) => i.level === level && re.test(i
   assert.ok(has(problems((d) => { d.characters.traits = ["A", "B"]; d.characters.opposites = []; }), "error", /at least five/));
   assert.ok(has(problems((d) => { d.map.world.locations.push({ ...d.map.world.locations[0] }); }), "error", /used twice/), "site keys are unique");
   assert.ok(has(problems((d) => { d.map.world.locations[0].interior = "tower"; }), "error", /Unknown interior preset/), "sites use known interiors");
+  assert.ok(has(problems((d) => { d.map.world.start = "nowhere"; }), "error", /Starting site must be one of/), "the start site exists");
   assert.ok(has(problems((d) => { d.map.world.routes[0].to = "nowhere"; }), "error", /not a site/), "routes join existing sites");
   assert.ok(has(problems((d) => { d.map.world.routes[0].distance = 0; }), "error", /at least 1/), "route distance is positive");
   assert.ok(has(problems((d) => { d.map.terrain.interiors[0].width = 4; }), "error", /9 to 61/), "interior width stays in range");

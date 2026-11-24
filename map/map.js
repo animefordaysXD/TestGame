@@ -73,6 +73,14 @@
     });
   };
 
+  // The town a new character enters. Falls back to the first authored site when the
+  // configured key is missing, so a hand-edited map still has a valid starting point.
+  const startKey = () => {
+    const sites = validSites();
+    const configured = D.world && typeof D.world.start === "string" ? D.world.start.trim() : "";
+    return sites.some((site) => site.key === configured) ? configured : (sites[0] ? sites[0].key : "");
+  };
+
   function buildPreset(raw) {
     const width = clamp(int(raw.width, 21), 9, 61);
     const height = clamp(int(raw.height, 11), 7, 41);
@@ -402,6 +410,15 @@
       },
 
       siteFor(key) {
+        const s = normalize();
+        const id = s.sites[key];
+        return id ? { ...validSites().find((site) => site.key === key), id } : null;
+      },
+
+      startKey,
+
+      startSite() {
+        const key = startKey();
         const s = normalize();
         const id = s.sites[key];
         return id ? { ...validSites().find((site) => site.key === key), id } : null;

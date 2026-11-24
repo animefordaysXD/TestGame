@@ -9,7 +9,7 @@
 > [IDEAS.md](IDEAS.md).
 
 Current build: core v0.2, characters v0.6, main character v0.7, creator v0.1, equipment v0.4,
-locations v0.5, map v0.2, actions v0.3, travel v0.2, combat v0.2, encounters v0.1,
+locations v0.5, map v0.2, tutorial v0.1, actions v0.3, travel v0.2, combat v0.2, encounters v0.1,
 save helper v0.1, plus the read-only status viewer and the content editor (`editor.html`
 — a tool, not a module, and never loaded by the game).
 
@@ -43,7 +43,7 @@ On Windows, if PowerShell blocks `npm.ps1`, use `npm.cmd test` or run the test f
 directly with `node test/locations.test.cjs`, `node test/locations-disk.test.cjs`,
 `node test/characters.test.cjs`, `node test/relations.test.cjs`,
 `node test/main-character.test.cjs`, `node test/creator.test.cjs`,
-`node test/biome-events.test.cjs`,
+`node test/tutorial.test.cjs`, `node test/biome-events.test.cjs`,
 `node test/actions.test.cjs`, `node test/equipment.test.cjs`,
 `node test/travel.test.cjs`, `node test/combat.test.cjs`, `node test/encounters.test.cjs`,
 `node test/map.test.cjs`, `node test/save.test.cjs`, and `node test/editor.test.cjs`.
@@ -57,6 +57,7 @@ directly with `node test/locations.test.cjs`, `node test/locations-disk.test.cjs
 - `locations/` — procedural locations with hostility and levels, linked into a travel graph
 - `encounters/` — hostility-driven hostile spawns on visit and hostility-scaled loot on a win
 - `map/` — static world map with authored sites and routes, plus procedural landmark interiors
+- `tutorial/` — persistent opening checklist and its labels/hints
 - `locations/events/` — per-biome event JSON (working events and copy/paste templates)
 - `actions/` — five area actions with costs/outcomes and optional biome overrides
 - `travel/` — route-based journeys with 5-minute interruption checks and pause/resume
@@ -82,7 +83,7 @@ same `localStorage` slot (`save1`) as the game and shows:
   main character with HP/Stamina/Mana, armor, skills, body parts and starting build, the
   creator's last build, the equipment inventory, the
   current combat and its log, locations with their routes and the current marker, the static
-  map's site keys, landmarks and generated interiors, the five
+  map's site keys, landmarks and generated interiors, the tutorial checklist, the five
   loaded actions plus the last resolution, and the current journey with its distance,
   checks and last interruption;
 - content data counts and the enabled/total events in each biome file;
@@ -112,10 +113,24 @@ them.
   rebuild it.
 - The full format, API, migration and limits are in `save/README.md`.
 
+## Opening and tutorial
+
+- The game opens on the character creator. Choose a background, origin and focus, then press
+  **Create character**.
+- The first save loads the static map and places the character in **Greywatch Village**.
+  The rest of the game appears, with the starting kit already in the **Inventory**.
+- The **Tutorial** panel tracks four steps: create a character, arrive in the village, take
+  your first action, and travel to **The Broken Wheel** tavern. Travel from the starting
+  town defaults to the tavern.
+- Tutorial progress is stored in the save. It is guidance, not a gate; after the checklist
+  you can explore, scavenge, fight or travel onward.
+- On a later visit, the landing page offers **Continue saved game** and **Import save file**.
+
 ## Character creator
 
 - The Main character panel has **Background**, **Origin** and **Focus** selects. Each option
-  adds starting stat changes and equipment from `characters/creatorData.js`.
+  adds starting stat changes and equipment from `characters/creatorData.js`. On the first
+  visit this panel is the landing screen.
 - A live preview shows the resulting stats and starting kit. Resources start at 80% of
   their maximum, so positive and negative choices both matter.
 - The first **Create character** save uses the build: the creator fires

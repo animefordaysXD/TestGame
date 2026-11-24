@@ -36,9 +36,10 @@ mercenary, a beast tamer or elven scout, or a highborn noble with court games, a
   profiles, data-only) and `temp`/`named` buckets (three-tier model planned), equipment with
   body-part armor, a weapon slot (swords/spears/axes/maces), weapon and armor types, and five
   rarity tiers, five area actions, timed travel, a travel graph with route distances, combat
-  v0.2 (weapon damage, Strength gating and armor piercing), locations, a placeholder map
-  spawner with fixed tavern/castle/shack landmarks, biome events, save files, and a
-  form-based content editor (`editor.html`; tooling, not a module).
+  v0.2 (weapon damage, Strength gating and armor piercing), locations, a static authored map
+  with procedural landmark interiors, a data-driven character creator, a playable opening
+  tutorial in Greywatch Village, biome events, save files, and a form-based content editor
+  (`editor.html`; tooling, not a module).
 
 ## Vision and scope
 
@@ -82,6 +83,8 @@ mercenary, a beast tamer or elven scout, or a highborn noble with court games, a
 
 ## World and map
 
+- [Built] Playable opening: character creator landing page, start in Greywatch Village, visible starting inventory, and a persistent four-step tutorial ending at the tavern — build, 2026-11-24
+- [Idea] A first real quest or reason to leave Greywatch Village — PM, 2026-11-24
 - [Built] Static world map: `map/data.js` authors twelve sites and thirteen routes; landmarks generate procedural room-and-corridor interiors on first visit — build, 2026-11-05
 - [Decided] Fixed map with changing details per save, e.g. an elven-held church in one game and a dwarven forge in the same city in another — Jo, 2026-10-25
 - [Decided] The map is AI-generated — Jo, 2026-10-25
@@ -142,6 +145,7 @@ mercenary, a beast tamer or elven scout, or a highborn noble with court games, a
 
 ## Log
 
+- 2026-11-24: Playable opening built: the character creator is the landing page, the first save loads the static map and starts in Greywatch Village, and a persistent tutorial module tracks create/arrive/action/tavern. The inventory shows the starting kit, travel defaults to the tavern, and the landing page can continue/import saves. Summary refreshed.
 - 2026-11-23: Character creator built: `characters/creatorData.js` defines backgrounds, origins and focuses that add starting stats and equipment. The first save uses the build through `creator:create`; later profile saves keep it. MainCharacter v0.7 accepts `data.stats`/`data.creator`, the UI has a live preview, and the editor edits the creator data. Summary refreshed.
 - 2026-11-05: Static map and interiors built: `map/data.js` now authors twelve sites and thirteen routes for every game, `map:load` is idempotent, and landmarks generate a room-and-corridor interior on first visit that is stored in the save. Sites use `autoLink: false` plus the new `location:link` request. The UI, status page and editor expose the map. Summary refreshed.
 - 2026-11-01: Equipment v0.4 built: every item now has a data-driven weapon or armor type. Weapons use sword/spear/axe/mace, armor uses cloth/leather/mail/plate/scale, and a five-rarity axe family fills out the new family. `equipment:add` filters by type, event payloads carry the type, old saves fall back to the catalogue, and the game, status page and editor show and validate it. Summary refreshed.

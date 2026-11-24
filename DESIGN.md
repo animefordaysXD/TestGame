@@ -318,6 +318,25 @@ The first save uses the build; later saves only edit the profile.
 - **Still open:** point-buy or free allocation, rerolling, in-game rebuilding, and
   background-specific events or dialogue.
 
+### 3.19 Opening flow and tutorial — Decided, Implemented (tutorial v0.1, map v0.2)
+
+A game should start with a character and a place, not a wall of panels. The character
+creator is now the landing page; creating a character loads the authored map, starts them in
+Greywatch Village, and reveals a short tutorial that teaches the basic loop.
+
+- **Landing state.** The creator is the first screen. Continue/import are available without
+  starting a new character.
+- **Start in a town.** `map/data.js` owns `world.start`; the game visits it after the first
+  save. The starting town's travel menu defaults to the tavern named in the tutorial.
+- **Four persistent steps.** Create, arrive, take an action, reach the tavern. A small
+  tutorial module stores the flags in the save and updates from game events, so progress
+  does not regress when the player moves on.
+- **Inventory is visible.** The starting kit from the creator is shown in the Inventory
+  panel and summarised in the tutorial.
+- **Guidance, not a gate.** The tutorial never blocks travel, actions or combat.
+- **Still open:** a first real quest, rewards, skipping/replaying the tutorial, and more
+  authored opening scenes per background.
+
 ## 4. Roadmap — Proposed
 
 Build playable slices, not systems in isolation. Each slice is a game you can play.
@@ -335,8 +354,10 @@ distance-based times), five area actions with time, costs and weighted outcomes,
 with interruption checks, and biome rolls on arrival exist. The world map is now static:
 `map/data.js` authors twelve sites and thirteen routes, and the tavern, castle and shack
 generate procedural interiors on first visit. Drawn layouts and atlas slots are still
-missing. Hostility-driven risk and events for most biomes are still missing. Slice 2 is
-partly built: a background/origin/focus character creator sets starting stats and a kit;
+missing. Hostility-driven risk and events for most biomes are still missing. The opening is
+now playable: the character creator is the landing page, the first save starts in
+Greywatch Village, and a four-step tutorial leads to the first action and the tavern. Slice 2
+is partly built: a background/origin/focus character creator sets starting stats and a kit;
 body-part armor, one weapon slot and five item rarities exist with the armor bridge, but
 money, companions and beasts do not.
 
@@ -352,7 +373,8 @@ money, companions and beasts do not.
 | actions v0.3: five area actions with time, costs, outcomes, route-aware Travel | working |
 | travel v0.2: 5-minute checks, event pause/resume, arrival handoff | working |
 | locations v0.5: procedural locations and a travel graph with distances; fixed `kind` landmarks and authored static sites | working |
-| map v0.2: static authored world (sites + routes) and procedural landmark interiors generated on first visit | working |
+| map v0.2: static authored world (sites + routes), authored starting site, and procedural landmark interiors generated on first visit | working |
+| tutorial v0.1: persistent four-step opening checklist (create, arrive, first action, tavern) with labels in `tutorial/data.js` | working |
 | combat v0.2: weapon damage, Strength gating and armor piercing; armor reduces every hit | working |
 | biome events | 7 of 10 biomes have a live event |
 | **save files v0.1 (seed + changes, JSON export/import)** | working |

@@ -12,7 +12,7 @@
 
 **Last updated:** 2026-11-02
 **Build:** core v0.2, characters v0.6, mainCharacter v0.7, creator v0.1, equipment v0.4,
-locations v0.5, map v0.2, actions v0.3, travel v0.2, combat v0.2,
+locations v0.5, map v0.2, tutorial v0.1, actions v0.3, travel v0.2, combat v0.2,
 encounters v0.1, save helper v0.1, status viewer and content editor (both tools, not modules).
 
 ---
@@ -44,6 +44,7 @@ Newest first. Keep entries short; details live in the module sections.
 
 | Date | Change | Files |
 |---|---|---|
+| 2026-11-24 | Tutorial v0.1 and the opening flow: the game page starts on the character creator, creates the character, loads the static map, visits `world.start` (Greywatch Village), and shows a persistent four-step tutorial (create, arrive, first action, tavern). The tutorial module stores progress in a JSON-safe slice, updates from `creator:created`/`mainCharacter:saved`, `location:visited`, `action:resolved` and `travel:completed`, and emits `tutorial:progress`. The map gains `world.start` and `startKey()`/`startSite()`; travel defaults to the tavern from the starting town; the inventory heading and starting-kit text are clearer. | `index.html`, `map/*`, `tutorial/*`, `status.html`, `test/map.test.cjs`, `test/tutorial.test.cjs`, `test/save.test.cjs`, `package.json`, docs |
 | 2026-11-23 | Creator v0.1: a data-driven character creator chooses a background, origin and focus that add starting stats and equipment. `creator:create` previews/validates a draft, fires `mainCharacter:create` with the computed stats, grants the kit through `equipment:add`, then emits `creator:created`. MainCharacter v0.7 accepts `data.stats`/`data.creator` and stores the build summary. The UI gains three selects and a live preview; the editor edits `characters/creatorData.js` (settings, backgrounds, origins, focuses). | `characters/creatorData.js`, `characters/creator.js`, `characters/mainCharacter.js`, `editor/schemas.js`, `index.html`, `status.html`, `test/creator.test.cjs`, docs |
 | 2026-11-23 | Added working biome events to seven of ten biomes: forest Wolf Pack, grassland Wild Berries, hills Old Cairn, coast Washed-Up Crate, desert Heat Haze and swamp Miasma, joining the tundra Snowfall. Each pairs a themed effect with a positive, negative or neutral hostility modifier; the remaining three biomes keep their disabled templates. | `locations/events/*/events.json`, docs |
 | 2026-11-05 | Map v0.2: the world is now static. `map/data.js` holds twelve authored sites and thirteen routes plus interior presets; `map:load` is idempotent and `map:generate` stays as an alias. Sites use `autoLink: false` and the new `location:link` request installs the authored graph. Landmarks generate a room-and-corridor interior on the first visit with `engine.rng`, store it in `map.terrain` and reuse it. The UI/status show the static map and terrain, and the editor now edits the map. | `map/*`, `locations/locations.js`, `editor/schemas.js`, `index.html`, `status.html`, `test/map.test.cjs`, docs |
@@ -81,13 +82,14 @@ Newest first. Keep entries short; details live in the module sections.
 | equipment | 0.4 | `nextId`, `items{}`, `equippedByPart{}`, `equippedWeaponId` | `equipment:add/equip/unequip/remove`, `action:resolved` | `equipment:added/equipped/unequipped/removed` | Equipment | `equipment.test.cjs` |
 | locations | 0.5 | `seed`, `createdAt`, `nextId`, `locations{}` (with `connections[]`), `currentId` | `location:add`, `location:link` | `location:added/visited/event` | Locations + biome events | `locations.test.cjs`, `locations-disk.test.cjs`, `biome-events.test.cjs` |
 | map | 0.2 | `version`, `loaded`, `seed`, `total`, `lastGeneratedTick`, `lastGeneratedAt`, `sites{}`, `landmarks{}`, `terrain{}` | `map:load`, `map:generate`, `location:added`, `location:visited` | `location:add`, `location:link`, `map:generated`, `map:terrainGenerated` | Locations panel (map status + terrain) | `map.test.cjs` |
+| tutorial | 0.1 | `started`, `steps{}`, `updatedAtTick`, `completedAtTick` | `creator:created`, `mainCharacter:saved`, `location:visited`, `action:resolved`, `travel:completed` | `tutorial:progress` | Tutorial checklist | `tutorial.test.cjs` |
 | actions | 0.3 | `locationId`, `locationName`, `biomeKey`, `actions[]`, `lastAction` | `location:visited`, `action:choose` | `actions:loaded`, `action:chosen/resolved/blocked` | Actions | `actions.test.cjs` |
 | travel | 0.2 | `active`, `paused`, `distance`, route, `elapsedMinutes`, `durationMinutes`, `checks`, `eventCount`, `lastEvent`, `lastCompleted` | `travel:start/advance/continue/cancel` | `travel:started/progress/event/resumed/completed/cancelled` | Travel | `travel.test.cjs` |
 | combat | 0.2 | `active`, `round`, `turn`, snapshots, `log[]` | `combat:start/action` | `combat:started/damage/defended/ended` | Combat | `combat.test.cjs` |
 | encounters | 0.1 | `enemies{}`, `lastVisit`, `lastLoot` | `location:visited`, `character:spawned/tempCleared`, `combat:ended` | `character:clearTemp`, `character:spawn`, `equipment:add` | Location visit status | `encounters.test.cjs` |
 
 Registration order in `index.html`: `bodyData.js` -> `body.js` -> characters -> mainCharacter ->
-equipment -> creator -> locations -> map -> actions -> travel -> combat -> encounters. Keep dependencies
+equipment -> creator -> locations -> map -> tutorial -> actions -> travel -> combat -> encounters. Keep dependencies
 registered earlier. The body data/helper must load before the character modules.
 The live page and the save baseline both use `buildEngine(opts)`, which registers the same
 modules and applies the save's seed/start date/tick size.
@@ -846,10 +848,10 @@ self-contained so future travel terrain can reuse it.
 
 ### Files and state
 
-- `map/data.js` - `world.name`, `world.locations` (twelve authored sites with `key`,
-  `kind`, `name`, `biome`, `biomeKey`, `weather`, `hostility`, `level`, optional
-  `interior`), `world.routes` (`{ id, from, to, distance }`), `terrain.tiles`,
-  `terrain.legend` and `terrain.interiors` presets.
+- `map/data.js` - `world.name`, `world.start` (the starting site key), `world.locations`
+  (twelve authored sites with `key`, `kind`, `name`, `biome`, `biomeKey`, `weather`,
+  `hostility`, `level`, optional `interior`), `world.routes` (`{ id, from, to, distance }`),
+  `terrain.tiles`, `terrain.legend` and `terrain.interiors` presets.
 - `map/map.js` - validation, the idempotent load, route install, terrain generator and
   accessors.
 - Slice:
@@ -877,6 +879,7 @@ self-contained so future travel terrain can reuse it.
 | `buildTerrain(preset, engine, id)` | Room-and-corridor generator; uses `engine.rng`, returns tile rows/counts |
 | `ensureTerrain(id)` / `terrainFor(id)` | Generate on demand / read the stored interior |
 | `siteForLocation(id)` / `siteFor(key)` | Authored site merged with its location id |
+| `startKey()` / `startSite()` | The configured starting site (falls back to the first site) and its location id after load |
 | `status()` | Copy of the slice for the UI |
 
 ### Events
@@ -895,6 +898,7 @@ self-contained so future travel terrain can reuse it.
 | If you want to... | Change |
 |---|---|
 | Add, remove or retune a site | `map/data.js` `world.locations` (`key` must be unique) |
+| Change where a new character starts | `map/data.js` `world.start` (must be a site key) |
 | Add or move a route | `map/data.js` `world.routes` (`from`/`to` are site keys) |
 | Change a landmark's interior | `map/data.js` `terrain.interiors` preset, then set the site's `interior` |
 | Change the tile symbols or legend | `map/data.js` `terrain.tiles` / `terrain.legend` |
@@ -913,6 +917,60 @@ self-contained so future travel terrain can reuse it.
 - Reset clears the slice and any in-flight batch. Load normalizes old saves without the new
   fields (they gain `sites`/`terrain`/`version` and keep working with an empty map until
   loaded).
+
+---
+
+## Tutorial (`tutorial/tutorial.js` v0.1)
+
+### Role
+
+Keeps the opening checklist honest. It owns four persistent steps — create a character,
+arrive in the starting town, take a first action, reach the tavern — and reacts to events
+from the other modules. It never reads another slice; the UI reads the tutorial slice for
+labels, checks and hints.
+
+### Files and state
+
+- `tutorial/data.js` - step keys, labels, hints, start and complete text. `{start}` and
+  `{tavern}` are filled from `map/data.js` names.
+- `tutorial/tutorial.js` - event subscriptions, progress and accessors. Notes in
+  `tutorial/README.md`.
+- Slice:
+  `{ started, steps: { created, arrived, action, travel }, updatedAtTick, completedAtTick }`.
+
+### Code map
+
+| Symbol | What it does |
+|---|---|
+| `mark(key, depth)` | Completes one step once, records ticks and emits `tutorial:progress` |
+| `progress()` | `{ steps, done, total, complete, updatedAtTick, completedAtTick }` |
+| `steps()` | Filled step labels and hints for the UI |
+| `status()` | Copy of the slice for the status page |
+
+### Events
+
+- Listens: `creator:created` / `mainCharacter:saved` (created), `location:visited`
+  (arrived; tavern also completes travel), `action:resolved` (action), `travel:completed`
+  (tavern destination).
+- Emits: `tutorial:progress` at `depth + 1` with the step, all flags and completion ticks.
+- No RNG and no tick generator. Reset clears progress; save/load keeps it.
+
+### Adjust it
+
+| If you want to... | Change |
+|---|---|
+| Change labels or hints | `tutorial/data.js` |
+| Change what completes a step | `tutorial/tutorial.js` listeners |
+| Turn the checklist off | Hide it in `index.html`; the slice is harmless |
+| Change the starting town or tavern names | `map/data.js` (the tutorial fills tokens) |
+
+### Gotchas
+
+- Step keys are fixed (`created`, `arrived`, `action`, `travel`); the module throws if one
+  is missing. Keep them when editing labels.
+- The module marks on events, not on current screen state, so leaving the starting town
+  does not un-complete arrival.
+- The tutorial does not gate play. It is guidance and a progress record, not a quest system.
 
 ---
 
